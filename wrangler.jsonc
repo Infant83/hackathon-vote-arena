@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "hackathon-vote-arena",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-05-09",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/events*"]
+  },
+  "vars": {
+    "ARENA_ROOM_NAME": "default"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ARENA_ROOM",
+        "class_name": "ArenaRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ArenaRoom"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

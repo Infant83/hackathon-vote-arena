@@ -52,7 +52,7 @@
 
 - 실시간 공유 상태는 `server.mjs`의 Node/SSE 서버 기준으로 확인한다.
 - Vite-only dev server는 기기 간 상태 공유 검증에 충분하지 않다.
-- 중복 응모 방지는 현재 browser id + SameSite cookie + reset session id 수준이다. 실제 행사 전에는 SSO, 사번 체크인, one-time QR/token을 적용한다.
+- 중복 응모 방지는 개인정보 수집을 낮추기 위해 `이름 + 소속(팀명) + 익명 브라우저 디바이스 id` 조합으로 동일인을 판단한다. 사번, 이메일, 사진, 카메라/QR 스캔, 강한 디바이스 fingerprint는 기본 흐름에 넣지 않는다.
 - 테스트 데이터는 검증 후 `/api/reset`으로 초기화한다.
 - 불필요한 LLM 호출 기능, prompt audition 기능, 대규모 모델 실행 흐름은 이 MVP 범위에 넣지 않는다.
 

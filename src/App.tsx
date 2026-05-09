@@ -42,6 +42,7 @@ type Team = {
 
 type Participant = {
   id: string
+  deviceId?: string
   name: string
   group: string
   allocations: Record<string, number>
@@ -180,7 +181,7 @@ const fallbackCopy: EventCopy = {
   adminHeroTitle: '관리자 모드에서 실시간 별 현황을 공개합니다.',
   adminHeroSubtitle: '모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.',
   checkInEyeline: 'Check In',
-  checkInTitle: '먼저 이름과 소속 팀을 등록하세요.',
+  checkInTitle: '먼저 이름과 소속(팀명)을 등록하세요.',
   teamVoteEyeline: 'Team Vote',
   teamVoteTitle: '팀별 별 보내기',
   raffleReady: '추첨 자동응모 완료',
@@ -191,7 +192,7 @@ const fallbackCopy: EventCopy = {
   raffleRemovedDisqualified:
     '관리자에 의해 응원 메시지가 제거되어 경품 추첨 응모 조건이 충족되지 않았습니다. 별을 준 팀에 새 응원 메시지를 작성해주세요.',
   voteClosedAlert: '투표가 마감되어 별을 추가하거나 메시지를 보낼 수 없습니다.',
-  registrationReady: '등록 후 팀 목록에서 바로 별과 응원 메시지를 보낼 수 있습니다.',
+  registrationReady: '같은 기기에서 같은 이름과 소속으로 다시 접속하면 기존 참여 내역을 이어갑니다.',
   registrationConnecting: '행사 서버에 연결하는 중입니다.',
 }
 
@@ -403,7 +404,7 @@ function App() {
   const [name, setName] = useState(() => getStoredValue(nameKey))
   const [group, setGroup] = useState(() => getStoredValue(groupKey))
 
-  const participant = state.participants.find((person) => person.id === participantId)
+  const participant = state.participants.find((person) => isSameParticipantIdentity(person, participantId, name, group))
   const allocations = participant?.allocations ?? {}
   const starBudget = getStarBudget(state)
   const spentStars = sumStars(allocations)
@@ -532,7 +533,8 @@ function VoteView({
   const isRegistered = hasRegistrationInfo && (sessionRegistered || Boolean(participant))
   const canVote = sessionReady && isRegistered && !state.closed
   const perTeamStarLimit = Math.min(starBudget, MAX_STARS_PER_TEAM)
-  const participantMessages = state.cheers.filter((message) => message.participantId === participantId)
+  const currentParticipantId = participant?.id ?? participantId
+  const participantMessages = state.cheers.filter((message) => message.participantId === currentParticipantId)
   const hasVisibleCheer = participantMessages.some((message) => !message.hidden)
   const hasHiddenCheer = participantMessages.some((message) => message.hidden)
   const hasSubmittedCheer = Boolean(participant?.cheerSubmitted || participantMessages.length)
@@ -646,12 +648,12 @@ function VoteView({
               />
             </label>
             <label>
-              <span>소속 팀</span>
+              <span>소속(팀명)</span>
               <input
                 value={group}
                 maxLength={24}
                 onChange={(event) => onGroupChange(event.target.value)}
-                placeholder="예: DX Lab / 품질혁신팀"
+                placeholder="예: 품질혁신팀"
               />
             </label>
             <button type="button" onClick={registerParticipant} disabled={!hasRegistrationInfo || !sessionReady}>
@@ -754,11 +756,11 @@ function VoteView({
                           {teamCheers.length ? (
                             teamCheers.map((message) => (
                               <div
-                                className={`thread-message ${message.participantId === participantId ? 'mine' : ''}`}
+                                className={`thread-message ${message.participantId === currentParticipantId ? 'mine' : ''}`}
                                 key={message.id}
                               >
                                 <div>
-                                  <strong>{message.participantId === participantId ? '나' : message.author}</strong>
+                                  <strong>{message.participantId === currentParticipantId ? '나' : message.author}</strong>
                                   <time>{formatMessageTime(message.createdAt)}</time>
                                 </div>
                                 <p>{message.text}</p>
@@ -2472,6 +2474,20 @@ function getOrCreateParticipantId() {
 
   storeValue(storageKey, next)
   return next
+}
+
+function isSameParticipantIdentity(person: Participant, deviceId: string, name: string, group: string) {
+  if (person.id === deviceId) return true
+
+  return (
+    person.deviceId === deviceId &&
+    normalizeParticipantIdentityPart(person.name) === normalizeParticipantIdentityPart(name) &&
+    normalizeParticipantIdentityPart(person.group) === normalizeParticipantIdentityPart(group)
+  )
+}
+
+function normalizeParticipantIdentityPart(value: string) {
+  return value.replace(/\s+/g, ' ').trim().normalize('NFKC').toLocaleLowerCase('ko-KR')
 }
 
 function getStoredValue(key: string) {

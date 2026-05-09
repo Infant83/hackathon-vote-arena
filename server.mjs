@@ -23,7 +23,7 @@ const defaultCopy = {
   adminHeroTitle: '관리자 모드에서 실시간 별 현황을 공개합니다.',
   adminHeroSubtitle: '모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.',
   checkInEyeline: 'Check In',
-  checkInTitle: '먼저 이름과 소속 팀을 등록하세요.',
+  checkInTitle: '먼저 이름과 소속(팀명)을 등록하세요.',
   teamVoteEyeline: 'Team Vote',
   teamVoteTitle: '팀별 별 보내기',
   raffleReady: '추첨 자동응모 완료',
@@ -34,7 +34,7 @@ const defaultCopy = {
   raffleRemovedDisqualified:
     '관리자에 의해 응원 메시지가 제거되어 경품 추첨 응모 조건이 충족되지 않았습니다. 별을 준 팀에 새 응원 메시지를 작성해주세요.',
   voteClosedAlert: '투표가 마감되어 별을 추가하거나 메시지를 보낼 수 없습니다.',
-  registrationReady: '등록 후 팀 목록에서 바로 별과 응원 메시지를 보낼 수 있습니다.',
+  registrationReady: '같은 기기에서 같은 이름과 소속으로 다시 접속하면 기존 참여 내역을 이어갑니다.',
   registrationConnecting: '행사 서버에 연결하는 중입니다.',
 }
 
@@ -341,25 +341,31 @@ function normalizeAllParticipantAllocations() {
   }
 }
 
-function upsertParticipant(participantId, name, group) {
-  const id = String(participantId || '').slice(0, 80)
-  if (!id) return null
+function upsertParticipant(deviceId, name, group) {
+  const browserDeviceId = sanitizeIdentifier(deviceId, 96)
+  if (!browserDeviceId) return null
 
+  const nextName = sanitizeText(name, 18)
+  const nextGroup = sanitizeText(group, 24)
+  if (!nextName || !nextGroup) return null
+
+  const identityKey = getParticipantIdentityKey(browserDeviceId, nextName, nextGroup)
+  const id = `participant-${hashIdentity(identityKey)}`
   const existing = participants.get(id)
-  const nextName = sanitizeText(name, 18) || existing?.name || `참여자-${id.slice(0, 4)}`
-  const nextGroup = sanitizeText(group, 24) || existing?.group || '미지정'
   const person =
     existing ||
     {
       id,
+      deviceId: browserDeviceId,
       name: nextName,
       group: nextGroup,
-          allocations: {},
-          cheered: false,
-          cheerSubmitted: false,
-          updatedAt: Date.now(),
-        }
+      allocations: {},
+      cheered: false,
+      cheerSubmitted: false,
+      updatedAt: Date.now(),
+    }
 
+  person.deviceId = browserDeviceId
   person.name = nextName
   person.group = nextGroup
   person.updatedAt = Date.now()
@@ -427,6 +433,36 @@ function sanitizeText(value, maxLength) {
     .slice(0, maxLength)
 }
 
+function sanitizeIdentifier(value, maxLength) {
+  return String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._:-]/g, '')
+    .slice(0, maxLength)
+}
+
+function normalizeIdentityPart(value, maxLength) {
+  return sanitizeText(value, maxLength).normalize('NFKC').toLocaleLowerCase('ko-KR')
+}
+
+function getParticipantIdentityKey(deviceId, name, group) {
+  return [
+    sanitizeIdentifier(deviceId, 96),
+    normalizeIdentityPart(name, 18),
+    normalizeIdentityPart(group, 24),
+  ].join('|')
+}
+
+function hashIdentity(value) {
+  let hash = 2166136261
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+
+  return (hash >>> 0).toString(36)
+}
+
 function parseCookies(cookieHeader = '') {
   return Object.fromEntries(
     cookieHeader
@@ -442,7 +478,7 @@ function parseCookies(cookieHeader = '') {
   )
 }
 
-function getRequestParticipantId(request, body) {
+function getRequestDeviceId(request, body) {
   const cookies = parseCookies(request.headers.cookie)
   return cookies[participantCookieName] || body.participantId
 }
@@ -451,8 +487,8 @@ function isCurrentSession(body) {
   return Number(body.sessionId) === sessionId
 }
 
-function participantCookieHeader(participantId) {
-  return `${participantCookieName}=${encodeURIComponent(participantId)}; Max-Age=${participantCookieMaxAge}; Path=/; SameSite=Lax`
+function participantCookieHeader(deviceId) {
+  return `${participantCookieName}=${encodeURIComponent(deviceId)}; Max-Age=${participantCookieMaxAge}; Path=/; SameSite=Lax`
 }
 
 function resetRuntimeState({ seed = false } = {}) {
@@ -602,9 +638,10 @@ async function handleApi(request, response, url) {
       return
     }
 
-    const person = upsertParticipant(getRequestParticipantId(request, body), body.name, body.group)
+    const deviceId = getRequestDeviceId(request, body)
+    const person = upsertParticipant(deviceId, body.name, body.group)
     if (!person) {
-      sendJson(response, 400, { error: 'participantId required' })
+      sendJson(response, 400, { error: 'name, group, and device required' })
       return
     }
 
@@ -614,7 +651,7 @@ async function handleApi(request, response, url) {
     recordVoteEvents(person, previousAllocations, nextAllocations)
     lastRaffle = null
     broadcast()
-    sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(person.id) })
+    sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -628,7 +665,8 @@ async function handleApi(request, response, url) {
       return
     }
 
-    const person = upsertParticipant(getRequestParticipantId(request, body), body.name, body.group)
+    const deviceId = getRequestDeviceId(request, body)
+    const person = upsertParticipant(deviceId, body.name, body.group)
     const teamId = String(body.teamId || '')
     const text = sanitizeText(body.text, 64)
 
@@ -654,7 +692,7 @@ async function handleApi(request, response, url) {
     })
     cheers.splice(120)
     broadcast()
-    sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(person.id) })
+    sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -745,14 +783,15 @@ async function handleApi(request, response, url) {
       return
     }
 
-    const person = upsertParticipant(getRequestParticipantId(request, body), body.name, body.group)
-    if (!person || !sanitizeText(body.name, 18) || !sanitizeText(body.group, 24)) {
+    const deviceId = getRequestDeviceId(request, body)
+    const person = upsertParticipant(deviceId, body.name, body.group)
+    if (!person) {
       sendJson(response, 400, { error: 'name and group required' })
       return
     }
 
     broadcast()
-    sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(person.id) })
+    sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 

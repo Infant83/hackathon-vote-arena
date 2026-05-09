@@ -6,9 +6,9 @@ Internal hackathon audience platform draft.
 
 - `/admin` administrator arena wall with live ranking, team logos, star totals, normalized 10-point scores, voter counts, hover stats with team members, floating stars, cheer bubbles, star movement feed, real participant list, message moderation, voting timer/star-budget controls, reset/test-data controls, close voting, and raffle.
 - The live ranking wall also has a full-screen showup mode so all teams can be projected cleanly during the event.
-- `/vote` audience mode where each participant first registers a name and organization/team, then gives stars directly on each team row. Audience users only see their own allocated stars, never team totals or ranking.
+- `/vote` audience mode where each participant first registers a name and affiliation/team, then gives stars directly on each team row. Audience users only see their own allocated stars, never team totals or ranking.
 - Team rows expand on click so users can read the latest per-team cheer thread and send messages repeatedly.
-- Participant name, organization/team, and browser participant id are persisted in local storage plus a SameSite cookie. The server also prefers the cookie id, so the same browser updates one participant record instead of creating another raffle entry.
+- Participant name, affiliation/team, and anonymous browser device id are persisted in local storage plus a SameSite cookie. The server treats the same name + affiliation/team + browser device id as the same participant.
 - A tiny Node/SSE realtime harness so mobile votes and cheer messages appear on the PC administrator screen.
 - The administrator cheer panel opens a full-screen showup view where message bubbles float inside team territories and can be shuffled or dragged before selection.
 - Lucky draw panel for voters, leader supporters, top-three supporters, or cheer-message participants, with a larger showup panel for drawing on the shared screen.
@@ -37,18 +37,45 @@ npm run dev -- --host 0.0.0.0 --port 5173
 
 The Vite-only mode does not share state across devices. Use `npm run realtime` for cross-device voting.
 
-## Deployment Notes
+## Cloudflare Hosting
 
-Good low-cost options for the first shared version:
+The Cloudflare track uses Workers Static Assets for the React build and one Durable Object room for shared realtime event state.
 
-- GitHub Pages for a static demo with simulated state.
-- Vercel or Netlify for a static React app.
-- Cloudflare Pages plus a lightweight Worker/Durable Object when real-time shared voting is added.
-- Fly.io or Render for a small Node/WebSocket server if internal network policy allows it.
+```text
+Cloudflare Worker
+- serves `dist/` static assets
+- routes `/api/*` and `/events` to the event room
+
+Durable Object `ArenaRoom`
+- keeps the live event room
+- handles registration, voting, cheer messages, moderation, reset, settings, and raffle APIs
+- persists the current room snapshot in Durable Object storage
+```
+
+Local Cloudflare runtime:
+
+```powershell
+npm run cf:dev
+```
+
+Dry-run package validation:
+
+```powershell
+npm run cf:deploy:dry-run
+```
+
+First real deployment:
+
+```powershell
+npx wrangler login
+npm run cf:deploy
+```
+
+The current Cloudflare worker intentionally keeps the same REST/SSE surface as the Node harness so the frontend can migrate without a large UI rewrite. The next scaling step is to split the stream into audience, admin, and wall roles and then replace broad state broadcasts with smaller role-specific events.
 
 ## Next Backend Step
 
-The current realtime harness is in-memory. For production, persist the same event model:
+The Node realtime harness is in-memory. The Cloudflare worker currently persists a compact room snapshot in Durable Object storage. For deeper reporting and post-event export, add D1 tables for:
 
 - `teams`
 - `participants`
@@ -80,14 +107,19 @@ Ask each team for one PNG file:
 
 ## Anti-Duplicate Participation Design
 
-The current version blocks duplicate entries from the same browser by combining a local browser id and SameSite cookie. That is enough for rehearsal, but it cannot stop someone who clears cookies, switches browsers, or uses another device.
+The event keeps duplicate prevention deliberately light to reduce privacy and operations overhead. Participants enter only:
 
-For the real event, use a one-attendee-one-token model:
+1. Name
+2. Affiliation/team
 
-1. Generate one QR/token per checked-in attendee.
-2. Open `/vote?token=...` from that QR and let the server claim the token once.
-3. Bind votes, visible cheer messages, and raffle eligibility to that token, not to display name.
-4. Allow display name/group edits only as profile metadata under the same claimed token.
-5. Keep an admin exception flow for staff to revoke or reissue a token if a phone is lost or replaced.
+The browser generates an anonymous device id and stores it in local storage plus a SameSite cookie. The server treats the same `name + affiliation/team + anonymous device id` combination as the same participant, so a normal browser restart restores the previous vote and cheer history.
 
-Company SSO or employee-number check-in can replace the token if the event environment supports it. Avoid IP/device fingerprinting as the primary guard because shared networks and privacy restrictions make it unreliable.
+This is enough for a large audience event where a small number of duplicate attempts will not materially change the outcome. It does not try to collect employee numbers, email addresses, phone numbers, photos, camera-based QR scans, or biometric/device fingerprint data.
+
+Known limits:
+
+1. Clearing cookies/local storage can create a new anonymous device id.
+2. Using another browser or another device can create another participant.
+3. A shared kiosk device is not a strong identity boundary.
+
+Use the admin participant list and raffle-exclusion controls for obvious abuse rather than adding personally identifiable check-in data.
