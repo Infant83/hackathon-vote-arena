@@ -1,0 +1,57 @@
+:root {
+  --lg-red: #a50034;
+  --active-red: #fd312e;
+  --ink: #202124;
+  --body: #4a4a4f;
+  --muted: #7b7b82;
+  --line: #e7e5e5;
+  --line-strong: #d9d6d6;
+  --surface: #ffffff;
+  --canvas: #f7f7f8;
+  --radius: 8px;
+  --font-sans:
+    Inter, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
+  color: var(--body);
+  background: var(--canvas);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--canvas);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100svh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(165, 0, 52, 0.06), transparent 26%),
+    linear-gradient(180deg, #ffffff 0%, #f7f7f8 48%, #ffffff 100%);
+}
+
+button,
+select,
+input,
+textarea {
+  letter-spacing: 0;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  color: #fff;
+  background: var(--lg-red);
+}
