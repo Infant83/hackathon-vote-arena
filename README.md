@@ -250,6 +250,56 @@ git commit -m "Regenerate lockfile for Cloudflare npm 10"
 git push origin cloudflare-migration
 ```
 
+### 5.7. Cloudflare 비용과 운영 규모 판단
+
+가격과 무료 한도는 바뀔 수 있으므로 행사 전에는 Cloudflare 공식 가격 문서를 다시 확인합니다.
+
+- Workers pricing: <https://developers.cloudflare.com/workers/platform/pricing/>
+- Durable Objects pricing: <https://developers.cloudflare.com/durable-objects/platform/pricing/>
+
+이 앱은 정적 화면만 제공하는 사이트가 아닙니다. `/api/*` 요청과 `/events` 실시간 연결이 Cloudflare Worker와 Durable Object를 사용합니다.
+
+과금과 한도에 영향을 주는 주요 요소는 다음과 같습니다.
+
+- Worker 요청 수
+- Durable Object 요청 수
+- Durable Object duration
+- 장시간 열려 있는 SSE/EventSource 연결
+
+특히 Durable Object duration은 단순히 배포를 많이 했다고 크게 늘어나는 항목이 아닙니다. 배포 후 `/vote`, `/admin`, `/admin?showCheer=1` 같은 페이지를 오래 열어두고 실시간 연결이 유지될 때 빠르게 늘어날 수 있습니다. 개발 테스트는 가능하면 Cloudflare 배포 URL이 아니라 로컬 `npm run realtime` 서버에서 진행합니다.
+
+운영 전 최적화 목표는 다음과 같습니다.
+
+- `/vote`: 관객 화면은 SSE를 끄고 15초 polling 중심으로 동기화
+- `/admin`: 관리자 화면은 실시간성이 중요하므로 SSE 유지
+- `/admin?showCheer=1`: 발표장 Showup 화면은 SSE 유지
+- 숨겨진 브라우저 탭은 가능하면 실시간 연결 종료
+- 투표 마감 후 관객 화면 polling 중지
+
+1000명 관객, 30분 투표, 15초 polling을 기준으로 단순 계산하면 다음과 같습니다.
+
+```text
+1000명 x 30분 x 분당 4회 = 120,000회 상태 조회
+```
+
+여기에 등록, 별 조정, 응원 메시지 전송, 관리자 조작을 더하면 대략 `130,000-150,000`회 안팎의 Worker/Durable Object 요청이 발생할 수 있습니다.
+
+Free 플랜은 개발과 작은 리허설에는 사용할 수 있지만, 전사 행사 운영용으로는 권장하지 않습니다. 1000명이 30분 정도 참여하면 요청 수만으로도 Free 일일 한도에 닿거나 넘을 수 있고, 실시간 연결을 오래 열어두면 Durable Object duration 경고가 먼저 발생할 수 있습니다.
+
+행사 운영에는 Workers Paid 플랜을 권장합니다. 공식 문서 기준 Paid 플랜은 월 최소 비용이 있고, Free보다 훨씬 큰 월간 포함량을 제공합니다. 이 앱의 1회성 행사 규모라면 15초 polling 최적화를 적용한 상태에서 기본 포함량 안에 들어갈 가능성이 높습니다. 다만 여러 번 대규모 리허설을 하거나 polling 주기를 짧게 줄이면 초과 사용량이 생길 수 있습니다.
+
+운영 판단은 다음 기준으로 합니다.
+
+| 상황 | 권장 플랜 |
+| --- | --- |
+| 로컬 개발 | 로컬 `npm run realtime` |
+| 10-50명 내부 테스트 | Free 가능 |
+| 100명 이하 짧은 리허설 | Free 가능, 사용량 확인 필요 |
+| 300명 이상 행사 리허설 | Paid 권장 |
+| 1000명 전사 행사 | Paid 권장 |
+
+행사 전에는 Cloudflare Dashboard에서 사용량 알림과 비용 알림을 켜 둡니다. 행사 당일에는 사용하지 않는 `/vote`, `/admin`, Showup 탭을 닫고, 리허설이 끝나면 Durable Object 사용량이 불필요하게 계속 늘지 않도록 배포 URL을 열어둔 브라우저를 정리합니다.
+
 ## 6. 팀 정보 관리
 
 팀 정보와 화면 문구의 기본값은 `teams.json`에 있습니다.
