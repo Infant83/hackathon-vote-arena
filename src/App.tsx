@@ -163,7 +163,7 @@ type ParticipantSummary = Participant & {
   statusClass: string
 }
 
-const DEFAULT_STAR_BUDGET = 5
+const DEFAULT_STAR_BUDGET = 20
 const DEFAULT_DURATION_MINUTES = 10
 const MAX_STARS_PER_TEAM = 10
 const storageKey = 'vibe-vote-participant'
@@ -177,7 +177,8 @@ const fallbackCopy: EventCopy = {
   audienceEyeline: 'Audience Vote',
   adminEyeline: 'Admin Arena Wall',
   audienceHeroTitle: '별 {starBudget}개를 원하는 팀에 나눠 담으세요.',
-  audienceHeroSubtitle: '한 팀에는 최대 {maxStarsPerTeam}개까지, 마감 전까지 다시 조정할 수 있습니다.',
+  audienceHeroSubtitle:
+    '한 팀에는 최대 {maxStarsPerTeam}개까지, 마감 전까지 다시 조정할 수 있습니다. 별과 함께 응원 메시지를 남기면 경품 추첨에 자동응모됩니다.',
   adminHeroTitle: '관리자 모드에서 실시간 별 현황을 공개합니다.',
   adminHeroSubtitle: '모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.',
   checkInEyeline: 'Check In',
@@ -2498,13 +2499,22 @@ function isSameParticipantIdentity(person: Participant, deviceId: string, name: 
 
   return (
     person.deviceId === deviceId &&
-    normalizeParticipantIdentityPart(person.name) === normalizeParticipantIdentityPart(name) &&
-    normalizeParticipantIdentityPart(person.group) === normalizeParticipantIdentityPart(group)
+    normalizeParticipantNameIdentity(person.name) === normalizeParticipantNameIdentity(name) &&
+    normalizeParticipantGroupIdentity(person.group) === normalizeParticipantGroupIdentity(group)
   )
 }
 
-function normalizeParticipantIdentityPart(value: string) {
-  return value.replace(/\s+/g, ' ').trim().normalize('NFKC').toLocaleLowerCase('ko-KR')
+function normalizeParticipantNameIdentity(value: string) {
+  return value.normalize('NFKC').replace(/\s+/gu, '').toLocaleLowerCase('ko-KR')
+}
+
+function normalizeParticipantGroupIdentity(value: string) {
+  const compact = value
+    .normalize('NFKC')
+    .toLocaleLowerCase('ko-KR')
+    .replace(/[\s\p{P}\p{S}]+/gu, '')
+
+  return compact.replace(/team$/u, '팀')
 }
 
 function getStoredValue(key: string) {

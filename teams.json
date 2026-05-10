@@ -4,7 +4,7 @@
     "audienceEyeline": "Audience Vote",
     "adminEyeline": "Admin Arena Wall",
     "audienceHeroTitle": "별 {starBudget}개를 원하는 팀에 나눠 담으세요.",
-    "audienceHeroSubtitle": "한 팀에는 최대 {maxStarsPerTeam}개까지, 마감 전까지 다시 조정할 수 있습니다.",
+    "audienceHeroSubtitle": "한 팀에는 최대 {maxStarsPerTeam}개까지, 마감 전까지 다시 조정할 수 있습니다. 별과 함께 응원 메시지를 남기면 경품 추첨에 자동응모됩니다.",
     "adminHeroTitle": "관리자 모드에서 실시간 별 현황을 공개합니다.",
     "adminHeroSubtitle": "모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.",
     "checkInEyeline": "Check In",

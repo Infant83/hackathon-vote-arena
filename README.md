@@ -112,7 +112,7 @@ The event keeps duplicate prevention deliberately light to reduce privacy and op
 1. Name
 2. Affiliation/team
 
-The browser generates an anonymous device id and stores it in local storage plus a SameSite cookie. The server treats the same `name + affiliation/team + anonymous device id` combination as the same participant, so a normal browser restart restores the previous vote and cheer history.
+The browser generates an anonymous device id and stores it in local storage plus a SameSite cookie. The server treats the same `name + affiliation/team + anonymous device id` combination as the same participant, so a normal browser restart restores the previous vote and cheer history. For identity comparison only, names remove all spacing, and affiliation/team values remove spacing and separators, lowercase Latin letters, and normalize a final `team` suffix to `팀`; the visible display still preserves the participant's latest input.
 
 This is enough for a large audience event where a small number of duplicate attempts will not materially change the outcome. It does not try to collect employee numbers, email addresses, phone numbers, photos, camera-based QR scans, or biometric/device fingerprint data.
 

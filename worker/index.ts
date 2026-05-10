@@ -1,11 +1,12 @@
 import rawConfig from '../teams.json'
 
-const defaultStarBudget = 5
+const defaultStarBudget = 20
 const defaultDurationMinutes = 10
 const maxStarsPerTeam = 10
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const snapshotKey = 'event-state-v1'
+const settingsVersion = 2
 
 type Env = {
   ARENA_ROOM: DurableObjectNamespace
@@ -108,6 +109,7 @@ type Snapshot = {
   sessionId: number
   testMode: boolean
   settings: Settings
+  settingsVersion?: number
 }
 
 type RequestBody = Record<string, unknown>
@@ -117,7 +119,8 @@ const defaultCopy = {
   audienceEyeline: 'Audience Vote',
   adminEyeline: 'Admin Arena Wall',
   audienceHeroTitle: '별 {starBudget}개를 원하는 팀에 나눠 담으세요.',
-  audienceHeroSubtitle: '한 팀에는 최대 {maxStarsPerTeam}개까지, 마감 전까지 다시 조정할 수 있습니다.',
+  audienceHeroSubtitle:
+    '한 팀에는 최대 {maxStarsPerTeam}개까지, 마감 전까지 다시 조정할 수 있습니다. 별과 함께 응원 메시지를 남기면 경품 추첨에 자동응모됩니다.',
   adminHeroTitle: '관리자 모드에서 실시간 별 현황을 공개합니다.',
   adminHeroSubtitle: '모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.',
   checkInEyeline: 'Check In',
@@ -235,9 +238,14 @@ export class ArenaRoom {
     this.voteEventId = Math.max(1, Number(snapshot.voteEventId || 1))
     this.sessionId = Math.max(1, Number(snapshot.sessionId || 1))
     this.testMode = Boolean(snapshot.testMode)
+    const persistedSettingsVersion = Number(snapshot.settingsVersion || 1)
+    const persistedStarBudget = Math.floor(Number(snapshot.settings?.starBudget || defaultStarBudget))
+    const migratedStarBudget =
+      persistedSettingsVersion < settingsVersion && persistedStarBudget === 5 ? defaultStarBudget : persistedStarBudget
+
     this.settings = {
       showScoresToAudience: Boolean(snapshot.settings?.showScoresToAudience ?? true),
-      starBudget: clamp(Math.floor(Number(snapshot.settings?.starBudget || defaultStarBudget)), 1, 20),
+      starBudget: clamp(migratedStarBudget, 1, 20),
       durationMinutes: clamp(Math.floor(Number(snapshot.settings?.durationMinutes || defaultDurationMinutes)), 1, 240),
     }
   }
@@ -255,6 +263,7 @@ export class ArenaRoom {
       sessionId: this.sessionId,
       testMode: this.testMode,
       settings: this.settings,
+      settingsVersion,
     }
 
     await this.state.storage.put(snapshotKey, snapshot)
@@ -553,8 +562,9 @@ export class ArenaRoom {
     if (!nextName || !nextGroup) return null
 
     const identityKey = getParticipantIdentityKey(browserDeviceId, nextName, nextGroup)
-    const id = `participant-${hashIdentity(identityKey)}`
-    const existing = this.participants.get(id)
+    const nextId = `participant-${hashIdentity(identityKey)}`
+    const existing = this.participants.get(nextId) || this.findParticipantByNormalizedIdentity(browserDeviceId, nextName, nextGroup)
+    const id = existing?.id || nextId
     const person =
       existing ||
       ({
@@ -574,6 +584,21 @@ export class ArenaRoom {
     person.updatedAt = Date.now()
     this.participants.set(id, person)
     return person
+  }
+
+  private findParticipantByNormalizedIdentity(deviceId: string, name: string, group: string) {
+    const browserDeviceId = sanitizeIdentifier(deviceId, 96)
+    const normalizedName = normalizeNameIdentity(name, 18)
+    const normalizedGroup = normalizeGroupIdentity(group, 24)
+
+    for (const person of this.participants.values()) {
+      if (person.deviceId !== browserDeviceId) continue
+      if (normalizeNameIdentity(person.name, 18) !== normalizedName) continue
+      if (normalizeGroupIdentity(person.group, 24) !== normalizedGroup) continue
+      return person
+    }
+
+    return null
   }
 
   private getRaffleCandidates(rule: RaffleRule) {
@@ -812,15 +837,24 @@ function sanitizeColor(value: unknown) {
   return /^#[0-9a-fA-F]{6}$/.test(color) ? color : ''
 }
 
-function normalizeIdentityPart(value: unknown, maxLength: number) {
-  return sanitizeText(value, maxLength).normalize('NFKC').toLocaleLowerCase('ko-KR')
+function normalizeNameIdentity(value: unknown, maxLength: number) {
+  return sanitizeText(value, maxLength).normalize('NFKC').replace(/\s+/gu, '').toLocaleLowerCase('ko-KR')
+}
+
+function normalizeGroupIdentity(value: unknown, maxLength: number) {
+  const compact = sanitizeText(value, maxLength)
+    .normalize('NFKC')
+    .toLocaleLowerCase('ko-KR')
+    .replace(/[\s\p{P}\p{S}]+/gu, '')
+
+  return compact.replace(/team$/u, '팀')
 }
 
 function getParticipantIdentityKey(deviceId: string, name: string, group: string) {
   return [
     sanitizeIdentifier(deviceId, 96),
-    normalizeIdentityPart(name, 18),
-    normalizeIdentityPart(group, 24),
+    normalizeNameIdentity(name, 18),
+    normalizeGroupIdentity(group, 24),
   ].join('|')
 }
 

@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const distDir = path.join(__dirname, 'dist')
 const port = Number(process.env.PORT || 5173)
 const host = process.env.HOST || '0.0.0.0'
-const defaultStarBudget = 5
+const defaultStarBudget = 20
 const defaultDurationMinutes = 10
 const maxStarsPerTeam = 10
 const participantCookieName = 'vibe-vote-participant'
@@ -19,7 +19,8 @@ const defaultCopy = {
   audienceEyeline: 'Audience Vote',
   adminEyeline: 'Admin Arena Wall',
   audienceHeroTitle: '별 {starBudget}개를 원하는 팀에 나눠 담으세요.',
-  audienceHeroSubtitle: '한 팀에는 최대 {maxStarsPerTeam}개까지, 마감 전까지 다시 조정할 수 있습니다.',
+  audienceHeroSubtitle:
+    '한 팀에는 최대 {maxStarsPerTeam}개까지, 마감 전까지 다시 조정할 수 있습니다. 별과 함께 응원 메시지를 남기면 경품 추첨에 자동응모됩니다.',
   adminHeroTitle: '관리자 모드에서 실시간 별 현황을 공개합니다.',
   adminHeroSubtitle: '모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.',
   checkInEyeline: 'Check In',
@@ -350,8 +351,9 @@ function upsertParticipant(deviceId, name, group) {
   if (!nextName || !nextGroup) return null
 
   const identityKey = getParticipantIdentityKey(browserDeviceId, nextName, nextGroup)
-  const id = `participant-${hashIdentity(identityKey)}`
-  const existing = participants.get(id)
+  const nextId = `participant-${hashIdentity(identityKey)}`
+  const existing = participants.get(nextId) || findParticipantByNormalizedIdentity(browserDeviceId, nextName, nextGroup)
+  const id = existing?.id || nextId
   const person =
     existing ||
     {
@@ -440,15 +442,39 @@ function sanitizeIdentifier(value, maxLength) {
     .slice(0, maxLength)
 }
 
-function normalizeIdentityPart(value, maxLength) {
-  return sanitizeText(value, maxLength).normalize('NFKC').toLocaleLowerCase('ko-KR')
+function normalizeNameIdentity(value, maxLength) {
+  return sanitizeText(value, maxLength).normalize('NFKC').replace(/\s+/gu, '').toLocaleLowerCase('ko-KR')
+}
+
+function normalizeGroupIdentity(value, maxLength) {
+  const compact = sanitizeText(value, maxLength)
+    .normalize('NFKC')
+    .toLocaleLowerCase('ko-KR')
+    .replace(/[\s\p{P}\p{S}]+/gu, '')
+
+  return compact.replace(/team$/u, '팀')
+}
+
+function findParticipantByNormalizedIdentity(deviceId, name, group) {
+  const browserDeviceId = sanitizeIdentifier(deviceId, 96)
+  const normalizedName = normalizeNameIdentity(name, 18)
+  const normalizedGroup = normalizeGroupIdentity(group, 24)
+
+  for (const person of participants.values()) {
+    if (person.deviceId !== browserDeviceId) continue
+    if (normalizeNameIdentity(person.name, 18) !== normalizedName) continue
+    if (normalizeGroupIdentity(person.group, 24) !== normalizedGroup) continue
+    return person
+  }
+
+  return null
 }
 
 function getParticipantIdentityKey(deviceId, name, group) {
   return [
     sanitizeIdentifier(deviceId, 96),
-    normalizeIdentityPart(name, 18),
-    normalizeIdentityPart(group, 24),
+    normalizeNameIdentity(name, 18),
+    normalizeGroupIdentity(group, 24),
   ].join('|')
 }
 
