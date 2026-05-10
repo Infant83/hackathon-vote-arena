@@ -428,6 +428,30 @@ function recordVoteEvents(person, previousAllocations, nextAllocations) {
   voteEvents.splice(100)
 }
 
+function removeCheersForClearedTeams(person, previousAllocations, nextAllocations) {
+  const clearedTeamIds = Object.keys(previousAllocations || {}).filter(
+    (teamId) => (previousAllocations[teamId] || 0) > 0 && (nextAllocations[teamId] || 0) <= 0,
+  )
+
+  if (!clearedTeamIds.length) return 0
+
+  const cleared = new Set(clearedTeamIds)
+  let removed = 0
+
+  for (let index = cheers.length - 1; index >= 0; index -= 1) {
+    const message = cheers[index]
+    if (message.participantId !== person.id || !cleared.has(message.teamId)) continue
+
+    cheers.splice(index, 1)
+    removed += 1
+  }
+
+  const hasRemainingMessages = cheers.some((message) => message.participantId === person.id)
+  person.cheered = hasRemainingMessages
+  person.cheerSubmitted = hasRemainingMessages
+  return removed
+}
+
 function sanitizeText(value, maxLength) {
   return String(value || '')
     .replace(/\s+/g, ' ')
@@ -675,6 +699,7 @@ async function handleApi(request, response, url) {
     const nextAllocations = normalizeAllocations(body.allocations)
     person.allocations = nextAllocations
     recordVoteEvents(person, previousAllocations, nextAllocations)
+    removeCheersForClearedTeams(person, previousAllocations, nextAllocations)
     lastRaffle = null
     broadcast()
     sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })

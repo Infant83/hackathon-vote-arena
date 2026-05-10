@@ -282,6 +282,7 @@ export class ArenaRoom {
       const nextAllocations = this.normalizeAllocations(body.allocations)
       person.allocations = nextAllocations
       this.recordVoteEvents(person, previousAllocations, nextAllocations)
+      this.removeCheersForClearedTeams(person, previousAllocations, nextAllocations)
       this.lastRaffle = null
       await this.commit()
       return json(this.getState(), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
@@ -648,6 +649,32 @@ export class ArenaRoom {
     }
 
     this.voteEvents.splice(100)
+  }
+
+  private removeCheersForClearedTeams(
+    person: Participant,
+    previousAllocations: Record<string, number>,
+    nextAllocations: Record<string, number>,
+  ) {
+    const clearedTeamIds = Object.keys(previousAllocations || {}).filter(
+      (teamId) => (previousAllocations[teamId] || 0) > 0 && (nextAllocations[teamId] || 0) <= 0,
+    )
+
+    if (!clearedTeamIds.length) return 0
+
+    const cleared = new Set(clearedTeamIds)
+    let removed = 0
+
+    this.cheers = this.cheers.filter((message) => {
+      const shouldRemove = message.participantId === person.id && cleared.has(message.teamId)
+      if (shouldRemove) removed += 1
+      return !shouldRemove
+    })
+
+    const hasRemainingMessages = this.cheers.some((message) => message.participantId === person.id)
+    person.cheered = hasRemainingMessages
+    person.cheerSubmitted = hasRemainingMessages
+    return removed
   }
 
   private async resetRuntimeState({ seed = false } = {}) {

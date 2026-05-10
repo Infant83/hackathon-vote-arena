@@ -592,6 +592,18 @@ function VoteView({
     const target = Math.min(targetStars, perTeamStarLimit)
     const maxForTeam = Math.min(perTeamStarLimit, current + remainingStars)
     const nextStars = Math.min(current === target ? Math.max(0, target - 1) : target, maxForTeam)
+    const removesAllStars = current > 0 && nextStars === 0
+    const hasTeamMessages = state.cheers.some(
+      (message) => message.participantId === currentParticipantId && message.teamId === teamId,
+    )
+
+    if (
+      removesAllStars &&
+      hasTeamMessages &&
+      !window.confirm('이 팀에 보낸 별을 모두 회수하면 내가 남긴 응원 메시지도 함께 삭제됩니다. 계속할까요?')
+    ) {
+      return
+    }
 
     await updateVote(post, state.sessionId, participantId, name, group, { ...allocations, [teamId]: nextStars })
   }
@@ -713,7 +725,7 @@ function VoteView({
                 const teamCheers = state.cheers
                   .filter((message) => message.teamId === team.id && !message.hidden)
                   .sort((a, b) => a.createdAt - b.createdAt)
-                  .slice(-6)
+                  .slice(-10)
 
                 return (
                   <article className={`direct-team ${myStars > 0 ? 'has-stars' : ''}`} key={team.id}>
