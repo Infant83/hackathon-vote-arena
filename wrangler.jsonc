@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "hackathon-vote-arena",
+  "name": "lgdhack",
   "main": "worker/index.ts",
   "compatibility_date": "2026-05-09",
   "assets": {
