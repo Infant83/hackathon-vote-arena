@@ -454,37 +454,54 @@ function Header({ mode, connection, state }: { mode: 'admin' | 'vote'; connectio
   }, [])
 
   const secondsLeft = Math.max(0, Math.floor((state.closesAt - now) / 1000))
+  const connectionLabel = connection === 'live' ? 'Live' : connection === 'connecting' ? '연결 중' : '오프라인 데모'
+  const voteUrl = `${window.location.host}/vote`
 
   return (
-    <header className="topbar" aria-label="행사 상태">
+    <header className={`topbar ${mode === 'admin' ? 'admin-topbar' : 'audience-topbar'}`} aria-label="행사 상태">
       <div className="brand-lockup">
         <div className="lg-dot" aria-hidden="true">
           V
         </div>
         <div>
           <p className="eyeline">{mode === 'admin' ? state.copy.adminEyeline : state.copy.audienceEyeline}</p>
-          <h1>{state.copy.appTitle}</h1>
+          <div className="brand-title-row">
+            <h1>{state.copy.appTitle}</h1>
+            {mode === 'admin' ? <span className="admin-console-badge">운영 콘솔</span> : null}
+          </div>
         </div>
       </div>
 
       <div className="event-controls">
-        <a className={mode === 'vote' ? 'mode-link active' : 'mode-link'} href="/vote">
-          사용자
-        </a>
-        <a className={mode === 'admin' ? 'mode-link active' : 'mode-link'} href="/admin">
-          관리자
-        </a>
-        <div className="short-url" aria-label="모바일 접속 주소">
-          <Radio size={16} />
-          <span>{window.location.host}/vote</span>
-        </div>
+        {mode === 'admin' ? (
+          <>
+            <a className="role-nav-link active" href="/admin">
+              실시간 현황
+            </a>
+            <a className="role-nav-link" href="/admin?showCheer=1">
+              Showup
+            </a>
+            <a className="role-nav-link" href="/vote" target="_blank" rel="noreferrer">
+              관객 화면 미리보기
+            </a>
+            <div className="short-url" aria-label="모바일 접속 주소">
+              <Radio size={16} />
+              <span>{voteUrl}</span>
+            </div>
+          </>
+        ) : (
+          <div className="audience-status-pill" aria-label="현재 화면">
+            <Radio size={16} />
+            <span>관객 투표 화면</span>
+          </div>
+        )}
         <div className={`timer ${state.closed ? 'closed' : ''}`}>
           <Clock3 size={18} />
           <span>{state.closed ? '투표 마감' : formatTime(secondsLeft)}</span>
         </div>
         <div className={`connection ${connection}`}>
           <span className="live-dot" />
-          <span>{connection === 'live' ? 'Live' : connection === 'connecting' ? '연결 중' : '오프라인 데모'}</span>
+          <span>{connectionLabel}</span>
         </div>
       </div>
     </header>
@@ -969,7 +986,7 @@ function AdminView({
           </button>
         </form>
         <p className="control-note">
-          현재 중복 응모 방지는 브라우저 쿠키 기준입니다. 실제 행사에서는 사번/SSO 또는 1회용 QR 토큰으로 체크인하는 방식이 필요합니다.
+          현재 중복 응모 방지는 이름, 소속, 익명 브라우저 디바이스 ID 조합으로 판단합니다. 개인정보 입력을 늘리지 않는 운영 기준입니다.
         </p>
       </section>
 

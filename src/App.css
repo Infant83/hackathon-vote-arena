@@ -12,6 +12,20 @@
   padding: 18px 0 22px;
 }
 
+.topbar.admin-topbar {
+  margin: -24px -24px 22px;
+  padding: 18px 24px;
+  border-bottom: 1px solid rgba(165, 0, 52, 0.24);
+  background:
+    linear-gradient(90deg, #202124 0%, #2c2c31 58%, #3b2630 100%),
+    #202124;
+  box-shadow: 0 16px 38px rgba(28, 28, 31, 0.12);
+}
+
+.topbar.audience-topbar {
+  border-bottom: 1px solid rgba(31, 31, 36, 0.08);
+}
+
 .brand-lockup {
   display: flex;
   align-items: center;
@@ -29,6 +43,12 @@
   font-weight: 800;
   font-size: 22px;
   box-shadow: 0 14px 32px rgba(165, 0, 52, 0.16);
+}
+
+.admin-topbar .lg-dot {
+  color: var(--lg-red);
+  background: #fff;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
 }
 
 .eyeline,
@@ -55,6 +75,34 @@
   font-weight: 780;
 }
 
+.brand-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-topbar .eyeline {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.admin-topbar h1 {
+  color: #fff;
+}
+
+.admin-console-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .event-controls {
   display: flex;
   align-items: center;
@@ -64,6 +112,8 @@
 }
 
 .mode-link,
+.role-nav-link,
+.audience-status-pill,
 .short-url,
 .timer,
 .connection,
@@ -84,6 +134,31 @@
   text-decoration: none;
 }
 
+.admin-topbar .role-nav-link,
+.admin-topbar .short-url,
+.admin-topbar .timer,
+.admin-topbar .connection {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.admin-topbar .short-url {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.role-nav-link.active {
+  color: #fff;
+  border-color: rgba(253, 49, 46, 0.7);
+  background: var(--lg-red);
+}
+
+.audience-status-pill {
+  color: var(--lg-red);
+  border-color: rgba(165, 0, 52, 0.18);
+  background: rgba(165, 0, 52, 0.045);
+}
+
 .mode-link.active {
   color: #fff;
   border-color: var(--lg-red);
@@ -98,6 +173,11 @@
 .timer.closed {
   color: var(--muted);
   background: #f4f4f5;
+}
+
+.admin-topbar .timer.closed {
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .connection {
@@ -3404,6 +3484,11 @@ a:focus-visible {
     padding: 14px;
   }
 
+  .topbar.admin-topbar {
+    margin: -14px -14px 18px;
+    padding: 14px;
+  }
+
   .topbar,
   .hero-band {
     align-items: flex-start;
@@ -3416,6 +3501,8 @@ a:focus-visible {
   }
 
   .mode-link,
+  .role-nav-link,
+  .audience-status-pill,
   .short-url,
   .timer,
   .connection {
