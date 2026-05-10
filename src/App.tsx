@@ -1,19 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import {
   Check,
   Clock3,
+  Download,
   Eye,
   EyeOff,
+  FileSpreadsheet,
   Gift,
   Maximize2,
   Megaphone,
   Radio,
+  Save,
   Search,
+  Settings2,
   Sparkles,
   Star,
   Trophy,
   Trash2,
+  Upload,
   Users,
   X,
 } from 'lucide-react'
@@ -32,6 +38,7 @@ type Team = {
   baseVoters: number
   color: string
   logo: LogoKind
+  sortOrder?: number
   totalStars: number
   voters: number
   rank: number
@@ -129,7 +136,7 @@ type EventCopy = {
 
 type RaffleRule = 'all' | 'leader' | 'top3' | 'cheer'
 type ConnectionState = 'connecting' | 'live' | 'offline'
-type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle'
+type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams'
 type Point = {
   x: number
   y: number
@@ -166,6 +173,27 @@ type ParticipantSummary = Participant & {
 const DEFAULT_STAR_BUDGET = 20
 const DEFAULT_DURATION_MINUTES = 10
 const MAX_STARS_PER_TEAM = 10
+const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
+const copyLabels: Record<keyof EventCopy, string> = {
+  appTitle: '앱 제목',
+  audienceEyeline: '관객 화면 상단 라벨',
+  adminEyeline: '관리자 화면 상단 라벨',
+  audienceHeroTitle: '관객 안내 제목',
+  audienceHeroSubtitle: '관객 안내 문구',
+  adminHeroTitle: '관리자 안내 제목',
+  adminHeroSubtitle: '관리자 안내 문구',
+  checkInEyeline: '등록 영역 라벨',
+  checkInTitle: '등록 안내 제목',
+  teamVoteEyeline: '투표 영역 라벨',
+  teamVoteTitle: '투표 영역 제목',
+  raffleReady: '추첨 응모 완료 문구',
+  raffleGuide: '추첨 안내 문구',
+  raffleHiddenDisqualified: '숨김 처리 안내 문구',
+  raffleRemovedDisqualified: '삭제 처리 안내 문구',
+  voteClosedAlert: '투표 마감 안내',
+  registrationReady: '재접속 안내',
+  registrationConnecting: '연결 중 안내',
+}
 const storageKey = 'vibe-vote-participant'
 const nameKey = 'vibe-vote-name'
 const groupKey = 'vibe-vote-group'
@@ -903,6 +931,7 @@ function AdminView({
           {activePanel === 'arena' ? <ArenaDetailPanel state={state} starBudget={starBudget} /> : null}
           {activePanel === 'participants' ? <ParticipantDetailPanel state={state} /> : null}
           {activePanel === 'messages' ? <MessageManagerDetail state={state} post={post} /> : null}
+          {activePanel === 'teams' ? <TeamConfigDetail state={state} post={post} /> : null}
           {activePanel === 'raffle' ? (
             <RaffleDetailPanel
               state={state}
@@ -1038,6 +1067,8 @@ function AdminView({
           <VoteActivityFeed state={state} />
           <ParticipantListPanel state={state} onOpen={() => setActivePanel('participants')} />
           <CheerModerationPanel state={state} post={post} onOpen={() => setActivePanel('messages')} />
+          <TeamConfigPanel state={state} onOpen={() => setActivePanel('teams')} />
+          <ResultExportPanel state={state} />
           <RafflePanel
             state={state}
             raffleRule={raffleRule}
@@ -1058,6 +1089,7 @@ function getAdminPanelTitle(panel: AdminPanel) {
   if (panel === 'arena') return '실시간 별 현황 전체화면'
   if (panel === 'participants') return '실참여자 전체 리스트'
   if (panel === 'messages') return '응원 메시지 전체 관리'
+  if (panel === 'teams') return '팀 정보 관리'
   return '행운권 추첨 쇼업'
 }
 
@@ -1540,6 +1572,215 @@ function MessageManagerDetail({
           <p className="empty-state">필터 조건에 맞는 메시지가 없습니다.</p>
         )}
       </div>
+    </div>
+  )
+}
+
+function TeamConfigPanel({ state, onOpen }: { state: EventState; onOpen: () => void }) {
+  return (
+    <section className="team-config-panel" aria-label="팀 정보 관리">
+      <div className="section-heading compact">
+        <div>
+          <p className="section-kicker">Team Setup</p>
+          <h2>팀 정보</h2>
+        </div>
+        <button type="button" className="panel-open-button" onClick={onOpen}>
+          <Settings2 size={14} />
+          관리
+        </button>
+      </div>
+      <div className="config-summary">
+        <strong>{state.teams.length}개 팀</strong>
+        <span>팀명, 프로젝트명, 팀원, 로고, 안내 문구를 수정합니다.</span>
+      </div>
+    </section>
+  )
+}
+
+function ResultExportPanel({ state }: { state: EventState }) {
+  const totalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
+
+  return (
+    <section className="result-export-panel" aria-label="결과 내보내기">
+      <div className="section-heading compact">
+        <div>
+          <p className="section-kicker">Export</p>
+          <h2>결과 내보내기</h2>
+        </div>
+        <button type="button" className="panel-open-button" onClick={() => exportResultsWorkbook(state)}>
+          <FileSpreadsheet size={14} />
+          XLSX
+        </button>
+      </div>
+      <div className="config-summary">
+        <strong>{totalStars}개 별</strong>
+        <span>팀별 결과, 참여자, 응원 메시지, 추첨 결과를 엑셀 파일로 저장합니다.</span>
+      </div>
+    </section>
+  )
+}
+
+function TeamConfigDetail({
+  state,
+  post,
+}: {
+  state: EventState
+  post: (path: string, body: unknown) => Promise<EventState | null>
+}) {
+  const [draftCopy, setDraftCopy] = useState<EventCopy>(() => ({ ...fallbackCopy, ...state.copy }))
+  const [draftTeams, setDraftTeams] = useState(() => createTeamDrafts(state.teams))
+  const [statusText, setStatusText] = useState('')
+
+  const updateCopy = (key: keyof EventCopy, value: string) => {
+    setDraftCopy((current) => ({ ...current, [key]: value }))
+  }
+
+  const updateTeam = (index: number, field: string, value: string) => {
+    setDraftTeams((current) =>
+      current.map((team, teamIndex) => (teamIndex === index ? { ...team, [field]: value } : team)),
+    )
+  }
+
+  const saveConfig = async () => {
+    const response = await post('/api/team-config', {
+      copy: draftCopy,
+      teams: draftTeams.map((team, index) => teamDraftToConfig(team, index)),
+    })
+
+    setStatusText(response ? '팀 정보가 저장되고 화면에 반영되었습니다.' : '팀 정보 저장에 실패했습니다.')
+  }
+
+  const importConfig = async (file: File | undefined) => {
+    if (!file) return
+
+    try {
+      const parsed = await parseTeamInfoFile(file)
+      const response = await post('/api/team-config', parsed)
+
+      if (response) {
+        setDraftCopy({ ...fallbackCopy, ...response.copy })
+        setDraftTeams(createTeamDrafts(response.teams))
+        setStatusText(`${file.name}을 적용했습니다.`)
+      } else {
+        setStatusText('업로드한 팀 정보를 적용하지 못했습니다.')
+      }
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : '업로드한 파일을 읽지 못했습니다.')
+    }
+  }
+
+  return (
+    <div className="team-config-detail">
+      <div className="config-toolbar">
+        <label className="file-import-button">
+          <Upload size={16} />
+          team_infos.zip / JSON 업로드
+          <input
+            type="file"
+            accept=".zip,.json,application/json,application/zip"
+            onChange={(event) => {
+              importConfig(event.currentTarget.files?.[0])
+              event.currentTarget.value = ''
+            }}
+          />
+        </label>
+        <button type="button" onClick={() => downloadTeamInfoJson({ copy: draftCopy, teams: draftTeams })}>
+          <Download size={16} />
+          team_info.json 저장
+        </button>
+        <button type="button" className="primary-action" onClick={saveConfig}>
+          <Save size={16} />
+          저장 및 반영
+        </button>
+      </div>
+
+      <p className="config-help">
+        ZIP 구조는 <code>team_infos/team_info.json</code>과 <code>team_infos/logos/T1-logo.png</code> 형식을 권장합니다.
+        로고는 png, jpg, webp, svg, ico를 받을 수 있습니다.
+      </p>
+      {statusText ? <p className="config-status">{statusText}</p> : null}
+
+      <section className="copy-config-grid" aria-label="화면 문구 관리">
+        <div className="section-heading compact">
+          <div>
+            <p className="section-kicker">Copy</p>
+            <h2>화면 문구</h2>
+          </div>
+        </div>
+        {(Object.keys(fallbackCopy) as Array<keyof EventCopy>).map((key) => (
+          <label key={key}>
+            <span>{copyLabels[key]}</span>
+            <textarea value={draftCopy[key]} onChange={(event) => updateCopy(key, event.target.value)} />
+          </label>
+        ))}
+      </section>
+
+      <section className="team-editor-list" aria-label="팀별 정보 편집">
+        <div className="section-heading compact">
+          <div>
+            <p className="section-kicker">Teams</p>
+            <h2>팀별 정보</h2>
+          </div>
+        </div>
+        {draftTeams.map((team, index) => (
+          <article className="team-editor-card" key={team.id || index}>
+            <div className="team-editor-head">
+              <LogoMark team={teamEditorPreview(team)} />
+              <div>
+                <strong>{team.name || `Team ${index + 1}`}</strong>
+                <span>{team.title || '프로젝트명 미정'}</span>
+              </div>
+            </div>
+
+            <div className="team-editor-grid">
+              <label>
+                <span>ID</span>
+                <input value={team.id} onChange={(event) => updateTeam(index, 'id', event.target.value)} />
+              </label>
+              <label>
+                <span>코드</span>
+                <input value={team.code} onChange={(event) => updateTeam(index, 'code', event.target.value)} />
+              </label>
+              <label>
+                <span>팀명</span>
+                <input value={team.name} onChange={(event) => updateTeam(index, 'name', event.target.value)} />
+              </label>
+              <label>
+                <span>프로젝트명</span>
+                <input value={team.title} onChange={(event) => updateTeam(index, 'title', event.target.value)} />
+              </label>
+              <label>
+                <span>팀원</span>
+                <textarea value={team.membersText} onChange={(event) => updateTeam(index, 'membersText', event.target.value)} />
+              </label>
+              <label>
+                <span>로고 경로</span>
+                <input value={team.logoFile} onChange={(event) => updateTeam(index, 'logoFile', event.target.value)} />
+              </label>
+              <label>
+                <span>색상</span>
+                <input value={team.color} onChange={(event) => updateTeam(index, 'color', event.target.value)} />
+              </label>
+              <label>
+                <span>기본 로고</span>
+                <select value={team.logo} onChange={(event) => updateTeam(index, 'logo', event.target.value)}>
+                  {logoKinds.map((logo) => (
+                    <option key={logo} value={logo}>{logo}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>테스트 기본 별</span>
+                <input value={team.baseStars} onChange={(event) => updateTeam(index, 'baseStars', event.target.value)} />
+              </label>
+              <label>
+                <span>테스트 기본 투표자</span>
+                <input value={team.baseVoters} onChange={(event) => updateTeam(index, 'baseVoters', event.target.value)} />
+              </label>
+            </div>
+          </article>
+        ))}
+      </section>
     </div>
   )
 }
@@ -2471,6 +2712,409 @@ function useEventState() {
   }, [applyState])
 
   return { state, connection, post }
+}
+
+type TeamConfigDraft = {
+  id: string
+  code: string
+  name: string
+  title: string
+  membersText: string
+  logoFile: string
+  color: string
+  logo: string
+  baseStars: string
+  baseVoters: string
+  sortOrder: number
+}
+
+type TeamInfoUpload = {
+  copy?: Partial<EventCopy>
+  teams: Array<Record<string, unknown>>
+  logos?: Array<{
+    fileName: string
+    dataUrl: string
+  }>
+}
+
+function createTeamDrafts(teams: Team[]): TeamConfigDraft[] {
+  return [...teams]
+    .sort((a, b) => getConfigOrder(a) - getConfigOrder(b))
+    .map((team, index) => ({
+      id: team.id,
+      code: team.code,
+      name: team.name,
+      title: team.title,
+      membersText: team.members.join('\n'),
+      logoFile: team.logoFile || '',
+      color: team.color,
+      logo: team.logo,
+      baseStars: String(team.baseStars ?? 0),
+      baseVoters: String(team.baseVoters ?? 0),
+      sortOrder: team.sortOrder ?? index,
+    }))
+}
+
+function getConfigOrder(team: Team) {
+  return team.sortOrder ?? fallbackTeamOrder.get(team.id) ?? team.rank ?? 0
+}
+
+function teamDraftToConfig(team: TeamConfigDraft, index: number) {
+  return {
+    id: team.id,
+    code: team.code,
+    name: team.name,
+    title: team.title,
+    members: team.membersText
+      .split(/[\n,]/)
+      .map((member) => member.trim())
+      .filter(Boolean)
+      .slice(0, 3),
+    logoFile: team.logoFile,
+    color: team.color,
+    logo: logoKinds.includes(team.logo as LogoKind) ? team.logo : 'orbit',
+    baseStars: Math.max(0, Math.floor(Number(team.baseStars) || 0)),
+    baseVoters: Math.max(0, Math.floor(Number(team.baseVoters) || 0)),
+    sortOrder: index,
+  }
+}
+
+function teamEditorPreview(team: TeamConfigDraft): Pick<Team, 'name' | 'logo' | 'color' | 'logoFile'> {
+  return {
+    name: team.name,
+    logo: logoKinds.includes(team.logo as LogoKind) ? (team.logo as LogoKind) : 'orbit',
+    color: /^#[0-9a-fA-F]{6}$/.test(team.color) ? team.color : '#A50034',
+    logoFile: team.logoFile,
+  }
+}
+
+async function parseTeamInfoFile(file: File): Promise<TeamInfoUpload> {
+  const lowerName = file.name.toLowerCase()
+
+  if (lowerName.endsWith('.json')) {
+    const parsed = JSON.parse(await file.text()) as Record<string, unknown>
+    return normalizeTeamInfoUpload(parsed)
+  }
+
+  if (!lowerName.endsWith('.zip')) {
+    throw new Error('team_info.json 또는 team_infos.zip 파일만 업로드할 수 있습니다.')
+  }
+
+  const entries = unzipSync(new Uint8Array(await file.arrayBuffer()))
+  const entryNames = Object.keys(entries)
+  const jsonEntryName =
+    entryNames.find((name) => name.replace(/\\/g, '/').toLowerCase().endsWith('/team_info.json')) ||
+    entryNames.find((name) => ['team_info.json', 'teams.json'].includes(name.replace(/\\/g, '/').toLowerCase()))
+
+  if (!jsonEntryName) {
+    throw new Error('ZIP 안에서 team_info.json 파일을 찾지 못했습니다.')
+  }
+
+  const parsed = JSON.parse(strFromU8(entries[jsonEntryName])) as Record<string, unknown>
+  const logos = entryNames
+    .map((name) => ({ name: name.replace(/\\/g, '/'), bytes: entries[name] }))
+    .filter((entry) => /(^|\/)logos\/[^/]+\.(png|jpe?g|webp|svg|ico)$/i.test(entry.name))
+    .slice(0, 20)
+    .map((entry) => {
+      const fileName = entry.name.split('/').pop() || ''
+      return {
+        fileName,
+        dataUrl: bytesToDataUrl(entry.bytes, getLogoMimeType(fileName)),
+      }
+    })
+
+  return normalizeTeamInfoUpload(parsed, logos)
+}
+
+function normalizeTeamInfoUpload(input: Record<string, unknown>, logos: TeamInfoUpload['logos'] = []): TeamInfoUpload {
+  const sourceTeams = Array.isArray(input) ? input : Array.isArray(input.teams) ? input.teams : []
+  if (!sourceTeams.length) {
+    throw new Error('team_info.json 안에 teams 배열이 필요합니다.')
+  }
+
+  const teams = sourceTeams.slice(0, 20).map((team, index) => {
+    const next = { ...(team as Record<string, unknown>) }
+    const matchedLogo = findImportedLogoFile(next, index, logos)
+    if (matchedLogo && !next.logoFile) {
+      next.logoFile = `/team-logos/${matchedLogo.fileName}`
+    }
+    return next
+  })
+
+  return {
+    copy: typeof input.copy === 'object' && input.copy ? (input.copy as Partial<EventCopy>) : undefined,
+    teams,
+    logos,
+  }
+}
+
+function findImportedLogoFile(team: Record<string, unknown>, index: number, logos: TeamInfoUpload['logos'] = []) {
+  const keys = [
+    `t${index + 1}`,
+    String(team.code || '').toLowerCase(),
+    String(team.id || '').toLowerCase(),
+    String(team.name || '').toLowerCase().replace(/\s+/g, ''),
+  ].filter(Boolean)
+
+  return logos.find((logo) => {
+    const baseName = logo.fileName.toLowerCase().replace(/\.(png|jpe?g|webp|svg|ico)$/i, '')
+    return keys.some((key) => baseName === key || baseName === `${key}-logo` || baseName.startsWith(`${key}_`))
+  })
+}
+
+function getLogoMimeType(fileName: string) {
+  const lower = fileName.toLowerCase()
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  if (lower.endsWith('.webp')) return 'image/webp'
+  if (lower.endsWith('.svg')) return 'image/svg+xml'
+  if (lower.endsWith('.ico')) return 'image/x-icon'
+  return 'image/png'
+}
+
+function bytesToDataUrl(bytes: Uint8Array, mimeType: string) {
+  let binary = ''
+  const chunkSize = 0x8000
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize))
+  }
+
+  return `data:${mimeType};base64,${btoa(binary)}`
+}
+
+function downloadTeamInfoJson({ copy, teams }: { copy: EventCopy; teams: TeamConfigDraft[] }) {
+  const payload = {
+    copy,
+    teams: teams.map((team, index) => teamDraftToConfig(team, index)),
+  }
+
+  downloadBlob(
+    new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' }),
+    'team_info.json',
+  )
+}
+
+function exportResultsWorkbook(state: EventState) {
+  const teamMap = new Map(state.teams.map((team) => [team.id, team]))
+  const participants = getParticipantSummaries(state)
+  const generatedAt = new Date()
+  const totalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
+  const eligibleCount = getRaffleCandidatesForRule(state, 'all').length
+  const sheets = [
+    {
+      name: '행사요약',
+      rows: [
+        ['항목', '값'],
+        ['생성시각', generatedAt.toLocaleString('ko-KR')],
+        ['투표상태', state.closed ? '마감' : '진행 중'],
+        ['세션', state.sessionId],
+        ['참여자별 별 개수', state.settings.starBudget],
+        ['등록 인원', state.participants.length],
+        ['총 별', totalStars],
+        ['추첨 응모 완료', eligibleCount],
+        ['마지막 추첨 후보', state.lastRaffle?.candidates ?? 0],
+      ],
+    },
+    {
+      name: '팀별결과',
+      rows: [
+        ['순위', '팀명', '프로젝트명', '팀원', '받은 별', '참여자', '점유율(%)', '환산점수', '테스트 기본 별', '테스트 기본 투표자'],
+        ...state.teams.map((team) => [
+          team.rank,
+          team.name,
+          team.title,
+          team.members.join(', '),
+          team.totalStars,
+          team.voters,
+          team.share,
+          formatPointScore(team.score ?? 0),
+          team.baseStars,
+          team.baseVoters,
+        ]),
+      ],
+    },
+    {
+      name: '참여자',
+      rows: [
+        ['이름', '소속', '사용 별', '응모 상태', '공개 메시지', '숨김 메시지', '팀별 배분', '최근 업데이트'],
+        ...participants.map((person) => [
+          person.name,
+          person.group,
+          person.spent,
+          person.status,
+          person.cheers.visible,
+          Math.max(0, person.cheers.total - person.cheers.visible),
+          person.allocationSummary,
+          new Date(person.updatedAt).toLocaleString('ko-KR'),
+        ]),
+      ],
+    },
+    {
+      name: '응원메시지',
+      rows: [
+        ['작성시각', '팀명', '작성자', '상태', '메시지'],
+        ...state.cheers.map((message) => [
+          new Date(message.createdAt).toLocaleString('ko-KR'),
+          teamMap.get(message.teamId)?.name ?? message.teamId,
+          message.author,
+          message.hidden ? '숨김' : '공개',
+          message.text,
+        ]),
+      ],
+    },
+    {
+      name: '추첨결과',
+      rows: [
+        ['추첨시각', '룰', '후보 수', '순번', '이름', '소속', '응원 참여'],
+        ...(state.lastRaffle?.winners ?? []).map((winner, index) => [
+          state.lastRaffle ? new Date(state.lastRaffle.createdAt).toLocaleString('ko-KR') : '',
+          state.lastRaffle?.rule ?? '',
+          state.lastRaffle?.candidates ?? 0,
+          index + 1,
+          winner.name,
+          winner.group ?? '',
+          winner.cheered ? 'Y' : 'N',
+        ]),
+      ],
+    },
+    {
+      name: '별이벤트',
+      rows: [
+        ['시각', '참여자', '팀명', '변화', '이전', '이후'],
+        ...state.voteEvents.map((event) => [
+          new Date(event.createdAt).toLocaleString('ko-KR'),
+          event.author,
+          teamMap.get(event.teamId)?.name ?? event.teamId,
+          event.delta,
+          event.previous,
+          event.next,
+        ]),
+      ],
+    },
+  ]
+
+  const workbook = buildXlsxWorkbook(sheets)
+  const workbookBuffer = workbook.buffer.slice(workbook.byteOffset, workbook.byteOffset + workbook.byteLength) as ArrayBuffer
+  const timestamp = generatedAt.toISOString().slice(0, 19).replace(/[-:T]/g, '')
+  downloadBlob(
+    new Blob([workbookBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    `vibe-vote-results-${timestamp}.xlsx`,
+  )
+}
+
+function buildXlsxWorkbook(sheets: Array<{ name: string; rows: Array<Array<string | number | boolean | null | undefined>> }>) {
+  const files: Record<string, Uint8Array> = {
+    '[Content_Types].xml': strToU8(buildContentTypes(sheets.length)),
+    '_rels/.rels': strToU8(buildRootRelationships()),
+    'xl/workbook.xml': strToU8(buildWorkbookXml(sheets)),
+    'xl/_rels/workbook.xml.rels': strToU8(buildWorkbookRelationships(sheets.length)),
+    'xl/styles.xml': strToU8(buildStylesXml()),
+  }
+
+  sheets.forEach((sheet, index) => {
+    files[`xl/worksheets/sheet${index + 1}.xml`] = strToU8(buildWorksheetXml(sheet.rows))
+  })
+
+  return zipSync(files)
+}
+
+function buildContentTypes(sheetCount: number) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+${Array.from({ length: sheetCount }).map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}
+</Types>`
+}
+
+function buildRootRelationships() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`
+}
+
+function buildWorkbookXml(sheets: Array<{ name: string }>) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets>
+${sheets.map((sheet, index) => `<sheet name="${escapeXml(sheet.name.slice(0, 31))}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join('')}
+</sheets>
+</workbook>`
+}
+
+function buildWorkbookRelationships(sheetCount: number) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+${Array.from({ length: sheetCount }).map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join('')}
+<Relationship Id="rId${sheetCount + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`
+}
+
+function buildStylesXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="1"><font><sz val="11"/><name val="맑은 고딕"/></font></fonts>
+<fills count="1"><fill><patternFill patternType="none"/></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
+</styleSheet>`
+}
+
+function buildWorksheetXml(rows: Array<Array<string | number | boolean | null | undefined>>) {
+  const xmlRows = rows.map((row, rowIndex) => {
+    const cells = row.map((value, columnIndex) => buildCellXml(value, columnIndex, rowIndex))
+    return `<row r="${rowIndex + 1}">${cells.join('')}</row>`
+  })
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData>${xmlRows.join('')}</sheetData>
+</worksheet>`
+}
+
+function buildCellXml(value: string | number | boolean | null | undefined, columnIndex: number, rowIndex: number) {
+  const ref = `${columnName(columnIndex)}${rowIndex + 1}`
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return `<c r="${ref}"><v>${value}</v></c>`
+  }
+
+  const text = value === null || value === undefined ? '' : String(value)
+  return `<c r="${ref}" t="inlineStr"><is><t>${escapeXml(text)}</t></is></c>`
+}
+
+function columnName(index: number) {
+  let current = index + 1
+  let name = ''
+
+  while (current > 0) {
+    const remainder = (current - 1) % 26
+    name = String.fromCharCode(65 + remainder) + name
+    current = Math.floor((current - 1) / 26)
+  }
+
+  return name
+}
+
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 async function updateVote(

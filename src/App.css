@@ -351,6 +351,8 @@
 .moderation-panel,
 .vote-feed-panel,
 .participant-panel,
+.team-config-panel,
+.result-export-panel,
 .raffle-panel {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -363,6 +365,8 @@
 .moderation-panel,
 .vote-feed-panel,
 .participant-panel,
+.team-config-panel,
+.result-export-panel,
 .raffle-panel {
   padding: 20px;
 }
@@ -2194,6 +2198,178 @@ a:focus-visible {
   min-height: 74px;
 }
 
+.config-summary {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(90deg, rgba(165, 0, 52, 0.045), rgba(255, 255, 255, 0.96)),
+    #fff;
+}
+
+.config-summary strong {
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.config-summary span {
+  color: var(--body);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.team-config-detail {
+  display: grid;
+  gap: 18px;
+}
+
+.config-toolbar {
+  position: sticky;
+  top: -20px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+}
+
+.config-toolbar button,
+.file-import-button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid rgba(165, 0, 52, 0.18);
+  border-radius: var(--radius);
+  color: var(--lg-red);
+  background: rgba(165, 0, 52, 0.045);
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.config-toolbar .primary-action {
+  margin-left: auto;
+  color: #fff;
+  border-color: var(--lg-red);
+  background: var(--lg-red);
+}
+
+.file-import-button input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.config-help,
+.config-status {
+  margin: 0;
+  color: var(--body);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.config-help code {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: rgba(165, 0, 52, 0.06);
+  color: var(--lg-red);
+}
+
+.config-status {
+  padding: 10px 12px;
+  border: 1px solid rgba(165, 0, 52, 0.18);
+  border-radius: var(--radius);
+  background: rgba(165, 0, 52, 0.045);
+  font-weight: 800;
+}
+
+.copy-config-grid,
+.team-editor-list {
+  display: grid;
+  gap: 12px;
+}
+
+.copy-config-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.copy-config-grid .section-heading,
+.team-editor-list .section-heading {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+.copy-config-grid label,
+.team-editor-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--body);
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.copy-config-grid textarea {
+  min-height: 86px;
+}
+
+.team-editor-card {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.team-editor-head {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.team-editor-head strong,
+.team-editor-head span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-editor-head strong {
+  color: var(--ink);
+  font-size: 17px;
+}
+
+.team-editor-head span {
+  margin-top: 3px;
+  color: var(--body);
+  font-size: 13px;
+  font-weight: 740;
+}
+
+.team-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.team-editor-grid label:nth-child(5),
+.team-editor-grid label:nth-child(6) {
+  grid-column: span 2;
+}
+
 .moderation-item time {
   color: var(--muted);
   font-size: 11px;
@@ -3599,6 +3775,25 @@ a:focus-visible {
 
   .registration-form {
     grid-template-columns: 1fr;
+  }
+
+  .config-toolbar,
+  .message-filter-bar {
+    position: static;
+  }
+
+  .config-toolbar .primary-action {
+    margin-left: 0;
+  }
+
+  .copy-config-grid,
+  .team-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .team-editor-grid label:nth-child(5),
+  .team-editor-grid label:nth-child(6) {
+    grid-column: auto;
   }
 
   .hero-band h2 {

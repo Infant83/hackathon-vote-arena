@@ -29,6 +29,7 @@ type TeamConfig = {
   baseVoters: number
   color: string
   logo: LogoKind
+  sortOrder: number
 }
 
 type TeamState = TeamConfig & {
@@ -109,6 +110,8 @@ type Snapshot = {
   sessionId: number
   testMode: boolean
   settings: Settings
+  teams?: TeamConfig[]
+  copy?: EventCopy
   settingsVersion?: number
 }
 
@@ -151,12 +154,12 @@ const defaultTeams: TeamConfig[] = [
     baseVoters: 46,
     color: '#A50034',
     logo: 'orbit',
+    sortOrder: 0,
   },
 ]
 
 const validLogos = new Set<LogoKind>(['orbit', 'beam', 'grid', 'wave', 'core'])
-const { teams, copy } = loadConfig(rawConfig)
-const validTeamIds = new Set(teams.map((team) => team.id))
+const initialConfig = loadConfig(rawConfig)
 const encoder = new TextEncoder()
 
 export default {
@@ -194,6 +197,9 @@ export class ArenaRoom {
     starBudget: defaultStarBudget,
     durationMinutes: defaultDurationMinutes,
   }
+  private teams: TeamConfig[] = initialConfig.teams
+  private copy: EventCopy = initialConfig.copy
+  private validTeamIds = new Set(initialConfig.teams.map((team) => team.id))
   private state: DurableObjectState
   private loaded: Promise<void>
 
@@ -238,6 +244,11 @@ export class ArenaRoom {
     this.voteEventId = Math.max(1, Number(snapshot.voteEventId || 1))
     this.sessionId = Math.max(1, Number(snapshot.sessionId || 1))
     this.testMode = Boolean(snapshot.testMode)
+    this.teams = Array.isArray(snapshot.teams) && snapshot.teams.length
+      ? snapshot.teams.map((team, index) => normalizeTeam(team, initialConfig.teams[index] || initialConfig.teams[0], index))
+      : initialConfig.teams
+    this.copy = normalizeCopy({ ...initialConfig.copy, ...(snapshot.copy || {}) })
+    this.validTeamIds = new Set(this.teams.map((team) => team.id))
     const persistedSettingsVersion = Number(snapshot.settingsVersion || 1)
     const persistedStarBudget = Math.floor(Number(snapshot.settings?.starBudget || defaultStarBudget))
     const migratedStarBudget =
@@ -263,6 +274,8 @@ export class ArenaRoom {
       sessionId: this.sessionId,
       testMode: this.testMode,
       settings: this.settings,
+      teams: this.teams,
+      copy: this.copy,
       settingsVersion,
     }
 
@@ -297,7 +310,7 @@ export class ArenaRoom {
       const teamId = String(body.teamId || '')
       const text = sanitizeText(body.text, 64)
 
-      if (!person || !validTeamIds.has(teamId) || !text) return json({ error: 'invalid cheer' }, 400)
+      if (!person || !this.validTeamIds.has(teamId) || !text) return json({ error: 'invalid cheer' }, 400)
       if ((person.allocations[teamId] || 0) <= 0) return json({ error: 'star allocation required' }, 409)
 
       person.cheered = true
@@ -414,6 +427,14 @@ export class ArenaRoom {
       return json(this.getState())
     }
 
+    if (pathname === '/api/team-config') {
+      const updated = this.applyTeamConfig(body)
+      if (!updated) return json({ error: 'teams array required' }, 400)
+
+      await this.commit()
+      return json(this.getState())
+    }
+
     if (pathname === '/api/reset') {
       await this.resetRuntimeState({ seed: Boolean(body.seed) })
       await this.commit()
@@ -442,7 +463,7 @@ export class ArenaRoom {
       }
     })
 
-    const teamStats = teams
+    const teamStats = this.teams
       .map((team) => {
         const baselineStars = this.testMode ? team.baseStars : 0
         const baselineVoters = this.testMode ? team.baseVoters : 0
@@ -479,8 +500,41 @@ export class ArenaRoom {
       sessionId: this.sessionId,
       testMode: this.testMode,
       settings: this.settings,
-      copy,
+      copy: this.copy,
     }
+  }
+
+  private applyTeamConfig(body: RequestBody) {
+    const sourceTeams = Array.isArray(body.teams) ? body.teams.slice(0, 20) : []
+    if (!sourceTeams.length) return false
+
+    const logos = Array.isArray(body.logos) ? body.logos : []
+
+    this.teams = sourceTeams.map((teamValue, index) => {
+      const team = teamValue && typeof teamValue === 'object' ? { ...(teamValue as Record<string, unknown>) } : {}
+      const logoDataUrl = resolveLogoDataUrl(team, index, logos)
+      if (logoDataUrl) {
+        team.logoFile = logoDataUrl
+      }
+
+      return normalizeTeam(team, this.teams[index] || initialConfig.teams[index] || initialConfig.teams[0], index)
+    })
+    this.copy = normalizeCopy({ ...this.copy, ...normalizeObject(body.copy) })
+    this.validTeamIds = new Set(this.teams.map((team) => team.id))
+    this.cleanupInvalidTeamReferences()
+    this.lastRaffle = null
+    return true
+  }
+
+  private cleanupInvalidTeamReferences() {
+    for (const person of this.participants.values()) {
+      person.allocations = Object.fromEntries(
+        Object.entries(person.allocations || {}).filter(([teamId]) => this.validTeamIds.has(teamId)),
+      )
+    }
+
+    this.cheers = this.cheers.filter((message) => this.validTeamIds.has(message.teamId))
+    this.voteEvents = this.voteEvents.filter((event) => this.validTeamIds.has(event.teamId))
   }
 
   private openEventStream() {
@@ -531,7 +585,7 @@ export class ArenaRoom {
     if (!input || typeof input !== 'object') return normalized
 
     for (const [teamId, rawValue] of Object.entries(input as Record<string, unknown>)) {
-      if (!validTeamIds.has(teamId)) continue
+      if (!this.validTeamIds.has(teamId)) continue
 
       const value = Math.max(0, Math.floor(Number(rawValue) || 0))
       const next = Math.min(value, remaining, maxStarsPerTeam)
@@ -628,7 +682,7 @@ export class ArenaRoom {
     const now = Date.now()
 
     for (const teamId of teamIds) {
-      if (!validTeamIds.has(teamId)) continue
+      if (!this.validTeamIds.has(teamId)) continue
 
       const previous = previousAllocations?.[teamId] || 0
       const next = nextAllocations?.[teamId] || 0
@@ -742,7 +796,7 @@ export class ArenaRoom {
       person.cheerSubmitted = true
       this.cheers.unshift({
         id: this.cheerId++,
-        teamId: Object.keys(person.allocations)[0] || teams[0].id,
+        teamId: Object.keys(person.allocations)[0] || this.teams[0].id,
         participantId: person.id,
         author: person.name,
         text: sample.message,
@@ -806,7 +860,12 @@ function normalizeTeam(teamValue: unknown, fallback: TeamConfig, index: number):
     baseVoters: Math.max(0, Math.floor(Number(team.baseVoters ?? fallback.baseVoters ?? 0))),
     color: sanitizeColor(team.color) || fallback.color || '#A50034',
     logo,
+    sortOrder: Math.max(0, Math.floor(Number(team.sortOrder ?? index))),
   }
+}
+
+function normalizeObject(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
 
 async function readJson(request: Request): Promise<RequestBody> {
@@ -854,9 +913,39 @@ function sanitizeSlug(value: unknown) {
 function sanitizeLogoPath(value: string) {
   const pathValue = value.trim()
   if (!pathValue) return ''
-  if (!/^\/?team-logos\/[a-zA-Z0-9._-]+\.png$/.test(pathValue)) return ''
+  if (/^data:image\/(png|jpeg|jpg|webp|svg\+xml|x-icon);base64,[a-zA-Z0-9+/=]+$/i.test(pathValue) && pathValue.length < 600_000) {
+    return pathValue
+  }
+  if (!/^\/?team-logos\/[a-zA-Z0-9._-]+\.(png|jpe?g|webp|svg|ico)$/i.test(pathValue)) return ''
 
   return pathValue.startsWith('/') ? pathValue : `/${pathValue}`
+}
+
+function resolveLogoDataUrl(team: Record<string, unknown>, index: number, logos: unknown[]) {
+  const explicitPath = String(team.logoFile || '').split('/').pop()?.toLowerCase() || ''
+  const keys = [
+    explicitPath,
+    `t${index + 1}-logo`,
+    `t${index + 1}`,
+    String(team.code || '').toLowerCase(),
+    String(team.id || '').toLowerCase(),
+    String(team.name || '').toLowerCase().replace(/\s+/g, ''),
+  ].filter(Boolean)
+
+  for (const logoValue of logos) {
+    const logo = normalizeObject(logoValue)
+    const fileName = String(logo.fileName || '').toLowerCase()
+    const baseName = fileName.replace(/\.(png|jpe?g|webp|svg|ico)$/i, '')
+
+    if (!keys.some((key) => fileName === key || baseName === key || baseName === `${key}-logo` || baseName.startsWith(`${key}_`))) {
+      continue
+    }
+
+    const dataUrl = sanitizeLogoPath(String(logo.dataUrl || ''))
+    if (dataUrl) return dataUrl
+  }
+
+  return ''
 }
 
 function sanitizeColor(value: unknown) {

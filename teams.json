@@ -21,124 +21,174 @@
   },
   "teams": [
     {
-    "id": "team-aurora",
-    "code": "A1",
-    "name": "Aurora Lab",
-    "title": "사내 지식 검색 Copilot",
-    "members": ["김도윤", "이서진", "박민재"],
-    "logoFile": "",
-    "color": "#A50034",
-    "logo": "orbit",
-    "baseStars": 128,
-    "baseVoters": 46
-  },
-  {
-    "id": "team-prism",
-    "code": "B2",
-    "name": "Prism Works",
-    "title": "제조 라인 이상 감지 대시보드",
-    "members": ["최서연", "한지우", "윤태오"],
-    "logoFile": "",
-    "color": "#D05A67",
-    "logo": "beam",
-    "baseStars": 112,
-    "baseVoters": 41
-  },
-  {
-    "id": "team-nova",
-    "code": "C3",
-    "name": "Nova Ops",
-    "title": "회의록 자동 액션 추출기",
-    "members": ["정유나", "강민호", "오하린"],
-    "logoFile": "",
-    "color": "#2E6F9E",
-    "logo": "grid",
-    "baseStars": 104,
-    "baseVoters": 39
-  },
-  {
-    "id": "team-flow",
-    "code": "D4",
-    "name": "Flow Mint",
-    "title": "현장 작업자 음성 QA 봇",
-    "members": ["문도연", "배준서", "신가은"],
-    "logoFile": "",
-    "color": "#A66B2A",
-    "logo": "wave",
-    "baseStars": 91,
-    "baseVoters": 35
-  },
-  {
-    "id": "team-signal",
-    "code": "E5",
-    "name": "Signal One",
-    "title": "영업 제안서 품질 평가기",
-    "members": ["장하나", "서지훈", "임채원"],
-    "logoFile": "",
-    "color": "#17816E",
-    "logo": "core",
-    "baseStars": 88,
-    "baseVoters": 33
-  },
-  {
-    "id": "team-lattice",
-    "code": "F6",
-    "name": "Lattice AI",
-    "title": "장애 리포트 원인 추적 Agent",
-    "members": ["남기현", "조예린", "허준영"],
-    "logoFile": "",
-    "color": "#6A4FB3",
-    "logo": "grid",
-    "baseStars": 76,
-    "baseVoters": 29
-  },
-  {
-    "id": "team-pulse",
-    "code": "G7",
-    "name": "Pulse Crew",
-    "title": "고객 VOC 우선순위 엔진",
-    "members": ["권도현", "백수아", "류현우"],
-    "logoFile": "",
-    "color": "#D5643A",
-    "logo": "wave",
-    "baseStars": 73,
-    "baseVoters": 27
-  },
-  {
-    "id": "team-craft",
-    "code": "H8",
-    "name": "Craft Mode",
-    "title": "신입 온보딩 튜터",
-    "members": ["송지민", "고은재", "차서우"],
-    "logoFile": "",
-    "color": "#4F6B4A",
-    "logo": "beam",
-    "baseStars": 69,
-    "baseVoters": 25
-  },
-  {
-    "id": "team-kindred",
-    "code": "I9",
-    "name": "Kindred",
-    "title": "협업 감정 온도 체크",
-    "members": ["표다은", "양준혁", "안소율"],
-    "logoFile": "",
-    "color": "#C24D86",
-    "logo": "orbit",
-    "baseStars": 62,
-    "baseVoters": 23
-  },
-  {
-    "id": "team-vector",
-    "code": "J10",
-    "name": "Vector Room",
-    "title": "코드 리뷰 위험도 요약기",
-    "members": ["홍유나", "이도겸", "전하늘"],
-    "logoFile": "",
-    "color": "#46515F",
-    "logo": "core",
-    "baseStars": 57,
-    "baseVoters": 22
+      "id": "team-aurora",
+      "code": "A1",
+      "name": "Aurora Lab",
+      "title": "사내 지식 검색 Copilot",
+      "members": [
+        "김도윤",
+        "이서진",
+        "박민재"
+      ],
+      "logoFile": "",
+      "color": "#A50034",
+      "logo": "orbit",
+      "baseStars": 128,
+      "baseVoters": 46,
+      "sortOrder": 0
+    },
+    {
+      "id": "team-prism",
+      "code": "B2",
+      "name": "Prism Works",
+      "title": "제조 라인 이상 감지 대시보드",
+      "members": [
+        "최서연",
+        "한지우",
+        "윤태오"
+      ],
+      "logoFile": "",
+      "color": "#D05A67",
+      "logo": "beam",
+      "baseStars": 112,
+      "baseVoters": 41,
+      "sortOrder": 1
+    },
+    {
+      "id": "team-nova",
+      "code": "C3",
+      "name": "Nova Ops",
+      "title": "회의록 자동 액션 추출기",
+      "members": [
+        "정유나",
+        "강민호",
+        "오하린"
+      ],
+      "logoFile": "",
+      "color": "#2E6F9E",
+      "logo": "grid",
+      "baseStars": 104,
+      "baseVoters": 39,
+      "sortOrder": 2
+    },
+    {
+      "id": "team-flow",
+      "code": "D4",
+      "name": "Flow Mint",
+      "title": "현장 작업자 음성 QA 봇",
+      "members": [
+        "문도연",
+        "배준서",
+        "신가은"
+      ],
+      "logoFile": "",
+      "color": "#A66B2A",
+      "logo": "wave",
+      "baseStars": 91,
+      "baseVoters": 35,
+      "sortOrder": 3
+    },
+    {
+      "id": "team-signal",
+      "code": "E5",
+      "name": "Signal One",
+      "title": "영업 제안서 품질 평가기",
+      "members": [
+        "장하나",
+        "서지훈",
+        "임채원"
+      ],
+      "logoFile": "",
+      "color": "#17816E",
+      "logo": "core",
+      "baseStars": 88,
+      "baseVoters": 33,
+      "sortOrder": 4
+    },
+    {
+      "id": "team-lattice",
+      "code": "F6",
+      "name": "Lattice AI",
+      "title": "장애 리포트 원인 추적 Agent",
+      "members": [
+        "남기현",
+        "조예린",
+        "허준영"
+      ],
+      "logoFile": "",
+      "color": "#6A4FB3",
+      "logo": "grid",
+      "baseStars": 76,
+      "baseVoters": 29,
+      "sortOrder": 5
+    },
+    {
+      "id": "team-pulse",
+      "code": "G7",
+      "name": "Pulse Crew",
+      "title": "고객 VOC 우선순위 엔진",
+      "members": [
+        "권도현",
+        "백수아",
+        "류현우"
+      ],
+      "logoFile": "",
+      "color": "#D5643A",
+      "logo": "wave",
+      "baseStars": 73,
+      "baseVoters": 27,
+      "sortOrder": 6
+    },
+    {
+      "id": "team-craft",
+      "code": "H8",
+      "name": "Craft Mode",
+      "title": "신입 온보딩 튜터",
+      "members": [
+        "송지민",
+        "고은재",
+        "차서우"
+      ],
+      "logoFile": "",
+      "color": "#4F6B4A",
+      "logo": "beam",
+      "baseStars": 69,
+      "baseVoters": 25,
+      "sortOrder": 7
+    },
+    {
+      "id": "team-kindred",
+      "code": "I9",
+      "name": "Kindred",
+      "title": "협업 감정 온도 체크",
+      "members": [
+        "표다은",
+        "양준혁",
+        "안소율"
+      ],
+      "logoFile": "",
+      "color": "#C24D86",
+      "logo": "orbit",
+      "baseStars": 62,
+      "baseVoters": 23,
+      "sortOrder": 8
+    },
+    {
+      "id": "team-vector",
+      "code": "J10",
+      "name": "Vector Room",
+      "title": "코드 리뷰 위험도 요약기",
+      "members": [
+        "홍유나",
+        "이도겸",
+        "전하늘"
+      ],
+      "logoFile": "",
+      "color": "#46515F",
+      "logo": "core",
+      "baseStars": 57,
+      "baseVoters": 22,
+      "sortOrder": 9
     }
   ]
 }

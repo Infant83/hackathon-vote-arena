@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -14,6 +14,7 @@ const maxStarsPerTeam = 10
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const teamsConfigPath = path.join(__dirname, 'teams.json')
+const teamLogoDir = path.join(__dirname, 'public', 'team-logos')
 const defaultCopy = {
   appTitle: 'Vibe Vote Arena',
   audienceEyeline: 'Audience Vote',
@@ -163,9 +164,9 @@ const defaultTeams = [
 ]
 
 const appConfig = loadConfig()
-const teams = appConfig.teams
-const copy = appConfig.copy
-const validTeamIds = new Set(teams.map((team) => team.id))
+let teams = appConfig.teams
+let copy = appConfig.copy
+let validTeamIds = new Set(teams.map((team) => team.id))
 const participants = new Map()
 const cheers = []
 const voteEvents = []
@@ -235,6 +236,7 @@ function normalizeTeam(team, fallback = defaultTeams[0], index = 0) {
     baseVoters: Math.max(0, Math.floor(Number(team?.baseVoters ?? fallback.baseVoters ?? 0))),
     color: sanitizeColor(team?.color) || fallback.color || '#A50034',
     logo,
+    sortOrder: Math.max(0, Math.floor(Number(team?.sortOrder ?? index))),
   }
 }
 
@@ -248,13 +250,115 @@ function sanitizeSlug(value) {
 function sanitizeLogoPath(value) {
   const pathValue = String(value || '').trim()
   if (!pathValue || pathValue.includes('..')) return ''
-  if (!/^\/?[a-zA-Z0-9_./-]+\.png$/i.test(pathValue)) return ''
+  if (/^data:image\/(png|jpeg|jpg|webp|svg\+xml|x-icon);base64,[a-zA-Z0-9+/=]+$/i.test(pathValue) && pathValue.length < 600_000) {
+    return pathValue
+  }
+  if (!/^\/?[a-zA-Z0-9_./-]+\.(png|jpe?g|webp|svg|ico)$/i.test(pathValue)) return ''
   return pathValue.startsWith('/') ? pathValue : `/${pathValue}`
 }
 
 function sanitizeColor(value) {
   const color = String(value || '').trim()
   return /^#[0-9a-fA-F]{6}$/.test(color) ? color : ''
+}
+
+async function applyTeamConfig(body) {
+  const nextTeams = normalizeTeamConfig(body?.teams)
+  if (!nextTeams.length) {
+    throw new Error('teams array required')
+  }
+
+  await saveLogoAssets(body?.logos)
+  teams = nextTeams
+  copy = normalizeCopy({ ...copy, ...(body?.copy || {}) })
+  validTeamIds = new Set(teams.map((team) => team.id))
+  cleanupInvalidTeamReferences()
+  lastRaffle = null
+  await persistTeamConfig()
+}
+
+function normalizeTeamConfig(input) {
+  const source = Array.isArray(input) ? input.slice(0, 20) : []
+  if (!source.length) return []
+
+  return source.map((team, index) => {
+    const fallback = teams[index] || defaultTeams[index] || defaultTeams[0]
+    const prepared = {
+      ...team,
+      id: team?.id || `team-${index + 1}`,
+      code: team?.code || `T${index + 1}`,
+    }
+
+    return normalizeTeam(prepared, fallback, index)
+  })
+}
+
+async function saveLogoAssets(input) {
+  const logos = Array.isArray(input) ? input : []
+  if (!logos.length) return
+
+  await mkdir(teamLogoDir, { recursive: true })
+
+  for (const logo of logos.slice(0, 20)) {
+    const fileName = sanitizeLogoFileName(logo?.fileName)
+    const payload = decodeLogoDataUrl(logo?.dataUrl)
+    if (!fileName || !payload) continue
+
+    await writeFile(path.join(teamLogoDir, fileName), payload)
+  }
+}
+
+function sanitizeLogoFileName(value) {
+  const fileName = path.basename(String(value || '')).replace(/[^a-zA-Z0-9._-]/g, '')
+  return /\.(png|jpe?g|webp|svg|ico)$/i.test(fileName) ? fileName.slice(0, 80) : ''
+}
+
+function decodeLogoDataUrl(value) {
+  const match = String(value || '').match(/^data:image\/(?:png|jpeg|jpg|webp|svg\+xml|x-icon);base64,([a-zA-Z0-9+/=]+)$/i)
+  if (!match) return null
+
+  const buffer = Buffer.from(match[1], 'base64')
+  return buffer.length <= 500_000 ? buffer : null
+}
+
+function cleanupInvalidTeamReferences() {
+  for (const person of participants.values()) {
+    person.allocations = Object.fromEntries(
+      Object.entries(person.allocations || {}).filter(([teamId]) => validTeamIds.has(teamId)),
+    )
+  }
+
+  for (let index = cheers.length - 1; index >= 0; index -= 1) {
+    if (!validTeamIds.has(cheers[index].teamId)) cheers.splice(index, 1)
+  }
+
+  for (let index = voteEvents.length - 1; index >= 0; index -= 1) {
+    if (!validTeamIds.has(voteEvents[index].teamId)) voteEvents.splice(index, 1)
+  }
+}
+
+async function persistTeamConfig() {
+  const payload = {
+    copy,
+    teams: teams
+      .slice()
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+      .map((team, index) => ({
+        id: team.id,
+        code: team.code,
+        name: team.name,
+        title: team.title,
+        members: team.members,
+        logoFile: team.logoFile.startsWith('data:') ? '' : team.logoFile,
+        color: team.color,
+        logo: team.logo,
+        baseStars: team.baseStars,
+        baseVoters: team.baseVoters,
+        sortOrder: team.sortOrder ?? index,
+      })),
+  }
+
+  await writeFile(teamsConfigPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
 }
 
 function getState() {
@@ -636,7 +740,7 @@ async function readJson(request) {
 
   for await (const chunk of request) {
     body += chunk
-    if (body.length > 100_000) {
+    if (body.length > 8_000_000) {
       throw new Error('request body too large')
     }
   }
@@ -865,6 +969,17 @@ async function handleApi(request, response, url) {
     return
   }
 
+  if (url.pathname === '/api/team-config') {
+    try {
+      await applyTeamConfig(body)
+      broadcast()
+      sendJson(response, 200, getState())
+    } catch (error) {
+      sendJson(response, 400, { error: error.message || 'invalid team config' })
+    }
+    return
+  }
+
   if (url.pathname === '/api/reset') {
     resetRuntimeState({ seed: Boolean(body.seed) })
     broadcast()
@@ -911,6 +1026,8 @@ function getContentType(filePath) {
   if (extension === '.css') return 'text/css; charset=utf-8'
   if (extension === '.svg') return 'image/svg+xml'
   if (extension === '.png') return 'image/png'
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg'
+  if (extension === '.webp') return 'image/webp'
   if (extension === '.ico') return 'image/x-icon'
   return 'application/octet-stream'
 }

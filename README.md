@@ -88,22 +88,74 @@ Keep vote mutation server-side so each participant can spend at most the adminis
 
 ## Event And Team Config
 
-Event copy and team metadata are managed in `teams.json`.
+Event copy and team metadata are managed in `teams.json`, and can also be edited from `/admin` > `팀 정보`.
 
 - `copy`: editable labels and guide text such as `Audience Vote`, `Vibe Vote Arena`, hero titles, registration guidance, raffle eligibility messages, and moderation/disqualification notices.
 - `teams`: team name, submitted project title, up to three team members, color, generated-logo style, and optional `logoFile`.
+- Local Node runtime writes admin edits back to `teams.json` and stores uploaded logo files under `public/team-logos/`.
+- Cloudflare Worker runtime has no writable repository filesystem, so admin edits are persisted in Durable Object storage for the live event. Download `team_info.json` from the admin panel if those edits should be committed back to the repository.
+
+Bulk upload accepts either a plain JSON file or a zip:
+
+```text
+team_infos.zip
+└─ team_infos/
+   ├─ team_info.json
+   └─ logos/
+      ├─ T1-logo.png
+      ├─ T2-logo.jpg
+      └─ ...
+```
+
+`team_info.json` should contain:
+
+```json
+{
+  "copy": {
+    "appTitle": "Vibe Vote Arena",
+    "audienceEyeline": "Audience Vote"
+  },
+  "teams": [
+    {
+      "id": "team-t1",
+      "code": "T1",
+      "name": "Team One",
+      "title": "Submitted Project",
+      "members": ["Member A", "Member B", "Member C"],
+      "logoFile": "/team-logos/T1-logo.png",
+      "color": "#A50034",
+      "logo": "orbit",
+      "baseStars": 0,
+      "baseVoters": 0,
+      "sortOrder": 0
+    }
+  ]
+}
+```
 
 ## Team Logo Intake
 
-Ask each team for one PNG file:
+Ask each team for one square logo file:
 
-- Format: transparent PNG preferred.
+- Format: transparent PNG preferred. JPG, WebP, SVG, and ICO are also accepted by the admin zip upload.
 - Canvas: square `512 x 512 px`.
 - Safe area: keep the visible mark inside the central `384 x 384 px`; leave about `64 px` padding on every side.
 - Background: no baked-in white box unless it is part of the official logo.
-- Filename: `team-slug.png`, for example `aurora-lab.png`.
+- Filename for bulk upload: `T1-logo.png` through `T10-logo.png` is recommended.
+- Filename for manual repo placement: `team-slug.png`, for example `aurora-lab.png`.
 - Place files under `public/team-logos/` and set `logoFile` in `teams.json`, for example `/team-logos/aurora-lab.png`.
 - Small-size check: the mark should still be recognizable at `48 x 48 px`.
+
+## Result Export
+
+The admin page can export an `.xlsx` workbook with these sheets:
+
+- `행사요약`
+- `팀별결과`
+- `참여자`
+- `응원메시지`
+- `추첨결과`
+- `별이벤트`
 
 ## Anti-Duplicate Participation Design
 
