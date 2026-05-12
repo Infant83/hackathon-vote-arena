@@ -111,6 +111,7 @@ type EventState = {
     starBudget: number
     durationMinutes: number
     minScore: number
+    cheerNameMode: CheerNameMode
   }
   copy: EventCopy
 }
@@ -134,10 +135,26 @@ type EventCopy = {
   voteClosedAlert: string
   registrationReady: string
   registrationConnecting: string
+  cheerButtonLabel: string
+  wallEyeline: string
+  wallMetricStars: string
+  wallMetricCheers: string
+  wallOverviewLabel: string
+  wallCheerLabel: string
+  wallRaffleLabel: string
+  wallShowupLabel: string
+  wallArenaEyeline: string
+  wallArenaTitle: string
+  wallCheerEyeline: string
+  wallCheerTitle: string
+  wallSelectedCheerSuffix: string
+  wallRaffleEyeline: string
+  wallRaffleTitle: string
 }
 
+type CheerNameMode = 'masked' | 'real'
 type RaffleRule = 'all' | 'leader' | 'top2' | 'top3' | 'multi' | 'big' | 'cheer'
-type RaffleStyle = 'roulette' | 'lotto'
+type RaffleStyle = 'roulette' | 'lotto' | 'target'
 type ConnectionState = 'connecting' | 'live' | 'offline'
 type AppMode = 'admin' | 'vote' | 'wall'
 type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams'
@@ -155,6 +172,7 @@ const raffleRuleOptions: Array<{ value: RaffleRule; label: string }> = [
 const raffleStyleOptions: Array<{ value: RaffleStyle; label: string }> = [
   { value: 'roulette', label: '룰렛 쇼업' },
   { value: 'lotto', label: '로또볼 쇼업' },
+  { value: 'target', label: '과녁 쇼업' },
 ]
 type Point = {
   x: number
@@ -171,6 +189,7 @@ type BubbleGroupInput = {
   teamId: string
   participantId?: string
   author: string
+  authorGroup?: string
   messages: CheerMessage[]
   latestMessage: CheerMessage
   team: Team
@@ -189,7 +208,7 @@ type ParticipantSummary = Participant & {
   statusClass: string
 }
 
-const DEFAULT_STAR_BUDGET = 10
+const DEFAULT_STAR_BUDGET = 20
 const DEFAULT_DURATION_MINUTES = 10
 const DEFAULT_MIN_SCORE = 5
 const MAX_STARS_PER_TEAM = 10
@@ -213,6 +232,21 @@ const copyLabels: Record<keyof EventCopy, string> = {
   voteClosedAlert: '투표 마감 안내',
   registrationReady: '재접속 안내',
   registrationConnecting: '연결 중 안내',
+  cheerButtonLabel: '관객 응원 버튼 문구',
+  wallEyeline: '송출 화면 상단 라벨',
+  wallMetricStars: '송출 누적 별 라벨',
+  wallMetricCheers: '송출 응원 메시지 라벨',
+  wallOverviewLabel: '송출 실시간 현황 버튼',
+  wallCheerLabel: '송출 응원 메시지 버튼',
+  wallRaffleLabel: '송출 행운권 추첨 버튼',
+  wallShowupLabel: '송출 말풍선 Showup 버튼',
+  wallArenaEyeline: '송출 현황 패널 라벨',
+  wallArenaTitle: '송출 현황 패널 제목',
+  wallCheerEyeline: '송출 응원 패널 라벨',
+  wallCheerTitle: '송출 응원 패널 제목',
+  wallSelectedCheerSuffix: '송출 선택 팀 응원 제목 접미사',
+  wallRaffleEyeline: '송출 추첨 패널 라벨',
+  wallRaffleTitle: '송출 추첨 패널 제목',
 }
 const storageKey = 'vibe-vote-participant'
 const nameKey = 'vibe-vote-name'
@@ -243,6 +277,21 @@ const fallbackCopy: EventCopy = {
   voteClosedAlert: '투표가 마감되어 별을 추가하거나 메시지를 보낼 수 없습니다.',
   registrationReady: "같은 이름과 Let's ID로 다시 접속하면 기존 참여 내역을 이어갑니다. 이메일을 입력해도 @ 뒤 주소는 사용하지 않습니다.",
   registrationConnecting: '행사 서버에 연결하는 중입니다.',
+  cheerButtonLabel: '응원 메시지 보내기',
+  wallEyeline: 'Audience Wall',
+  wallMetricStars: '누적 별',
+  wallMetricCheers: '응원 메시지',
+  wallOverviewLabel: '실시간 현황',
+  wallCheerLabel: '응원메세지',
+  wallRaffleLabel: '행운권추첨',
+  wallShowupLabel: '말풍선 Showup',
+  wallArenaEyeline: 'Live Arena Wall',
+  wallArenaTitle: '실시간 별 현황',
+  wallCheerEyeline: 'Cheer Board',
+  wallCheerTitle: '응원 메시지',
+  wallSelectedCheerSuffix: '응원 메시지',
+  wallRaffleEyeline: 'Lucky Draw Showup',
+  wallRaffleTitle: '행운권 추첨',
 }
 
 const fallbackTeams: Team[] = [
@@ -271,7 +320,7 @@ const fallbackTeams: Team[] = [
     logoFile: '',
     baseStars: 112,
     baseVoters: 41,
-    color: '#D05A67',
+    color: '#D85A6A',
     logo: 'beam',
     totalStars: 112,
     voters: 41,
@@ -303,7 +352,7 @@ const fallbackTeams: Team[] = [
     logoFile: '',
     baseStars: 91,
     baseVoters: 35,
-    color: '#A66B2A',
+    color: '#A67835',
     logo: 'wave',
     totalStars: 91,
     voters: 35,
@@ -319,7 +368,7 @@ const fallbackTeams: Team[] = [
     logoFile: '',
     baseStars: 88,
     baseVoters: 33,
-    color: '#17816E',
+    color: '#007C73',
     logo: 'core',
     totalStars: 88,
     voters: 33,
@@ -335,7 +384,7 @@ const fallbackTeams: Team[] = [
     logoFile: '',
     baseStars: 76,
     baseVoters: 29,
-    color: '#6A4FB3',
+    color: '#6F58C9',
     logo: 'grid',
     totalStars: 76,
     voters: 29,
@@ -351,7 +400,7 @@ const fallbackTeams: Team[] = [
     logoFile: '',
     baseStars: 73,
     baseVoters: 27,
-    color: '#D5643A',
+    color: '#E06B3D',
     logo: 'wave',
     totalStars: 73,
     voters: 27,
@@ -367,7 +416,7 @@ const fallbackTeams: Team[] = [
     logoFile: '',
     baseStars: 69,
     baseVoters: 25,
-    color: '#4F6B4A',
+    color: '#52734D',
     logo: 'beam',
     totalStars: 69,
     voters: 25,
@@ -383,7 +432,7 @@ const fallbackTeams: Team[] = [
     logoFile: '',
     baseStars: 62,
     baseVoters: 23,
-    color: '#C24D86',
+    color: '#C44B8E',
     logo: 'orbit',
     totalStars: 62,
     voters: 23,
@@ -399,7 +448,7 @@ const fallbackTeams: Team[] = [
     logoFile: '',
     baseStars: 57,
     baseVoters: 22,
-    color: '#46515F',
+    color: '#4C5968',
     logo: 'core',
     totalStars: 57,
     voters: 22,
@@ -437,6 +486,7 @@ const fallbackState: EventState = {
     starBudget: DEFAULT_STAR_BUDGET,
     durationMinutes: DEFAULT_DURATION_MINUTES,
     minScore: DEFAULT_MIN_SCORE,
+    cheerNameMode: 'masked',
   },
   copy: fallbackCopy,
 }
@@ -522,7 +572,7 @@ function Header({ mode, connection, state }: { mode: AppMode; connection: Connec
           V
         </div>
         <div>
-            <p className="eyeline">{mode === 'admin' ? state.copy.adminEyeline : mode === 'wall' ? 'Audience Wall' : state.copy.audienceEyeline}</p>
+            <p className="eyeline">{mode === 'admin' ? state.copy.adminEyeline : mode === 'wall' ? state.copy.wallEyeline : state.copy.audienceEyeline}</p>
           <div className="brand-title-row">
             <h1>{state.copy.appTitle}</h1>
             {mode === 'admin' ? <span className="admin-console-badge">운영 콘솔</span> : null}
@@ -808,7 +858,7 @@ function VoteView({
                           <strong>{team.name}</strong>
                           <span>{team.title}</span>
                         </div>
-                        <small>{expanded ? '닫기' : '응원 메시지'}</small>
+                        <small>{expanded ? '닫기' : state.copy.cheerButtonLabel}</small>
                       </button>
 
                       <div className="team-star-picker" aria-label={`${team.name}에 준 별 ${myStars}개`}>
@@ -925,6 +975,7 @@ function AdminView({
   const starBudget = getStarBudget(state)
   const durationMinutes = getDurationMinutes(state)
   const minScore = getMinScore(state)
+  const cheerNameMode = getCheerNameMode(state)
   const totalRegistered = state.participants.length
   const totalDynamicVoters = state.participants.filter((person) => sumStars(person.allocations) > 0).length
   const totalDynamicStars = state.participants.reduce((sum, person) => sum + sumStars(person.allocations), 0)
@@ -956,6 +1007,7 @@ function AdminView({
       starBudget: data.get('starBudget'),
       durationMinutes: data.get('durationMinutes'),
       minScore: data.get('minScore'),
+      cheerNameMode: data.get('cheerNameMode'),
     })
   }
 
@@ -1036,7 +1088,7 @@ function AdminView({
         </div>
         <form
           className="control-grid"
-          key={`${starBudget}:${durationMinutes}:${minScore}`}
+          key={`${starBudget}:${durationMinutes}:${minScore}:${cheerNameMode}`}
           onSubmit={(event) => {
             event.preventDefault()
             applySettings(event.currentTarget)
@@ -1078,6 +1130,13 @@ function AdminView({
               />
               <em>분</em>
             </div>
+          </label>
+          <label>
+            <span>송출 이름 표시</span>
+            <select name="cheerNameMode" defaultValue={cheerNameMode}>
+              <option value="masked">익명모드</option>
+              <option value="real">실명모드</option>
+            </select>
           </label>
           <button type="submit">
             <Clock3 size={16} />
@@ -1168,6 +1227,7 @@ function PublicWallView({
     () => new URLSearchParams(window.location.search).get('showCheer') === '1',
   )
   const starBudget = getStarBudget(state)
+  const cheerNameMode = getCheerNameMode(state)
   const totalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
   const visibleCheers = state.cheers.filter((message) => !message.hidden)
   const selectedTeam = selectedTeamId === 'all' ? null : state.teams.find((team) => team.id === selectedTeamId) ?? null
@@ -1197,36 +1257,29 @@ function PublicWallView({
 
       <section className="public-wall-shell" aria-label="관객 송출 보드">
         <div className="public-wall-header">
-          <div className="public-wall-title">
-            <h2>실시간 현황</h2>
-          </div>
           <div className="public-wall-metrics" aria-label="관객 공개 지표">
             <div>
-              <span>누적 별</span>
+              <span>{state.copy.wallMetricStars}</span>
               <strong>{totalStars}</strong>
             </div>
             <div>
-              <span>응원 메시지</span>
+              <span>{state.copy.wallMetricCheers}</span>
               <strong>{visibleCheers.length}</strong>
-            </div>
-            <div>
-              <span>참여 팀</span>
-              <strong>{state.teams.filter((team) => team.totalStars > 0).length}</strong>
             </div>
           </div>
           <div className="public-wall-actions">
             <button type="button" className={wallPanel === 'overview' ? 'active' : ''} onClick={() => setWallPanel('overview')}>
-              실시간 현황
+              {state.copy.wallOverviewLabel}
             </button>
             <button type="button" className={wallPanel === 'cheer' ? 'active' : ''} onClick={() => setWallPanel('cheer')}>
-              응원메세지
+              {state.copy.wallCheerLabel}
             </button>
             <button type="button" className={wallPanel === 'raffle' ? 'active' : ''} onClick={() => setWallPanel('raffle')}>
-              행운권추첨
+              {state.copy.wallRaffleLabel}
             </button>
             <button type="button" onClick={() => setShowCheerConstellation(true)}>
               <Sparkles size={17} />
-              말풍선 Showup
+              {state.copy.wallShowupLabel}
             </button>
           </div>
         </div>
@@ -1235,8 +1288,8 @@ function PublicWallView({
           <section className="public-raffle-board" aria-label="관객 행운권 추첨 쇼업">
             <div className="wall-panel-toolbar">
               <div>
-                <p className="section-kicker">Lucky Draw Showup</p>
-                <h2>행운권 추첨</h2>
+                <p className="section-kicker">{state.copy.wallRaffleEyeline}</p>
+                <h2>{state.copy.wallRaffleTitle}</h2>
               </div>
               <button type="button" onClick={() => setWallPanel('overview')}>
                 <X size={16} />
@@ -1263,10 +1316,10 @@ function PublicWallView({
               <section className="public-arena-board" aria-label="실시간 별 현황">
                 <div className="section-heading compact">
                   <div>
-                    <p className="section-kicker">Live Arena Wall</p>
-                    <h2>실시간 별 현황</h2>
+                    <p className="section-kicker">{state.copy.wallArenaEyeline}</p>
+                    <h2>{state.copy.wallArenaTitle}</h2>
                   </div>
-                  {selectedTeam ? <span className="selected-team-note">{selectedTeam.name} 응원 보기</span> : null}
+                  {selectedTeam ? <span className="selected-team-note">{selectedTeam.name} {state.copy.wallSelectedCheerSuffix} 보기</span> : null}
                 </div>
                 <div className="public-ranking-list">
                   {state.teams.map((team) => {
@@ -1281,6 +1334,7 @@ function PublicWallView({
                         showVoteAuthor={false}
                         showScoreStack={false}
                         showEventLabel={false}
+                        showMembersInline
                         selected={selectedTeamId === team.id}
                         onSelect={() => selectTeamMessages(team.id)}
                       />
@@ -1294,6 +1348,7 @@ function PublicWallView({
               state={state}
               selectedTeamId={selectedTeamId}
               onSelectAll={() => setSelectedTeamId('all')}
+              cheerNameMode={cheerNameMode}
               large={wallPanel === 'cheer'}
             />
           </div>
@@ -1307,11 +1362,13 @@ function PublicCheerBoard({
   state,
   selectedTeamId,
   onSelectAll,
+  cheerNameMode,
   large = false,
 }: {
   state: EventState
   selectedTeamId: string
   onSelectAll: () => void
+  cheerNameMode: CheerNameMode
   large?: boolean
 }) {
   const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams])
@@ -1322,11 +1379,14 @@ function PublicCheerBoard({
   const selectedTeam = selectedTeamId === 'all' ? null : teamMap.get(selectedTeamId)
 
   return (
-    <section className={`public-cheer-board ${large ? 'large' : ''}`} aria-label="응원 메시지 보드">
+    <section
+      className={`public-cheer-board ${large ? 'large' : ''} ${selectedTeam ? 'has-team-preview' : ''}`}
+      aria-label="응원 메시지 보드"
+    >
       <div className="section-heading compact">
         <div>
-          <p className="section-kicker">Cheer Board</p>
-          <h2>{selectedTeam ? `${selectedTeam.name} 응원 메시지` : '응원 메시지'}</h2>
+          <p className="section-kicker">{state.copy.wallCheerEyeline}</p>
+          <h2>{selectedTeam ? `${selectedTeam.name} ${state.copy.wallSelectedCheerSuffix}` : state.copy.wallCheerTitle}</h2>
         </div>
         <button type="button" className="panel-open-button" onClick={onSelectAll}>
           전체
@@ -1337,11 +1397,15 @@ function PublicCheerBoard({
         {selectedCheers.length ? (
           selectedCheers.map((message) => {
             const team = teamMap.get(message.teamId) ?? state.teams[0]
+            const authorLabel = formatCheerAuthor(message.author, cheerNameMode)
             return (
               <article className="public-cheer-message" key={message.id} style={{ '--team-color': team.color } as CSSProperties}>
-                <strong>{team.name}</strong>
+                <strong>
+                  {authorLabel}
+                  <span> ==&gt; </span>
+                  {team.name}
+                </strong>
                 <p>{message.text}</p>
-                <small>{message.author}</small>
               </article>
             )
           })
@@ -1349,6 +1413,22 @@ function PublicCheerBoard({
           <p className="empty-state">아직 표시할 응원 메시지가 없습니다.</p>
         )}
       </div>
+      {selectedTeam ? (
+        <button
+          type="button"
+          className="selected-team-preview"
+          style={{ '--team-color': selectedTeam.color } as CSSProperties}
+          onClick={onSelectAll}
+          aria-label={`${selectedTeam.name} 선택 해제`}
+        >
+          <LogoMark team={selectedTeam} />
+          <div>
+            <strong>{selectedTeam.name}</strong>
+            <p>{selectedTeam.title}</p>
+            <span>{selectedTeam.members.length ? selectedTeam.members.join(' · ') : '팀원 미등록'}</span>
+          </div>
+        </button>
+      ) : null}
     </section>
   )
 }
@@ -1429,6 +1509,7 @@ function TeamRow({
   showVoteAuthor = true,
   showScoreStack = true,
   showEventLabel = true,
+  showMembersInline = false,
   selected = false,
   onSelect,
 }: {
@@ -1440,6 +1521,7 @@ function TeamRow({
   showVoteAuthor?: boolean
   showScoreStack?: boolean
   showEventLabel?: boolean
+  showMembersInline?: boolean
   selected?: boolean
   onSelect?: () => void
 }) {
@@ -1447,6 +1529,7 @@ function TeamRow({
   const rankDelta = team.rankDelta ?? 0
   const rankMoveClass = rankDelta > 0 ? 'up' : rankDelta < 0 ? 'down' : 'same'
   const normalizedScore = formatPointScore(team.score ?? team.share / 10)
+  const scoreShare = clamp(((team.score ?? 0) / 10) * 100, 0, 100)
   const progressLabel = showScore ? `${normalizedScore}점` : `${team.totalStars}★`
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!onSelect) return
@@ -1458,7 +1541,7 @@ function TeamRow({
 
   return (
     <div
-      className={`team-row ${compact ? 'compact-row' : ''} ${showScoreStack ? '' : 'no-score-stack'} ${onSelect ? 'is-clickable' : ''} ${selected ? 'is-selected' : ''}`}
+      className={`team-row ${compact ? 'compact-row' : ''} ${showScoreStack ? '' : 'no-score-stack'} rank-${rankMoveClass} ${onSelect ? 'is-clickable' : ''} ${selected ? 'is-selected' : ''}`}
       role={onSelect ? 'button' : undefined}
       tabIndex={onSelect ? 0 : undefined}
       onClick={onSelect}
@@ -1466,7 +1549,7 @@ function TeamRow({
       style={
         {
           '--team-color': team.color,
-          '--share': `${team.share}%`,
+          '--share': `${scoreShare}%`,
         } as CSSProperties
       }
     >
@@ -1477,7 +1560,10 @@ function TeamRow({
       <LogoMark team={team} />
       <div className="team-meta">
         <div>
-          <h3>{team.name}</h3>
+          <h3>
+            {team.name}
+            {showMembersInline && team.members.length ? <span className="team-members-inline">{team.members.join(' · ')}</span> : null}
+          </h3>
           <p>{team.title}</p>
         </div>
         <div className="progress-line">
@@ -2196,6 +2282,7 @@ function CheerConstellation({
 
       return {
         ...group,
+        authorGroup: participant?.group,
         latestMessage: group.messages[0],
         team,
         size,
@@ -2418,10 +2505,11 @@ function CheerConstellation({
         })}
 
         {groupedBubbles.map(
-          ({ key, latestMessage, messages, author, team, x, y, size, starCount, depth, delay, drift, breathe, wobble }) => {
+          ({ key, latestMessage, messages, author, authorGroup, team, x, y, size, starCount, depth, delay, drift, breathe, wobble }) => {
             const position = dragPositions[key] ?? { x, y }
             const isOpen = openMessageId === latestMessage.id
             const isDragging = draggingKey === key
+            const displayPosition = isOpen ? constrainOpenBubblePoint(position) : position
 
             return (
               <button
@@ -2438,8 +2526,8 @@ function CheerConstellation({
                 style={
                   {
                     '--team-color': team.color,
-                    '--x': `${position.x}%`,
-                    '--y': `${position.y}%`,
+                    '--x': `${displayPosition.x}%`,
+                    '--y': `${displayPosition.y}%`,
                     '--bubble-size': `${size}px`,
                     '--delay': delay,
                     '--drift': drift,
@@ -2453,7 +2541,10 @@ function CheerConstellation({
                   <span className="sealed-star" aria-hidden="true">★</span>
                 ) : (
                   <>
-                    <strong>{author}</strong>
+                    <strong>
+                      {author}
+                      {authorGroup ? <span>{authorGroup}</span> : null}
+                    </strong>
                     <span className="bubble-message-list">
                       {messages.slice(0, 5).map((message) => (
                         <span key={message.id}>{message.text}</span>
@@ -2634,30 +2725,68 @@ function RaffleDetailPanel({
     : [{ id: 'standby', name: '후보 대기', group: '', allocations: {}, cheered: false, updatedAt: 0 }]
   const winners = !isDrawing ? (state.lastRaffle?.winners ?? []) : []
   const hasWinners = winners.length > 0
+  const candidateBalls = Array.from({ length: 14 }, (_, index) => rollingNames[index % rollingNames.length])
+  const targetCandidates = Array.from({ length: 6 }, (_, index) => rollingNames[index % rollingNames.length])
 
   return (
     <div className={`raffle-detail ${publicMode ? 'public-mode' : ''}`}>
       <section className={`raffle-showcase style-${raffleStyle} ${isDrawing ? 'drawing' : ''} ${hasWinners ? 'has-winners' : ''}`} aria-live="polite">
         <CelebrationConfetti active={hasWinners} seedKey={state.lastRaffle?.createdAt ?? 0} />
-        <div className="raffle-globe" aria-hidden="true">
-          {Array.from({ length: 18 }).map((_, index) => (
-            <span key={index} style={{ '--i': index } as CSSProperties}>
-              {raffleStyle === 'lotto' ? ((index % 9) + 1) : index % 3 === 0 ? '★' : index % 3 === 1 ? '◆' : '•'}
-            </span>
-          ))}
-          <div className="raffle-core">
-            <Trophy size={54} />
-            <strong>{isDrawing ? '추첨 중' : state.lastRaffle?.winners.length ? '당첨 확정' : '대기'}</strong>
+        {raffleStyle === 'lotto' ? (
+          <div className="lotto-machine" aria-hidden="true">
+            <div className="lotto-bowl">
+              {candidateBalls.map((person, index) => (
+                <span key={`${person.id}-ball-${index}`} style={{ '--i': index } as CSSProperties}>
+                  <strong>{person.name}</strong>
+                </span>
+              ))}
+            </div>
+            <div className="lotto-neck" />
+            <div className="lotto-result-ball">
+              <strong>{hasWinners ? winners[0]?.name : isDrawing ? '선정 중' : '대기'}</strong>
+            </div>
           </div>
-        </div>
-
-        <div className="raffle-reel-large" aria-hidden="true">
-          <div>
-            {[...rollingNames, ...rollingNames, ...rollingNames].map((person, index) => (
-              <span key={`${person.id}-${index}`}>{person.group ? `${person.name} · ${person.group}` : person.name}</span>
+        ) : raffleStyle === 'target' ? (
+          <div className="target-showcase" aria-hidden="true">
+            <div className="arrow-track">
+              <span className="arrow-shaft" />
+              <span className="arrow-head" />
+            </div>
+            <div className="target-board">
+              {targetCandidates.map((person, index) => (
+                <span key={`${person.id}-target-${index}`} style={{ '--i': index } as CSSProperties}>
+                  {person.name}
+                </span>
+              ))}
+              <div className="target-center">
+                <Trophy size={46} />
+                <strong>{hasWinners ? winners[0]?.name : isDrawing ? '조준 중' : '대기'}</strong>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="raffle-globe" aria-hidden="true">
+            {Array.from({ length: 18 }).map((_, index) => (
+              <span key={index} style={{ '--i': index } as CSSProperties}>
+                {index % 3 === 0 ? '★' : index % 3 === 1 ? '◆' : '•'}
+              </span>
             ))}
+            <div className="raffle-core">
+              <Trophy size={54} />
+              <strong>{isDrawing ? '추첨 중' : state.lastRaffle?.winners.length ? '당첨 확정' : '대기'}</strong>
+            </div>
           </div>
-        </div>
+        )}
+
+        {raffleStyle === 'lotto' ? null : (
+          <div className="raffle-reel-large" aria-hidden="true">
+            <div>
+              {[...rollingNames, ...rollingNames, ...rollingNames].map((person, index) => (
+                <span key={`${person.id}-${index}`}>{person.group ? `${person.name} · ${person.group}` : person.name}</span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {hasWinners ? (
           <div className="raffle-winner-showcase">
@@ -3601,6 +3730,20 @@ function getMinScore(state: EventState) {
   return clamp(Number(state.settings.minScore ?? DEFAULT_MIN_SCORE), 0, 9.9)
 }
 
+function getCheerNameMode(state: EventState): CheerNameMode {
+  return state.settings.cheerNameMode === 'real' ? 'real' : 'masked'
+}
+
+function formatCheerAuthor(name: string, mode: CheerNameMode) {
+  const cleanName = name.trim()
+  if (!cleanName) return mode === 'real' ? '익명' : '익*'
+  if (mode === 'real') return cleanName
+
+  const letters = Array.from(cleanName.replace(/\s+/g, ''))
+  if (!letters.length) return '익*'
+  return `${letters[0]}${'*'.repeat(Math.max(1, Math.min(letters.length - 1, 3)))}`
+}
+
 function formatCopy(template: string, values: Record<string, string | number>) {
   return template.replace(/\{(\w+)\}/g, (match, key) => String(values[key] ?? match))
 }
@@ -3627,21 +3770,22 @@ function formatMessageTime(timestamp: number) {
 function buildTerritoryCells(teams: Team[], centers: Map<string, Point>): TerritoryCell[] {
   const width = 1000
   const height = 600
-  const maxStars = Math.max(...teams.map((team) => team.totalStars), 1)
-  const minStars = Math.min(...teams.map((team) => team.totalStars), maxStars)
-  const starRange = Math.max(1, maxStars - minStars)
+  const maxStars = Math.max(...teams.map((team) => team.totalStars), 0)
+  const baselineStars = Math.max(4, Math.round(maxStars * 0.18))
+  const maxWeightedStars = Math.max(...teams.map((team) => team.totalStars + baselineStars), baselineStars)
 
   const sites = teams.map((team) => {
     const center = centers.get(team.id) ?? { x: 50, y: 50 }
-    const normalized = (team.totalStars - minStars) / starRange
-    const radius = 122 + normalized * 86
+    const weightedStars = team.totalStars + baselineStars
+    const normalized = Math.sqrt(weightedStars / maxWeightedStars)
+    const radius = 88 + normalized * 172
 
     return {
       team,
       x: (center.x / 100) * width,
       y: (center.y / 100) * height,
       power: radius * radius,
-      share: Math.max(0.16, team.totalStars / maxStars),
+      share: Math.max(0.14, weightedStars / maxWeightedStars),
     }
   })
 
@@ -3712,9 +3856,9 @@ function layoutBubbleGroups(items: BubbleGroupInput[], centers: Map<string, Poin
       px: initial.x,
       py: initial.y,
       depth: `${index % 2 ? 'near' : 'far'}`,
-      delay: `${-(index % 13) * 0.28}s`,
-      drift: `${4.8 + (index % 7) * 0.52}s`,
-      breathe: `${3.2 + (index % 5) * 0.36}s`,
+      delay: `${-(index % 13) * 0.18}s`,
+      drift: `${2.5 + (index % 7) * 0.28}s`,
+      breathe: `${2.1 + (index % 5) * 0.22}s`,
       wobble: `${index % 2 ? -1 : 1}`,
     }
   })
@@ -3836,6 +3980,13 @@ function constrainPercentPointToTerritory(
   return {
     x: clamp((finalPoint.x / 1000) * 100, 4.5, 95.5),
     y: clamp((finalPoint.y / 600) * 100, 7, 93),
+  }
+}
+
+function constrainOpenBubblePoint(point: Point) {
+  return {
+    x: clamp(point.x, 17, 83),
+    y: clamp(point.y, 20, 80),
   }
 }
 

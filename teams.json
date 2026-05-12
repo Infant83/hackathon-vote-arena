@@ -17,7 +17,22 @@
     "raffleRemovedDisqualified": "관리자에 의해 응원 메시지가 제거되어 경품 추첨 응모 조건이 충족되지 않았습니다. 별을 준 팀에 새 응원 메시지를 작성해주세요.",
     "voteClosedAlert": "투표가 마감되어 별을 추가하거나 메시지를 보낼 수 없습니다.",
     "registrationReady": "같은 이름과 Let's ID로 다시 접속하면 기존 참여 내역을 이어갑니다. 이메일을 입력해도 @ 뒤 주소는 사용하지 않습니다.",
-    "registrationConnecting": "행사 서버에 연결하는 중입니다."
+    "registrationConnecting": "행사 서버에 연결하는 중입니다.",
+    "cheerButtonLabel": "응원 메시지 보내기",
+    "wallEyeline": "Audience Wall",
+    "wallMetricStars": "누적 별",
+    "wallMetricCheers": "응원 메시지",
+    "wallOverviewLabel": "실시간 현황",
+    "wallCheerLabel": "응원메세지",
+    "wallRaffleLabel": "행운권추첨",
+    "wallShowupLabel": "말풍선 Showup",
+    "wallArenaEyeline": "Live Arena Wall",
+    "wallArenaTitle": "실시간 별 현황",
+    "wallCheerEyeline": "Cheer Board",
+    "wallCheerTitle": "응원 메시지",
+    "wallSelectedCheerSuffix": "응원 메시지",
+    "wallRaffleEyeline": "Lucky Draw Showup",
+    "wallRaffleTitle": "행운권 추첨"
   },
   "teams": [
     {
@@ -48,7 +63,7 @@
         "윤태오"
       ],
       "logoFile": "",
-      "color": "#D05A67",
+      "color": "#D85A6A",
       "logo": "beam",
       "baseStars": 112,
       "baseVoters": 41,
@@ -82,7 +97,7 @@
         "신가은"
       ],
       "logoFile": "",
-      "color": "#A66B2A",
+      "color": "#A67835",
       "logo": "wave",
       "baseStars": 91,
       "baseVoters": 35,
@@ -99,7 +114,7 @@
         "임채원"
       ],
       "logoFile": "",
-      "color": "#17816E",
+      "color": "#007C73",
       "logo": "core",
       "baseStars": 88,
       "baseVoters": 33,
@@ -116,7 +131,7 @@
         "허준영"
       ],
       "logoFile": "",
-      "color": "#6A4FB3",
+      "color": "#6F58C9",
       "logo": "grid",
       "baseStars": 76,
       "baseVoters": 29,
@@ -133,7 +148,7 @@
         "류현우"
       ],
       "logoFile": "",
-      "color": "#D5643A",
+      "color": "#E06B3D",
       "logo": "wave",
       "baseStars": 73,
       "baseVoters": 27,
@@ -150,7 +165,7 @@
         "차서우"
       ],
       "logoFile": "",
-      "color": "#4F6B4A",
+      "color": "#52734D",
       "logo": "beam",
       "baseStars": 69,
       "baseVoters": 25,
@@ -167,7 +182,7 @@
         "안소율"
       ],
       "logoFile": "",
-      "color": "#C24D86",
+      "color": "#C44B8E",
       "logo": "orbit",
       "baseStars": 62,
       "baseVoters": 23,
@@ -184,7 +199,7 @@
         "전하늘"
       ],
       "logoFile": "",
-      "color": "#46515F",
+      "color": "#4C5968",
       "logo": "core",
       "baseStars": 57,
       "baseVoters": 22,

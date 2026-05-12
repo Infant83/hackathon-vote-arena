@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const distDir = path.join(__dirname, 'dist')
 const port = Number(process.env.PORT || 5173)
 const host = process.env.HOST || '0.0.0.0'
-const defaultStarBudget = 10
+const defaultStarBudget = 20
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const maxStarsPerTeam = 10
@@ -39,6 +39,21 @@ const defaultCopy = {
   voteClosedAlert: '투표가 마감되어 별을 추가하거나 메시지를 보낼 수 없습니다.',
   registrationReady: "같은 이름과 Let's ID로 다시 접속하면 기존 참여 내역을 이어갑니다. 이메일을 입력해도 @ 뒤 주소는 사용하지 않습니다.",
   registrationConnecting: '행사 서버에 연결하는 중입니다.',
+  cheerButtonLabel: '응원 메시지 보내기',
+  wallEyeline: 'Audience Wall',
+  wallMetricStars: '누적 별',
+  wallMetricCheers: '응원 메시지',
+  wallOverviewLabel: '실시간 현황',
+  wallCheerLabel: '응원메세지',
+  wallRaffleLabel: '행운권추첨',
+  wallShowupLabel: '말풍선 Showup',
+  wallArenaEyeline: 'Live Arena Wall',
+  wallArenaTitle: '실시간 별 현황',
+  wallCheerEyeline: 'Cheer Board',
+  wallCheerTitle: '응원 메시지',
+  wallSelectedCheerSuffix: '응원 메시지',
+  wallRaffleEyeline: 'Lucky Draw Showup',
+  wallRaffleTitle: '행운권 추첨',
 }
 
 const defaultTeams = [
@@ -63,7 +78,7 @@ const defaultTeams = [
     logoFile: '',
     baseStars: 112,
     baseVoters: 41,
-    color: '#D05A67',
+    color: '#D85A6A',
     logo: 'beam',
   },
   {
@@ -87,7 +102,7 @@ const defaultTeams = [
     logoFile: '',
     baseStars: 91,
     baseVoters: 35,
-    color: '#A66B2A',
+    color: '#A67835',
     logo: 'wave',
   },
   {
@@ -99,7 +114,7 @@ const defaultTeams = [
     logoFile: '',
     baseStars: 88,
     baseVoters: 33,
-    color: '#17816E',
+    color: '#007C73',
     logo: 'core',
   },
   {
@@ -111,7 +126,7 @@ const defaultTeams = [
     logoFile: '',
     baseStars: 76,
     baseVoters: 29,
-    color: '#6A4FB3',
+    color: '#6F58C9',
     logo: 'grid',
   },
   {
@@ -123,7 +138,7 @@ const defaultTeams = [
     logoFile: '',
     baseStars: 73,
     baseVoters: 27,
-    color: '#D5643A',
+    color: '#E06B3D',
     logo: 'wave',
   },
   {
@@ -135,7 +150,7 @@ const defaultTeams = [
     logoFile: '',
     baseStars: 69,
     baseVoters: 25,
-    color: '#4F6B4A',
+    color: '#52734D',
     logo: 'beam',
   },
   {
@@ -147,7 +162,7 @@ const defaultTeams = [
     logoFile: '',
     baseStars: 62,
     baseVoters: 23,
-    color: '#C24D86',
+    color: '#C44B8E',
     logo: 'orbit',
   },
   {
@@ -159,7 +174,7 @@ const defaultTeams = [
     logoFile: '',
     baseStars: 57,
     baseVoters: 22,
-    color: '#46515F',
+    color: '#4C5968',
     logo: 'core',
   },
 ]
@@ -185,6 +200,7 @@ let settings = {
   starBudget: defaultStarBudget,
   durationMinutes: defaultDurationMinutes,
   minScore: defaultMinScore,
+  cheerNameMode: 'masked',
 }
 
 function loadConfig() {
@@ -662,6 +678,10 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
+function normalizeCheerNameMode(value, fallback = 'masked') {
+  return value === 'real' ? 'real' : value === 'masked' ? 'masked' : fallback
+}
+
 function parseCookies(cookieHeader = '') {
   return Object.fromEntries(
     cookieHeader
@@ -1007,6 +1027,7 @@ async function handleApi(request, response, url) {
       starBudget: nextStarBudget,
       durationMinutes: nextDurationMinutes,
       minScore: nextMinScore,
+      cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, settings.cheerNameMode),
     }
     normalizeAllParticipantAllocations()
     closed = false

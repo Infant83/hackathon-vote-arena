@@ -1,13 +1,13 @@
 import rawConfig from '../teams.json'
 
-const defaultStarBudget = 10
+const defaultStarBudget = 20
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const maxStarsPerTeam = 10
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const snapshotKey = 'event-state-v1'
-const settingsVersion = 3
+const settingsVersion = 4
 
 type Env = {
   ARENA_ROOM: DurableObjectNamespace
@@ -99,6 +99,7 @@ type Settings = {
   starBudget: number
   durationMinutes: number
   minScore: number
+  cheerNameMode: 'masked' | 'real'
 }
 
 type Snapshot = {
@@ -143,6 +144,21 @@ const defaultCopy = {
   voteClosedAlert: '투표가 마감되어 별을 추가하거나 메시지를 보낼 수 없습니다.',
   registrationReady: "같은 이름과 Let's ID로 다시 접속하면 기존 참여 내역을 이어갑니다. 이메일을 입력해도 @ 뒤 주소는 사용하지 않습니다.",
   registrationConnecting: '행사 서버에 연결하는 중입니다.',
+  cheerButtonLabel: '응원 메시지 보내기',
+  wallEyeline: 'Audience Wall',
+  wallMetricStars: '누적 별',
+  wallMetricCheers: '응원 메시지',
+  wallOverviewLabel: '실시간 현황',
+  wallCheerLabel: '응원메세지',
+  wallRaffleLabel: '행운권추첨',
+  wallShowupLabel: '말풍선 Showup',
+  wallArenaEyeline: 'Live Arena Wall',
+  wallArenaTitle: '실시간 별 현황',
+  wallCheerEyeline: 'Cheer Board',
+  wallCheerTitle: '응원 메시지',
+  wallSelectedCheerSuffix: '응원 메시지',
+  wallRaffleEyeline: 'Lucky Draw Showup',
+  wallRaffleTitle: '행운권 추첨',
 }
 
 const defaultTeams: TeamConfig[] = [
@@ -200,6 +216,7 @@ export class ArenaRoom {
     starBudget: defaultStarBudget,
     durationMinutes: defaultDurationMinutes,
     minScore: defaultMinScore,
+    cheerNameMode: 'masked',
   }
   private teams: TeamConfig[] = initialConfig.teams
   private copy: EventCopy = initialConfig.copy
@@ -263,6 +280,7 @@ export class ArenaRoom {
       starBudget: clamp(migratedStarBudget, 1, 20),
       durationMinutes: clamp(Math.floor(Number(snapshot.settings?.durationMinutes || defaultDurationMinutes)), 1, 240),
       minScore: clamp(Number(snapshot.settings?.minScore ?? defaultMinScore), 0, 9.9),
+      cheerNameMode: normalizeCheerNameMode(snapshot.settings?.cheerNameMode),
     }
   }
 
@@ -424,6 +442,7 @@ export class ArenaRoom {
         starBudget: clamp(Math.floor(Number(body.starBudget) || this.settings.starBudget), 1, 20),
         durationMinutes: clamp(Math.floor(Number(body.durationMinutes) || this.settings.durationMinutes), 1, 240),
         minScore: clamp(Number(body.minScore ?? this.settings.minScore), 0, 9.9),
+        cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, this.settings.cheerNameMode),
       }
       this.normalizeAllParticipantAllocations()
       this.closesAt = Date.now() + this.settings.durationMinutes * 60 * 1000
@@ -1071,4 +1090,8 @@ function sumStars(allocations: Record<string, number>) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
+}
+
+function normalizeCheerNameMode(value: unknown, fallback: Settings['cheerNameMode'] = 'masked'): Settings['cheerNameMode'] {
+  return value === 'real' ? 'real' : value === 'masked' ? 'masked' : fallback
 }
