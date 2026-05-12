@@ -1,12 +1,13 @@
 import rawConfig from '../teams.json'
 
-const defaultStarBudget = 20
+const defaultStarBudget = 10
 const defaultDurationMinutes = 10
+const defaultMinScore = 5
 const maxStarsPerTeam = 10
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const snapshotKey = 'event-state-v1'
-const settingsVersion = 2
+const settingsVersion = 3
 
 type Env = {
   ARENA_ROOM: DurableObjectNamespace
@@ -43,6 +44,7 @@ type TeamState = TeamConfig & {
 type Participant = {
   id: string
   deviceId: string
+  deviceIds?: string[]
   name: string
   group: string
   allocations: Record<string, number>
@@ -96,6 +98,7 @@ type Settings = {
   showScoresToAudience: boolean
   starBudget: number
   durationMinutes: number
+  minScore: number
 }
 
 type Snapshot = {
@@ -127,7 +130,7 @@ const defaultCopy = {
   adminHeroTitle: '관리자 모드에서 실시간 별 현황을 공개합니다.',
   adminHeroSubtitle: '모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.',
   checkInEyeline: 'Check In',
-  checkInTitle: '먼저 이름과 소속(팀명)을 등록하세요.',
+  checkInTitle: "먼저 이름과 Let's ID를 등록하세요.",
   teamVoteEyeline: 'Team Vote',
   teamVoteTitle: '팀별 별 보내기',
   raffleReady: '추첨 자동응모 완료',
@@ -138,7 +141,7 @@ const defaultCopy = {
   raffleRemovedDisqualified:
     '관리자에 의해 응원 메시지가 제거되어 경품 추첨 응모 조건이 충족되지 않았습니다. 별을 준 팀에 새 응원 메시지를 작성해주세요.',
   voteClosedAlert: '투표가 마감되어 별을 추가하거나 메시지를 보낼 수 없습니다.',
-  registrationReady: '같은 기기에서 같은 이름과 소속으로 다시 접속하면 기존 참여 내역을 이어갑니다.',
+  registrationReady: "같은 이름과 Let's ID로 다시 접속하면 기존 참여 내역을 이어갑니다. 이메일을 입력해도 @ 뒤 주소는 사용하지 않습니다.",
   registrationConnecting: '행사 서버에 연결하는 중입니다.',
 }
 
@@ -196,6 +199,7 @@ export class ArenaRoom {
     showScoresToAudience: true,
     starBudget: defaultStarBudget,
     durationMinutes: defaultDurationMinutes,
+    minScore: defaultMinScore,
   }
   private teams: TeamConfig[] = initialConfig.teams
   private copy: EventCopy = initialConfig.copy
@@ -252,12 +256,13 @@ export class ArenaRoom {
     const persistedSettingsVersion = Number(snapshot.settingsVersion || 1)
     const persistedStarBudget = Math.floor(Number(snapshot.settings?.starBudget || defaultStarBudget))
     const migratedStarBudget =
-      persistedSettingsVersion < settingsVersion && persistedStarBudget === 5 ? defaultStarBudget : persistedStarBudget
+      persistedSettingsVersion < settingsVersion && [5, 20].includes(persistedStarBudget) ? defaultStarBudget : persistedStarBudget
 
     this.settings = {
       showScoresToAudience: Boolean(snapshot.settings?.showScoresToAudience ?? true),
       starBudget: clamp(migratedStarBudget, 1, 20),
       durationMinutes: clamp(Math.floor(Number(snapshot.settings?.durationMinutes || defaultDurationMinutes)), 1, 240),
+      minScore: clamp(Number(snapshot.settings?.minScore ?? defaultMinScore), 0, 9.9),
     }
   }
 
@@ -418,6 +423,7 @@ export class ArenaRoom {
             : this.settings.showScoresToAudience,
         starBudget: clamp(Math.floor(Number(body.starBudget) || this.settings.starBudget), 1, 20),
         durationMinutes: clamp(Math.floor(Number(body.durationMinutes) || this.settings.durationMinutes), 1, 240),
+        minScore: clamp(Number(body.minScore ?? this.settings.minScore), 0, 9.9),
       }
       this.normalizeAllParticipantAllocations()
       this.closesAt = Date.now() + this.settings.durationMinutes * 60 * 1000
@@ -481,11 +487,13 @@ export class ArenaRoom {
       })
       .sort((a, b) => b.totalStars - a.totalStars)
 
-    const maxStars = Math.max(...teamStats.map((team) => team.totalStars), 0)
+    const starTotals = teamStats.map((team) => team.totalStars)
+    const maxStars = Math.max(...starTotals, 0)
+    const minStars = starTotals.length ? Math.min(...starTotals) : 0
     const rankedTeams: TeamState[] = teamStats.map((team, index) => ({
       ...team,
       rank: index + 1,
-      score: maxStars > 0 ? Math.round((team.totalStars / maxStars) * 100) / 10 : 0,
+      score: calculateLinearScore(team.totalStars, minStars, maxStars, this.settings.minScore),
       share: maxStars > 0 ? Math.max(8, Math.round((team.totalStars / maxStars) * 100)) : 0,
     }))
 
@@ -613,7 +621,7 @@ export class ArenaRoom {
     if (!browserDeviceId) return null
 
     const nextName = sanitizeText(nameValue, 18)
-    const nextGroup = sanitizeText(groupValue, 24)
+    const nextGroup = sanitizeLetsId(groupValue, 48)
     if (!nextName || !nextGroup) return null
 
     const identityKey = getParticipantIdentityKey(browserDeviceId, nextName, nextGroup)
@@ -625,6 +633,7 @@ export class ArenaRoom {
       ({
         id,
         deviceId: browserDeviceId,
+        deviceIds: [browserDeviceId],
         name: nextName,
         group: nextGroup,
         allocations: {},
@@ -633,7 +642,7 @@ export class ArenaRoom {
         updatedAt: Date.now(),
       } satisfies Participant)
 
-    person.deviceId = browserDeviceId
+    attachParticipantDevice(person, browserDeviceId)
     person.name = nextName
     person.group = nextGroup
     person.updatedAt = Date.now()
@@ -644,12 +653,13 @@ export class ArenaRoom {
   private findParticipantByNormalizedIdentity(deviceId: string, name: string, group: string) {
     const browserDeviceId = sanitizeIdentifier(deviceId, 96)
     const normalizedName = normalizeNameIdentity(name, 18)
-    const normalizedGroup = normalizeGroupIdentity(group, 24)
+    const normalizedGroup = normalizeGroupIdentity(group, 48)
 
     for (const person of this.participants.values()) {
-      if (person.deviceId !== browserDeviceId) continue
+      const deviceIds = getParticipantDeviceIds(person)
+      if (deviceIds.includes(browserDeviceId)) return person
       if (normalizeNameIdentity(person.name, 18) !== normalizedName) continue
-      if (normalizeGroupIdentity(person.group, 24) !== normalizedGroup) continue
+      if (normalizeGroupIdentity(person.group, 48) !== normalizedGroup) continue
       return person
     }
 
@@ -900,6 +910,17 @@ function sanitizeIdentifier(value: unknown, maxLength: number) {
     .slice(0, maxLength)
 }
 
+function sanitizeLetsId(value: unknown, maxLength: number) {
+  return String(value || '')
+    .split('@')[0]
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '')
+    .toLocaleLowerCase('en-US')
+    .slice(0, maxLength)
+}
+
 function sanitizeSlug(value: unknown) {
   return String(value || '')
     .trim()
@@ -958,20 +979,39 @@ function normalizeNameIdentity(value: unknown, maxLength: number) {
 }
 
 function normalizeGroupIdentity(value: unknown, maxLength: number) {
-  const compact = sanitizeText(value, maxLength)
+  return sanitizeLetsId(value, maxLength)
     .normalize('NFKC')
     .toLocaleLowerCase('ko-KR')
-    .replace(/[\s\p{P}\p{S}]+/gu, '')
-
-  return compact.replace(/team$/u, '팀')
+    .replace(/\s+/gu, '')
 }
 
-function getParticipantIdentityKey(deviceId: string, name: string, group: string) {
+function getParticipantIdentityKey(_deviceId: string, name: string, group: string) {
   return [
-    sanitizeIdentifier(deviceId, 96),
     normalizeNameIdentity(name, 18),
-    normalizeGroupIdentity(group, 24),
+    normalizeGroupIdentity(group, 48),
   ].join('|')
+}
+
+function getParticipantDeviceIds(person: Participant) {
+  const ids = Array.isArray(person.deviceIds) ? person.deviceIds : []
+  const legacyId = sanitizeIdentifier(person.deviceId, 96)
+  return [...new Set([...ids, legacyId].filter(Boolean))]
+}
+
+function attachParticipantDevice(person: Participant, deviceId: string) {
+  const browserDeviceId = sanitizeIdentifier(deviceId, 96)
+  const deviceIds = getParticipantDeviceIds(person)
+  if (browserDeviceId && !deviceIds.includes(browserDeviceId)) deviceIds.push(browserDeviceId)
+  person.deviceIds = deviceIds
+  person.deviceId = deviceIds[0] || browserDeviceId
+}
+
+function calculateLinearScore(totalStars: number, minStars: number, maxStars: number, minScore: number) {
+  if (maxStars <= 0) return 0
+  if (maxStars === minStars) return 10
+
+  const normalized = (totalStars - minStars) / (maxStars - minStars)
+  return Math.round((minScore + normalized * (10 - minScore)) * 10) / 10
 }
 
 function hashIdentity(value: string) {

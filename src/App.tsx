@@ -50,6 +50,7 @@ type Team = {
 type Participant = {
   id: string
   deviceId?: string
+  deviceIds?: string[]
   name: string
   group: string
   allocations: Record<string, number>
@@ -109,6 +110,7 @@ type EventState = {
     showScoresToAudience: boolean
     starBudget: number
     durationMinutes: number
+    minScore: number
   }
   copy: EventCopy
 }
@@ -136,6 +138,7 @@ type EventCopy = {
 
 type RaffleRule = 'all' | 'leader' | 'top3' | 'cheer'
 type ConnectionState = 'connecting' | 'live' | 'offline'
+type AppMode = 'admin' | 'vote' | 'wall'
 type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams'
 type Point = {
   x: number
@@ -170,8 +173,9 @@ type ParticipantSummary = Participant & {
   statusClass: string
 }
 
-const DEFAULT_STAR_BUDGET = 20
+const DEFAULT_STAR_BUDGET = 10
 const DEFAULT_DURATION_MINUTES = 10
+const DEFAULT_MIN_SCORE = 5
 const MAX_STARS_PER_TEAM = 10
 const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
 const copyLabels: Record<keyof EventCopy, string> = {
@@ -210,7 +214,7 @@ const fallbackCopy: EventCopy = {
   adminHeroTitle: '관리자 모드에서 실시간 별 현황을 공개합니다.',
   adminHeroSubtitle: '모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.',
   checkInEyeline: 'Check In',
-  checkInTitle: '먼저 이름과 소속(팀명)을 등록하세요.',
+  checkInTitle: "먼저 이름과 Let's ID를 등록하세요.",
   teamVoteEyeline: 'Team Vote',
   teamVoteTitle: '팀별 별 보내기',
   raffleReady: '추첨 자동응모 완료',
@@ -221,7 +225,7 @@ const fallbackCopy: EventCopy = {
   raffleRemovedDisqualified:
     '관리자에 의해 응원 메시지가 제거되어 경품 추첨 응모 조건이 충족되지 않았습니다. 별을 준 팀에 새 응원 메시지를 작성해주세요.',
   voteClosedAlert: '투표가 마감되어 별을 추가하거나 메시지를 보낼 수 없습니다.',
-  registrationReady: '같은 기기에서 같은 이름과 소속으로 다시 접속하면 기존 참여 내역을 이어갑니다.',
+  registrationReady: "같은 이름과 Let's ID로 다시 접속하면 기존 참여 내역을 이어갑니다. 이메일을 입력해도 @ 뒤 주소는 사용하지 않습니다.",
   registrationConnecting: '행사 서버에 연결하는 중입니다.',
 }
 
@@ -416,6 +420,7 @@ const fallbackState: EventState = {
     showScoresToAudience: true,
     starBudget: DEFAULT_STAR_BUDGET,
     durationMinutes: DEFAULT_DURATION_MINUTES,
+    minScore: DEFAULT_MIN_SCORE,
   },
   copy: fallbackCopy,
 }
@@ -427,8 +432,8 @@ const messageTimeFormatter = new Intl.DateTimeFormat('ko-KR', {
 })
 
 function App() {
-  const mode = window.location.pathname.startsWith('/admin') ? 'admin' : 'vote'
-  const { state, connection, post } = useEventState()
+  const mode = getAppMode()
+  const { state, connection, post } = useEventState(mode)
   const [participantId] = useState(getOrCreateParticipantId)
   const [name, setName] = useState(() => getStoredValue(nameKey))
   const [group, setGroup] = useState(() => getStoredValue(groupKey))
@@ -454,6 +459,8 @@ function App() {
       <Header mode={mode} connection={connection} state={state} />
       {mode === 'admin' ? (
         <AdminView state={state} connection={connection} post={post} />
+      ) : mode === 'wall' ? (
+        <PublicWallView state={state} connection={connection} />
       ) : (
         <VoteView
           state={state}
@@ -474,7 +481,13 @@ function App() {
   )
 }
 
-function Header({ mode, connection, state }: { mode: 'admin' | 'vote'; connection: ConnectionState; state: EventState }) {
+function getAppMode(): AppMode {
+  if (window.location.pathname.startsWith('/admin')) return 'admin'
+  if (window.location.pathname.startsWith('/wall')) return 'wall'
+  return 'vote'
+}
+
+function Header({ mode, connection, state }: { mode: AppMode; connection: ConnectionState; state: EventState }) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -487,13 +500,13 @@ function Header({ mode, connection, state }: { mode: 'admin' | 'vote'; connectio
   const voteUrl = `${window.location.host}/vote`
 
   return (
-    <header className={`topbar ${mode === 'admin' ? 'admin-topbar' : 'audience-topbar'}`} aria-label="행사 상태">
+    <header className={`topbar ${mode === 'admin' ? 'admin-topbar' : 'audience-topbar'} ${mode === 'wall' ? 'wall-topbar' : ''}`} aria-label="행사 상태">
       <div className="brand-lockup">
         <div className="lg-dot" aria-hidden="true">
           V
         </div>
         <div>
-          <p className="eyeline">{mode === 'admin' ? state.copy.adminEyeline : state.copy.audienceEyeline}</p>
+            <p className="eyeline">{mode === 'admin' ? state.copy.adminEyeline : mode === 'wall' ? 'Audience Wall' : state.copy.audienceEyeline}</p>
           <div className="brand-title-row">
             <h1>{state.copy.appTitle}</h1>
             {mode === 'admin' ? <span className="admin-console-badge">운영 콘솔</span> : null}
@@ -510,6 +523,9 @@ function Header({ mode, connection, state }: { mode: 'admin' | 'vote'; connectio
             <a className="role-nav-link" href="/admin?showCheer=1">
               Showup
             </a>
+            <a className="role-nav-link" href="/wall" target="_blank" rel="noreferrer">
+              관객 송출 보드
+            </a>
             <a className="role-nav-link" href="/vote" target="_blank" rel="noreferrer">
               관객 화면 미리보기
             </a>
@@ -518,6 +534,11 @@ function Header({ mode, connection, state }: { mode: 'admin' | 'vote'; connectio
               <span>{voteUrl}</span>
             </div>
           </>
+        ) : mode === 'wall' ? (
+          <div className="audience-status-pill" aria-label="현재 화면">
+            <Radio size={16} />
+            <span>관객 송출 보드</span>
+          </div>
         ) : (
           <div className="audience-status-pill" aria-label="현재 화면">
             <Radio size={16} />
@@ -573,7 +594,7 @@ function VoteView({
   const audienceTeams = useMemo(() => {
     return [...state.teams].sort((a, b) => (fallbackTeamOrder.get(a.id) ?? 0) - (fallbackTeamOrder.get(b.id) ?? 0))
   }, [state.teams])
-  const hasRegistrationInfo = Boolean(name.trim() && group.trim())
+  const hasRegistrationInfo = Boolean(name.trim() && normalizeLetsIdDisplay(group))
   const sessionReady = state.sessionId > 0
   const sessionRegistered = hasRegistered && registeredSession === String(state.sessionId)
   const isRegistered = hasRegistrationInfo && (sessionRegistered || Boolean(participant))
@@ -610,7 +631,7 @@ function VoteView({
       sessionId: state.sessionId,
       participantId,
       name: name.trim(),
-      group: group.trim(),
+      group: normalizeLetsIdDisplay(group),
     })
   }, [group, hasRegistrationInfo, name, participant, participantId, post, sessionReady, sessionRegistered, state.sessionId])
 
@@ -638,13 +659,15 @@ function VoteView({
 
   const registerParticipant = async () => {
     if (!sessionReady || !hasRegistrationInfo) return
+    const letsId = normalizeLetsIdDisplay(group)
     const response = await post('/api/register', {
       sessionId: state.sessionId,
       participantId,
       name: name.trim(),
-      group: group.trim(),
+      group: letsId,
     })
     if (response) {
+      onGroupChange(letsId)
       storeValue(registeredKey, '1')
       storeValue(registeredSessionKey, String(response.sessionId))
       setRegisteredSession(String(response.sessionId))
@@ -660,7 +683,7 @@ function VoteView({
       sessionId: state.sessionId,
       participantId,
       name: name.trim(),
-      group: group.trim(),
+      group: normalizeLetsIdDisplay(group),
       teamId,
       text,
     })
@@ -704,14 +727,14 @@ function VoteView({
                 onChange={(event) => onNameChange(event.target.value)}
                 placeholder="예: 김민준"
               />
-            </label>
+              </label>
             <label>
-              <span>소속(팀명)</span>
+              <span>Let's ID</span>
               <input
                 value={group}
-                maxLength={24}
+                maxLength={48}
                 onChange={(event) => onGroupChange(event.target.value)}
-                placeholder="예: 품질혁신팀"
+                placeholder="예: hyun-jung.kim"
               />
             </label>
             <button type="button" onClick={registerParticipant} disabled={!hasRegistrationInfo || !sessionReady}>
@@ -733,7 +756,7 @@ function VoteView({
               </div>
               <div className="participant-chip">
                 <strong>{name}</strong>
-                <span>{group}</span>
+                <span>{normalizeLetsIdDisplay(group)}</span>
               </div>
             </div>
 
@@ -884,6 +907,7 @@ function AdminView({
   const [activePanel, setActivePanel] = useState<AdminPanel | null>(null)
   const starBudget = getStarBudget(state)
   const durationMinutes = getDurationMinutes(state)
+  const minScore = getMinScore(state)
   const totalRegistered = state.participants.length
   const totalDynamicVoters = state.participants.filter((person) => sumStars(person.allocations) > 0).length
   const totalDynamicStars = state.participants.reduce((sum, person) => sum + sumStars(person.allocations), 0)
@@ -910,6 +934,7 @@ function AdminView({
     post('/api/settings', {
       starBudget: data.get('starBudget'),
       durationMinutes: data.get('durationMinutes'),
+      minScore: data.get('minScore'),
     })
   }
 
@@ -987,7 +1012,7 @@ function AdminView({
         </div>
         <form
           className="control-grid"
-          key={`${starBudget}:${durationMinutes}`}
+          key={`${starBudget}:${durationMinutes}:${minScore}`}
           onSubmit={(event) => {
             event.preventDefault()
             applySettings(event.currentTarget)
@@ -1002,6 +1027,20 @@ function AdminView({
               max={20}
               defaultValue={starBudget}
             />
+          </label>
+          <label>
+            <span>최하위 환산점수</span>
+            <div className="inline-input">
+              <input
+                name="minScore"
+                type="number"
+                min={0}
+                max={9.9}
+                step={0.1}
+                defaultValue={minScore}
+              />
+              <em>점</em>
+            </div>
           </label>
           <label>
             <span>투표 타이머</span>
@@ -1028,7 +1067,7 @@ function AdminView({
           </button>
         </form>
         <p className="control-note">
-          현재 중복 응모 방지는 이름, 소속, 익명 브라우저 디바이스 ID 조합으로 판단합니다. 개인정보 입력을 늘리지 않는 운영 기준입니다.
+          현재 중복 응모 방지는 이름과 Let's ID 기준으로 판단합니다. 이메일을 입력하면 @ 뒤 주소는 제외하고 Let's ID만 사용합니다.
         </p>
       </section>
 
@@ -1082,6 +1121,143 @@ function AdminView({
         </aside>
       </section>
     </>
+  )
+}
+
+function PublicWallView({ state, connection }: { state: EventState; connection: ConnectionState }) {
+  const [showCheerConstellation, setShowCheerConstellation] = useState(
+    () => new URLSearchParams(window.location.search).get('showCheer') === '1',
+  )
+  const starBudget = getStarBudget(state)
+  const totalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
+  const visibleCheers = state.cheers.filter((message) => !message.hidden)
+
+  return (
+    <>
+      {showCheerConstellation ? (
+        <CheerConstellation state={state} starBudget={starBudget} onClose={() => setShowCheerConstellation(false)} />
+      ) : null}
+
+      <section className="public-wall-shell" aria-label="관객 송출 보드">
+        <div className="public-wall-header">
+          <div>
+            <h2>실시간 별 현황과 응원 메시지</h2>
+            <p>관객이 보낸 별과 응원 메시지를 함께 보여줍니다.</p>
+          </div>
+          <div className="public-wall-actions">
+            <button type="button" onClick={() => setShowCheerConstellation(true)}>
+              <Sparkles size={17} />
+              말풍선 Showup
+            </button>
+            <div className={`connection ${connection}`}>
+              <span className="live-dot" />
+              <span>{connection === 'live' ? 'Live' : connection === 'connecting' ? '연결 중' : '오프라인'}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="public-wall-metrics" aria-label="관객 공개 지표">
+          <div>
+            <span>누적 별</span>
+            <strong>{totalStars}</strong>
+          </div>
+          <div>
+            <span>응원 메시지</span>
+            <strong>{visibleCheers.length}</strong>
+          </div>
+          <div>
+            <span>참여 팀</span>
+            <strong>{state.teams.filter((team) => team.totalStars > 0).length}</strong>
+          </div>
+        </div>
+
+        <div className="public-wall-grid">
+          <section className="public-arena-board" aria-label="실시간 별 현황">
+            <div className="section-heading compact">
+              <div>
+                <p className="section-kicker">Live Arena Wall</p>
+                <h2>실시간 별 현황</h2>
+              </div>
+            </div>
+            <div className="public-ranking-list">
+              {state.teams.map((team) => {
+                const recentEvent = state.voteEvents.find((event) => event.teamId === team.id)
+                return (
+                  <TeamRow
+                    key={team.id}
+                    team={team}
+                    recentEvent={recentEvent}
+                    starBudget={starBudget}
+                    showScore={false}
+                    showVoteAuthor={false}
+                  />
+                )
+              })}
+            </div>
+          </section>
+
+          <PublicCheerBoard state={state} onShowup={() => setShowCheerConstellation(true)} />
+        </div>
+      </section>
+    </>
+  )
+}
+
+function PublicCheerBoard({ state, onShowup }: { state: EventState; onShowup: () => void }) {
+  const [selectedTeamId, setSelectedTeamId] = useState<string>('all')
+  const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams])
+  const visibleCheers = state.cheers.filter((message) => !message.hidden)
+  const selectedCheers = visibleCheers
+    .filter((message) => selectedTeamId === 'all' || message.teamId === selectedTeamId)
+    .slice(0, 36)
+
+  return (
+    <section className="public-cheer-board" aria-label="응원 메시지 보드">
+      <div className="section-heading compact">
+        <div>
+          <p className="section-kicker">Cheer Board</p>
+          <h2>응원 메시지</h2>
+        </div>
+        <button type="button" className="panel-open-button" onClick={onShowup}>
+          <Sparkles size={14} />
+          Showup
+        </button>
+      </div>
+
+      <div className="team-filter-strip" aria-label="응원 메시지 팀 필터">
+        <button type="button" className={selectedTeamId === 'all' ? 'active' : ''} onClick={() => setSelectedTeamId('all')}>
+          전체
+        </button>
+        {state.teams.map((team) => (
+          <button
+            type="button"
+            key={team.id}
+            className={selectedTeamId === team.id ? 'active' : ''}
+            style={{ '--team-color': team.color } as CSSProperties}
+            onClick={() => setSelectedTeamId(team.id)}
+          >
+            {team.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="public-cheer-stream" aria-live="polite">
+        {selectedCheers.length ? (
+          selectedCheers.map((message) => {
+            const team = teamMap.get(message.teamId) ?? state.teams[0]
+            return (
+              <article className="public-cheer-message" key={message.id} style={{ '--team-color': team.color } as CSSProperties}>
+                <strong>{team.name}</strong>
+                <p>{message.text}</p>
+                <small>{message.author}</small>
+              </article>
+            )
+          })
+        ) : (
+          <p className="empty-state">아직 표시할 응원 메시지가 없습니다.</p>
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -1157,16 +1333,21 @@ function TeamRow({
   recentEvent,
   starBudget,
   compact = false,
+  showScore = true,
+  showVoteAuthor = true,
 }: {
   team: Team
   recentEvent?: VoteEvent
   starBudget: number
   compact?: boolean
+  showScore?: boolean
+  showVoteAuthor?: boolean
 }) {
   const burstCount = recentEvent ? Math.min(starBudget, MAX_STARS_PER_TEAM, Math.abs(recentEvent.delta)) : 0
   const rankDelta = team.rankDelta ?? 0
   const rankMoveClass = rankDelta > 0 ? 'up' : rankDelta < 0 ? 'down' : 'same'
   const normalizedScore = formatPointScore(team.score ?? team.share / 10)
+  const progressLabel = showScore ? `${normalizedScore}점` : `${team.totalStars}★`
 
   return (
     <div
@@ -1192,7 +1373,7 @@ function TeamRow({
           <div className="progress-track" aria-hidden="true">
             <span />
           </div>
-          <em>{normalizedScore}점</em>
+          <em>{progressLabel}</em>
         </div>
       </div>
       <div className="score-stack">
@@ -1208,7 +1389,7 @@ function TeamRow({
           key={recentEvent.id}
           aria-hidden="true"
         >
-          <small>{recentEvent.author}</small>
+          <small>{showVoteAuthor ? recentEvent.author : recentEvent.delta > 0 ? '별 추가' : '별 회수'}</small>
           <div>
             {Array.from({ length: burstCount }).map((_, index) => (
               <span key={index} style={{ '--i': index } as CSSProperties}>
@@ -1223,7 +1404,7 @@ function TeamRow({
         <strong>{team.name}</strong>
         <span>총 별 {team.totalStars}개</span>
         <span>참여자 {team.voters}명</span>
-        <span>환산점수 {normalizedScore}점</span>
+        {showScore ? <span>환산점수 {normalizedScore}점</span> : null}
         <div className="popover-members">
           <em>팀원</em>
           <span>{team.members.length ? team.members.join(' · ') : '팀원 미등록'}</span>
@@ -2636,7 +2817,7 @@ function FloatingStars() {
   )
 }
 
-function useEventState() {
+function useEventState(mode: AppMode) {
   const [state, setState] = useState<EventState>(fallbackState)
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const lastRankStateRef = useRef<EventState | null>(null)
@@ -2647,6 +2828,7 @@ function useEventState() {
     const nextWithRankMovement = {
       ...nextState,
       copy: { ...fallbackCopy, ...(nextState.copy ?? {}) },
+      settings: { ...fallbackState.settings, ...(nextState.settings ?? {}) },
       teams: nextState.teams.map((team) => {
         const previousRank = previousRanks?.get(team.id)
         return {
@@ -2662,35 +2844,67 @@ function useEventState() {
 
   useEffect(() => {
     let active = true
+    let events: EventSource | null = null
+    let pollTimer: number | undefined
+    const realtime = mode !== 'vote'
 
-    fetch('/api/state')
-      .then((response) => {
+    const fetchState = async () => {
+      try {
+        const response = await fetch('/api/state')
         if (!response.ok) throw new Error('state request failed')
-        return response.json() as Promise<EventState>
-      })
-      .then((nextState) => {
-        if (active) {
-          applyState(nextState)
-          setConnection('live')
-        }
-      })
-      .catch(() => {
-        if (active) setConnection('offline')
-      })
+        const nextState = (await response.json()) as EventState
+        if (!active) return
+        applyState(nextState)
+        setConnection('live')
 
-    const events = new EventSource('/events')
-    events.onopen = () => setConnection('live')
-    events.addEventListener('state', (event) => {
-      applyState(JSON.parse((event as MessageEvent).data) as EventState)
-      setConnection('live')
-    })
-    events.onerror = () => setConnection('offline')
+        if (!realtime && nextState.closed && pollTimer) {
+          window.clearInterval(pollTimer)
+          pollTimer = undefined
+        }
+      } catch {
+        if (active) setConnection('offline')
+      }
+    }
+
+    const openEvents = () => {
+      if (!realtime || events || document.hidden) return
+
+      events = new EventSource('/events')
+      events.onopen = () => setConnection('live')
+      events.addEventListener('state', (event) => {
+        applyState(JSON.parse((event as MessageEvent).data) as EventState)
+        setConnection('live')
+      })
+      events.onerror = () => setConnection('offline')
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        events?.close()
+        events = null
+        return
+      }
+
+      fetchState()
+      openEvents()
+    }
+
+    fetchState()
+    openEvents()
+
+    if (!realtime) {
+      pollTimer = window.setInterval(fetchState, 15_000)
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       active = false
-      events.close()
+      events?.close()
+      if (pollTimer) window.clearInterval(pollTimer)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [applyState])
+  }, [applyState, mode])
 
   const post = useCallback(async (path: string, body: unknown) => {
     try {
@@ -2936,7 +3150,7 @@ function exportResultsWorkbook(state: EventState) {
     {
       name: '참여자',
       rows: [
-        ['이름', '소속', '사용 별', '응모 상태', '공개 메시지', '숨김 메시지', '팀별 배분', '최근 업데이트'],
+        ['이름', "Let's ID", '사용 별', '응모 상태', '공개 메시지', '숨김 메시지', '팀별 배분', '최근 업데이트'],
         ...participants.map((person) => [
           person.name,
           person.group,
@@ -2965,7 +3179,7 @@ function exportResultsWorkbook(state: EventState) {
     {
       name: '추첨결과',
       rows: [
-        ['추첨시각', '룰', '후보 수', '순번', '이름', '소속', '응원 참여'],
+        ['추첨시각', '룰', '후보 수', '순번', '이름', "Let's ID", '응원 참여'],
         ...(state.lastRaffle?.winners ?? []).map((winner, index) => [
           state.lastRaffle ? new Date(state.lastRaffle.createdAt).toLocaleString('ko-KR') : '',
           state.lastRaffle?.rule ?? '',
@@ -3129,7 +3343,7 @@ async function updateVote(
     sessionId,
     participantId,
     name: name.trim(),
-    group: group.trim(),
+    group: normalizeLetsIdDisplay(group),
     allocations,
   })
 }
@@ -3152,12 +3366,16 @@ function getOrCreateParticipantId() {
 
 function isSameParticipantIdentity(person: Participant, deviceId: string, name: string, group: string) {
   if (person.id === deviceId) return true
+  if (getParticipantDeviceIds(person).includes(deviceId)) return true
 
   return (
-    person.deviceId === deviceId &&
     normalizeParticipantNameIdentity(person.name) === normalizeParticipantNameIdentity(name) &&
     normalizeParticipantGroupIdentity(person.group) === normalizeParticipantGroupIdentity(group)
   )
+}
+
+function getParticipantDeviceIds(person: Participant) {
+  return [...new Set([...(person.deviceIds ?? []), person.deviceId].filter(Boolean) as string[])]
 }
 
 function normalizeParticipantNameIdentity(value: string) {
@@ -3165,12 +3383,21 @@ function normalizeParticipantNameIdentity(value: string) {
 }
 
 function normalizeParticipantGroupIdentity(value: string) {
-  const compact = value
+  return normalizeLetsIdDisplay(value)
     .normalize('NFKC')
     .toLocaleLowerCase('ko-KR')
-    .replace(/[\s\p{P}\p{S}]+/gu, '')
+    .replace(/\s+/gu, '')
+}
 
-  return compact.replace(/team$/u, '팀')
+function normalizeLetsIdDisplay(value: string) {
+  return value
+    .split('@')[0]
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '')
+    .toLocaleLowerCase('en-US')
+    .slice(0, 48)
 }
 
 function getStoredValue(key: string) {
@@ -3206,6 +3433,10 @@ function getStarBudget(state: EventState) {
 
 function getDurationMinutes(state: EventState) {
   return clamp(Math.floor(state.settings.durationMinutes || DEFAULT_DURATION_MINUTES), 1, 240)
+}
+
+function getMinScore(state: EventState) {
+  return clamp(Number(state.settings.minScore ?? DEFAULT_MIN_SCORE), 0, 9.9)
 }
 
 function formatCopy(template: string, values: Record<string, string | number>) {

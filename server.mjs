@@ -8,8 +8,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const distDir = path.join(__dirname, 'dist')
 const port = Number(process.env.PORT || 5173)
 const host = process.env.HOST || '0.0.0.0'
-const defaultStarBudget = 20
+const defaultStarBudget = 10
 const defaultDurationMinutes = 10
+const defaultMinScore = 5
 const maxStarsPerTeam = 10
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
@@ -25,7 +26,7 @@ const defaultCopy = {
   adminHeroTitle: '관리자 모드에서 실시간 별 현황을 공개합니다.',
   adminHeroSubtitle: '모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.',
   checkInEyeline: 'Check In',
-  checkInTitle: '먼저 이름과 소속(팀명)을 등록하세요.',
+  checkInTitle: "먼저 이름과 Let's ID를 등록하세요.",
   teamVoteEyeline: 'Team Vote',
   teamVoteTitle: '팀별 별 보내기',
   raffleReady: '추첨 자동응모 완료',
@@ -36,7 +37,7 @@ const defaultCopy = {
   raffleRemovedDisqualified:
     '관리자에 의해 응원 메시지가 제거되어 경품 추첨 응모 조건이 충족되지 않았습니다. 별을 준 팀에 새 응원 메시지를 작성해주세요.',
   voteClosedAlert: '투표가 마감되어 별을 추가하거나 메시지를 보낼 수 없습니다.',
-  registrationReady: '같은 기기에서 같은 이름과 소속으로 다시 접속하면 기존 참여 내역을 이어갑니다.',
+  registrationReady: "같은 이름과 Let's ID로 다시 접속하면 기존 참여 내역을 이어갑니다. 이메일을 입력해도 @ 뒤 주소는 사용하지 않습니다.",
   registrationConnecting: '행사 서버에 연결하는 중입니다.',
 }
 
@@ -183,6 +184,7 @@ let settings = {
   showScoresToAudience: true,
   starBudget: defaultStarBudget,
   durationMinutes: defaultDurationMinutes,
+  minScore: defaultMinScore,
 }
 
 function loadConfig() {
@@ -395,11 +397,13 @@ function getState() {
     })
     .sort((a, b) => b.totalStars - a.totalStars)
 
-  const maxStars = Math.max(...teamStats.map((team) => team.totalStars), 0)
+  const starTotals = teamStats.map((team) => team.totalStars)
+  const maxStars = Math.max(...starTotals, 0)
+  const minStars = starTotals.length ? Math.min(...starTotals) : 0
   const rankedTeams = teamStats.map((team, index) => ({
     ...team,
     rank: index + 1,
-    score: maxStars > 0 ? Math.round((team.totalStars / maxStars) * 100) / 10 : 0,
+    score: calculateLinearScore(team.totalStars, minStars, maxStars, settings.minScore),
     share: maxStars > 0 ? Math.max(8, Math.round((team.totalStars / maxStars) * 100)) : 0,
   }))
 
@@ -451,7 +455,7 @@ function upsertParticipant(deviceId, name, group) {
   if (!browserDeviceId) return null
 
   const nextName = sanitizeText(name, 18)
-  const nextGroup = sanitizeText(group, 24)
+  const nextGroup = sanitizeLetsId(group, 48)
   if (!nextName || !nextGroup) return null
 
   const identityKey = getParticipantIdentityKey(browserDeviceId, nextName, nextGroup)
@@ -463,6 +467,7 @@ function upsertParticipant(deviceId, name, group) {
     {
       id,
       deviceId: browserDeviceId,
+      deviceIds: [browserDeviceId],
       name: nextName,
       group: nextGroup,
       allocations: {},
@@ -471,7 +476,7 @@ function upsertParticipant(deviceId, name, group) {
       updatedAt: Date.now(),
     }
 
-  person.deviceId = browserDeviceId
+  attachParticipantDevice(person, browserDeviceId)
   person.name = nextName
   person.group = nextGroup
   person.updatedAt = Date.now()
@@ -570,28 +575,38 @@ function sanitizeIdentifier(value, maxLength) {
     .slice(0, maxLength)
 }
 
+function sanitizeLetsId(value, maxLength) {
+  return String(value || '')
+    .split('@')[0]
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '')
+    .toLocaleLowerCase('en-US')
+    .slice(0, maxLength)
+}
+
 function normalizeNameIdentity(value, maxLength) {
   return sanitizeText(value, maxLength).normalize('NFKC').replace(/\s+/gu, '').toLocaleLowerCase('ko-KR')
 }
 
 function normalizeGroupIdentity(value, maxLength) {
-  const compact = sanitizeText(value, maxLength)
+  return sanitizeLetsId(value, maxLength)
     .normalize('NFKC')
     .toLocaleLowerCase('ko-KR')
-    .replace(/[\s\p{P}\p{S}]+/gu, '')
-
-  return compact.replace(/team$/u, '팀')
+    .replace(/\s+/gu, '')
 }
 
 function findParticipantByNormalizedIdentity(deviceId, name, group) {
   const browserDeviceId = sanitizeIdentifier(deviceId, 96)
   const normalizedName = normalizeNameIdentity(name, 18)
-  const normalizedGroup = normalizeGroupIdentity(group, 24)
+  const normalizedGroup = normalizeGroupIdentity(group, 48)
 
   for (const person of participants.values()) {
-    if (person.deviceId !== browserDeviceId) continue
+    const deviceIds = getParticipantDeviceIds(person)
+    if (deviceIds.includes(browserDeviceId)) return person
     if (normalizeNameIdentity(person.name, 18) !== normalizedName) continue
-    if (normalizeGroupIdentity(person.group, 24) !== normalizedGroup) continue
+    if (normalizeGroupIdentity(person.group, 48) !== normalizedGroup) continue
     return person
   }
 
@@ -600,10 +615,23 @@ function findParticipantByNormalizedIdentity(deviceId, name, group) {
 
 function getParticipantIdentityKey(deviceId, name, group) {
   return [
-    sanitizeIdentifier(deviceId, 96),
     normalizeNameIdentity(name, 18),
-    normalizeGroupIdentity(group, 24),
+    normalizeGroupIdentity(group, 48),
   ].join('|')
+}
+
+function getParticipantDeviceIds(person) {
+  const ids = Array.isArray(person.deviceIds) ? person.deviceIds : []
+  const legacyId = sanitizeIdentifier(person.deviceId, 96)
+  return [...new Set([...ids, legacyId].filter(Boolean))]
+}
+
+function attachParticipantDevice(person, deviceId) {
+  const browserDeviceId = sanitizeIdentifier(deviceId, 96)
+  const deviceIds = getParticipantDeviceIds(person)
+  if (browserDeviceId && !deviceIds.includes(browserDeviceId)) deviceIds.push(browserDeviceId)
+  person.deviceIds = deviceIds
+  person.deviceId = deviceIds[0] || browserDeviceId
 }
 
 function hashIdentity(value) {
@@ -615,6 +643,18 @@ function hashIdentity(value) {
   }
 
   return (hash >>> 0).toString(36)
+}
+
+function calculateLinearScore(totalStars, minStars, maxStars, minScore) {
+  if (maxStars <= 0) return 0
+  if (maxStars === minStars) return 10
+
+  const normalized = (totalStars - minStars) / (maxStars - minStars)
+  return Math.round((minScore + normalized * (10 - minScore)) * 10) / 10
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value))
 }
 
 function parseCookies(cookieHeader = '') {
@@ -951,8 +991,9 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === '/api/settings') {
-    const nextStarBudget = Math.max(1, Math.min(20, Math.floor(Number(body.starBudget) || settings.starBudget)))
-    const nextDurationMinutes = Math.max(1, Math.min(240, Math.floor(Number(body.durationMinutes) || settings.durationMinutes)))
+      const nextStarBudget = Math.max(1, Math.min(20, Math.floor(Number(body.starBudget) || settings.starBudget)))
+      const nextDurationMinutes = Math.max(1, Math.min(240, Math.floor(Number(body.durationMinutes) || settings.durationMinutes)))
+      const nextMinScore = clamp(Number(body.minScore ?? settings.minScore), 0, 9.9)
 
     settings = {
       ...settings,
@@ -960,6 +1001,7 @@ async function handleApi(request, response, url) {
         typeof body.showScoresToAudience === 'boolean' ? Boolean(body.showScoresToAudience) : settings.showScoresToAudience,
       starBudget: nextStarBudget,
       durationMinutes: nextDurationMinutes,
+      minScore: nextMinScore,
     }
     normalizeAllParticipantAllocations()
     closed = false
