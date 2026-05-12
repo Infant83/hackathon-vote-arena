@@ -487,15 +487,20 @@ function upsertParticipant(deviceId, name, group) {
 function getRaffleCandidates(rule) {
   const state = getState()
   const leaderId = state.teams[0]?.id
+  const topTwoIds = state.teams.slice(0, 2).map((team) => team.id)
   const topThreeIds = state.teams.slice(0, 3).map((team) => team.id)
 
   return state.participants.filter((person) => {
     const spent = sumStars(person.allocations)
     if (spent <= 0) return false
     if (!person.cheered) return false
+    const allocationValues = Object.values(person.allocations || {}).filter((value) => value > 0)
 
     if (rule === 'leader') return Boolean(person.allocations[leaderId])
+    if (rule === 'top2') return topTwoIds.every((teamId) => Boolean(person.allocations[teamId]))
     if (rule === 'top3') return topThreeIds.every((teamId) => Boolean(person.allocations[teamId]))
+    if (rule === 'multi') return allocationValues.length >= 3
+    if (rule === 'big') return allocationValues.some((value) => value >= 7)
     if (rule === 'cheer') return person.cheered
     return true
   })
@@ -937,7 +942,7 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === '/api/raffle') {
-    const rule = ['all', 'leader', 'top3', 'cheer'].includes(body.rule) ? body.rule : 'all'
+    const rule = ['all', 'leader', 'top2', 'top3', 'multi', 'big', 'cheer'].includes(body.rule) ? body.rule : 'all'
     const winnerCount = Math.max(1, Math.min(8, Number(body.winnerCount) || 4))
     const candidates = getRaffleCandidates(rule)
     const winners = shuffle(candidates)

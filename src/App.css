@@ -4,6 +4,14 @@
   padding: 24px;
 }
 
+.app-shell.wall-shell-app {
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  padding: 12px 16px;
+  overflow: hidden;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -27,10 +35,27 @@
 }
 
 .topbar.wall-topbar {
-  margin: -24px -24px 18px;
-  padding: 18px 24px;
+  margin: -12px -16px 10px;
+  padding: 10px 16px;
   background: rgba(255, 255, 255, 0.96);
   border-bottom-color: rgba(165, 0, 52, 0.16);
+}
+
+.wall-topbar .lg-dot {
+  width: 42px;
+  height: 42px;
+  font-size: 19px;
+}
+
+.wall-topbar h1 {
+  font-size: clamp(26px, 2.5vw, 38px);
+}
+
+.wall-topbar .event-controls > .timer,
+.wall-topbar .event-controls > .connection,
+.wall-topbar .event-controls > .audience-status-pill {
+  min-height: 34px;
+  font-size: 13px;
 }
 
 .brand-lockup {
@@ -1297,10 +1322,12 @@ a:focus-visible {
   width: 100%;
   min-height: 72px;
   padding: 11px 12px;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--team-color) 22%, var(--line));
   border-radius: var(--radius);
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.88);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--team-color) 5%, #fff), rgba(255, 255, 255, 0.94) 60%),
+    #fff;
   box-shadow: 0 9px 28px rgba(28, 28, 31, 0.045);
   transition:
     transform 160ms ease,
@@ -1320,6 +1347,29 @@ a:focus-visible {
   transform: translateY(-1px);
   border-color: rgba(165, 0, 52, 0.28);
   box-shadow: 0 16px 38px rgba(28, 28, 31, 0.08);
+}
+
+.team-row.is-clickable {
+  cursor: pointer;
+}
+
+.team-row.is-clickable:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--team-color) 42%, rgba(165, 0, 52, 0.24));
+  outline-offset: 2px;
+}
+
+.team-row.is-selected {
+  border-color: color-mix(in srgb, var(--team-color) 58%, rgba(165, 0, 52, 0.25));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--team-color) 13%, #fff), #fff 62%),
+    #fff;
+  box-shadow:
+    0 15px 34px rgba(28, 28, 31, 0.08),
+    inset 4px 0 0 var(--team-color);
+}
+
+.team-row.no-score-stack {
+  grid-template-columns: 38px 52px minmax(0, 1fr);
 }
 
 .arena-detail-list .team-row.compact-row {
@@ -1673,6 +1723,23 @@ a:focus-visible {
   font-size: 20px;
   text-shadow: none;
   animation-name: burstStarAway;
+}
+
+.public-ranking-list .star-burst {
+  right: 80px;
+}
+
+.public-ranking-list .star-burst span {
+  width: 28px;
+  height: 28px;
+  font-size: 28px;
+  text-shadow:
+    0 12px 28px rgba(253, 49, 46, 0.28),
+    0 2px 0 rgba(45, 45, 49, 0.18);
+}
+
+.public-ranking-list .star-burst.loss span {
+  font-size: 28px;
 }
 
 .stat-popover {
@@ -2101,14 +2168,17 @@ a:focus-visible {
 
 .public-wall-shell {
   display: grid;
-  gap: 16px;
-  min-height: calc(100vh - 132px);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  height: calc(100vh - 78px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .public-wall-header,
-.public-wall-metrics,
 .public-arena-board,
-.public-cheer-board {
+.public-cheer-board,
+.public-raffle-board {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.94);
@@ -2116,154 +2186,197 @@ a:focus-visible {
 }
 
 .public-wall-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(350px, 1fr) auto auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 20px 24px;
+  gap: 12px;
+  padding: 10px 14px;
 }
 
 .public-wall-header h2 {
   margin: 0;
   color: var(--ink);
-  font-size: clamp(32px, 4.2vw, 62px);
-  line-height: 0.98;
-}
-
-.public-wall-header p {
-  max-width: 760px;
-  margin: 10px 0 0;
-  color: var(--body);
-  font-size: clamp(15px, 1.3vw, 20px);
-  line-height: 1.45;
+  font-size: clamp(28px, 3.2vw, 42px);
+  line-height: 1.02;
+  white-space: nowrap;
 }
 
 .public-wall-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
 .public-wall-actions button {
-  min-height: 44px;
+  min-height: 36px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 0 16px;
+  padding: 0 11px;
   border: 1px solid rgba(165, 0, 52, 0.24);
   border-radius: var(--radius);
   color: var(--lg-red);
   background: #fff;
+  font-size: 13px;
   font-weight: 850;
   cursor: pointer;
 }
 
+.public-wall-actions button.active {
+  color: #fff;
+  border-color: var(--lg-red);
+  background: var(--lg-red);
+  box-shadow: 0 10px 22px rgba(165, 0, 52, 0.16);
+}
+
 .public-wall-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
   gap: 1px;
   overflow: hidden;
+  border: 1px solid rgba(165, 0, 52, 0.08);
+  border-radius: var(--radius);
 }
 
 .public-wall-metrics > div {
   display: grid;
-  gap: 4px;
-  padding: 16px 20px;
+  min-width: 92px;
+  gap: 2px;
+  padding: 8px 11px;
   background: linear-gradient(135deg, rgba(165, 0, 52, 0.055), rgba(255, 255, 255, 0.9));
 }
 
 .public-wall-metrics span {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .public-wall-metrics strong {
   color: var(--ink);
-  font-size: clamp(28px, 3vw, 44px);
+  font-size: clamp(22px, 2.1vw, 34px);
   line-height: 1;
 }
 
 .public-wall-grid {
   display: grid;
-  grid-template-columns: minmax(560px, 1.35fr) minmax(360px, 0.65fr);
-  gap: 16px;
+  grid-template-columns: minmax(620px, 1.42fr) minmax(360px, 0.58fr);
+  gap: 12px;
+  height: 100%;
   min-height: 0;
+  overflow: hidden;
+}
+
+.public-wall-grid.cheer-focus {
+  grid-template-columns: 1fr;
 }
 
 .public-arena-board,
 .public-cheer-board {
   min-height: 0;
-  padding: 18px;
+  overflow: hidden;
+  padding: 12px;
 }
 
 .public-ranking-list {
   display: grid;
-  gap: 10px;
+  grid-template-rows: repeat(10, minmax(0, 1fr));
+  gap: 6px;
+  height: calc(100% - 48px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .public-ranking-list .team-row {
-  min-height: 78px;
-  grid-template-columns: 44px 56px minmax(0, 1fr) 90px;
+  min-height: 0;
+  grid-template-columns: 36px 46px minmax(0, 1fr);
+  gap: 10px;
+  padding: 5px 10px;
+  border-width: 1.5px;
 }
 
 .public-ranking-list .team-meta h3 {
-  font-size: clamp(18px, 1.55vw, 26px);
+  font-size: clamp(18px, 1.35vw, 24px);
 }
 
 .public-ranking-list .team-meta p {
-  font-size: clamp(13px, 1vw, 17px);
+  font-size: clamp(12px, 0.9vw, 16px);
 }
 
-.public-ranking-list .score-stack strong {
-  font-size: clamp(27px, 2.6vw, 42px);
+.public-ranking-list .rank-badge {
+  width: 28px;
+  height: 28px;
 }
 
-.team-filter-strip {
-  display: flex;
-  gap: 8px;
-  padding: 10px 0 14px;
-  overflow-x: auto;
+.public-ranking-list .logo-mark {
+  width: 38px;
+  height: 38px;
 }
 
-.team-filter-strip button {
-  flex: 0 0 auto;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid color-mix(in srgb, var(--team-color, var(--lg-red)) 22%, var(--line));
-  border-radius: 999px;
-  color: var(--ink);
-  background: color-mix(in srgb, var(--team-color, var(--lg-red)) 8%, #fff);
-  font-weight: 800;
-  cursor: pointer;
+.public-ranking-list .team-meta {
+  grid-template-columns: minmax(170px, 0.48fr) minmax(240px, 1fr);
+  align-items: center;
+  gap: 12px;
 }
 
-.team-filter-strip button.active {
-  color: #fff;
-  border-color: var(--team-color, var(--lg-red));
-  background: var(--team-color, var(--lg-red));
+.public-ranking-list .team-meta > div:first-child {
+  min-width: 0;
+}
+
+.public-ranking-list .progress-track {
+  height: 6px;
+}
+
+.public-ranking-list .progress-line {
+  grid-template-columns: minmax(0, 1fr) 70px;
+}
+
+.public-ranking-list .progress-line em {
+  color: var(--lg-red);
+  font-size: clamp(17px, 1.3vw, 24px);
+  font-weight: 940;
+  letter-spacing: 0;
+}
+
+.public-ranking-list .stat-popover {
+  display: none;
+}
+
+.selected-team-note {
+  align-self: center;
+  color: var(--lg-red);
+  font-size: 14px;
+  font-weight: 850;
 }
 
 .public-cheer-stream {
-  max-height: calc(100vh - 360px);
-  min-height: 460px;
+  height: calc(100% - 48px);
+  min-height: 0;
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   gap: 10px;
   overflow-y: auto;
   padding-right: 4px;
+}
+
+.public-cheer-board.large .public-cheer-stream {
+  height: calc(100% - 52px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
 }
 
 .public-cheer-message {
   position: relative;
   display: grid;
   gap: 6px;
-  padding: 14px 16px 14px 20px;
+  padding: 13px 15px 13px 20px;
   border: 1px solid color-mix(in srgb, var(--team-color) 26%, var(--line));
   border-radius: var(--radius);
   background: linear-gradient(90deg, color-mix(in srgb, var(--team-color) 10%, #fff), #fff 72%);
+  animation: cheerSlideIn 520ms cubic-bezier(0.18, 0.82, 0.28, 1) both;
 }
 
 .public-cheer-message::before {
@@ -2285,7 +2398,7 @@ a:focus-visible {
 .public-cheer-message p {
   margin: 0;
   color: var(--ink);
-  font-size: clamp(17px, 1.45vw, 25px);
+  font-size: clamp(16px, 1.25vw, 24px);
   line-height: 1.34;
   font-weight: 720;
 }
@@ -2294,6 +2407,40 @@ a:focus-visible {
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
+}
+
+.public-raffle-board {
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.wall-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.wall-panel-toolbar h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(26px, 2.4vw, 42px);
+}
+
+.wall-panel-toolbar button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid rgba(165, 0, 52, 0.22);
+  border-radius: var(--radius);
+  color: var(--lg-red);
+  background: #fff;
+  font-weight: 850;
+  cursor: pointer;
 }
 
 .moderation-counts {
@@ -3126,12 +3273,31 @@ a:focus-visible {
 
 .raffle-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 100px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
 }
 
 .draw-button {
-  grid-column: 1 / -1;
+  min-height: 48px;
+  font-size: 15px;
+}
+
+.draw-button.start {
+  grid-column: auto;
+}
+
+.draw-button.stop {
+  grid-column: auto;
+  border-color: rgba(45, 45, 49, 0.2);
+  color: var(--ink);
+  background: #fff;
+}
+
+.draw-button.stop:not(:disabled) {
+  color: #fff;
+  border-color: var(--lg-red);
+  background: linear-gradient(135deg, var(--lg-red), var(--active-red));
+  box-shadow: 0 14px 30px rgba(165, 0, 52, 0.18);
 }
 
 .draw-button.drawing {
@@ -3343,6 +3509,78 @@ a:focus-visible {
   align-items: stretch;
 }
 
+.raffle-detail.public-mode {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.36fr);
+  height: calc(100% - 58px);
+  min-height: 0;
+}
+
+.raffle-detail.public-mode .raffle-showcase {
+  min-height: 0;
+  height: 100%;
+  align-content: start;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+.raffle-detail.public-mode .raffle-detail-desk {
+  overflow: auto;
+}
+
+.raffle-detail.public-mode .draw-button {
+  min-height: 58px;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.raffle-detail.public-mode .draw-stage strong {
+  font-size: 24px;
+}
+
+.raffle-detail.public-mode .raffle-globe {
+  width: 300px;
+  height: 300px;
+}
+
+.raffle-detail.public-mode .raffle-globe > span {
+  transform: rotate(calc(var(--i) * 20deg)) translateX(132px) rotate(calc(var(--i) * -20deg));
+}
+
+.raffle-detail.public-mode .raffle-core {
+  width: 148px;
+  height: 148px;
+}
+
+.raffle-detail.public-mode .raffle-showcase.has-winners .raffle-globe {
+  width: 238px;
+  height: 238px;
+  margin-top: -20px;
+}
+
+.raffle-detail.public-mode .raffle-showcase.has-winners .raffle-globe > span {
+  transform: rotate(calc(var(--i) * 20deg)) translateX(104px) rotate(calc(var(--i) * -20deg));
+}
+
+.raffle-showcase.has-winners .raffle-reel-large {
+  display: none;
+}
+
+.raffle-detail.public-mode .raffle-winner-showcase {
+  width: min(560px, 90%);
+  gap: 8px;
+}
+
+.raffle-detail.public-mode .raffle-winner-showcase article {
+  padding: 9px 12px;
+}
+
+.raffle-detail.public-mode .gift-agent {
+  right: 24px;
+  bottom: 16px;
+  scale: 0.68;
+  transform-origin: bottom right;
+}
+
 .raffle-showcase {
   position: relative;
   min-height: 560px;
@@ -3358,6 +3596,22 @@ a:focus-visible {
     radial-gradient(circle at 20% 18%, rgba(46, 111, 158, 0.12), transparent 26%),
     radial-gradient(circle at 82% 78%, rgba(23, 129, 110, 0.12), transparent 28%),
     linear-gradient(180deg, #fff, #fff6f8);
+}
+
+.raffle-showcase.style-lotto {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.96), transparent 24%),
+    radial-gradient(circle at 18% 20%, rgba(244, 185, 66, 0.18), transparent 30%),
+    radial-gradient(circle at 78% 76%, rgba(46, 111, 158, 0.15), transparent 30%),
+    linear-gradient(180deg, #fff, #f7fbff);
+}
+
+.raffle-showcase.style-lotto .raffle-globe > span {
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 34% 25%, rgba(255, 255, 255, 0.92), transparent 24%),
+    color-mix(in srgb, #f4b942 42%, white);
+  border: 1px solid rgba(45, 45, 49, 0.12);
 }
 
 .celebration-canvas {
@@ -3462,6 +3716,15 @@ a:focus-visible {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.72),
     0 24px 70px rgba(165, 0, 52, 0.16);
+  animation: drawRingSpin 8s linear infinite reverse;
+}
+
+.raffle-showcase.drawing .raffle-core {
+  animation-duration: 1.8s;
+}
+
+.raffle-showcase.has-winners .raffle-core {
+  animation: none;
 }
 
 .raffle-core strong {
@@ -3669,6 +3932,17 @@ a:focus-visible {
   from {
     opacity: 0;
     transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cheerSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-22px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -3889,8 +4163,7 @@ a:focus-visible {
 
 @media (max-width: 1160px) {
   .user-grid,
-  .admin-grid,
-  .public-wall-grid {
+  .admin-grid {
     grid-template-columns: 1fr;
   }
 

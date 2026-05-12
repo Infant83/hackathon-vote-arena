@@ -136,10 +136,26 @@ type EventCopy = {
   registrationConnecting: string
 }
 
-type RaffleRule = 'all' | 'leader' | 'top3' | 'cheer'
+type RaffleRule = 'all' | 'leader' | 'top2' | 'top3' | 'multi' | 'big' | 'cheer'
+type RaffleStyle = 'roulette' | 'lotto'
 type ConnectionState = 'connecting' | 'live' | 'offline'
 type AppMode = 'admin' | 'vote' | 'wall'
 type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams'
+type WallPanel = 'overview' | 'cheer' | 'raffle'
+
+const raffleRuleOptions: Array<{ value: RaffleRule; label: string }> = [
+  { value: 'all', label: '공개 응원 메시지 참여자' },
+  { value: 'leader', label: '현재 1위 팀에 별을 준 참여자' },
+  { value: 'top2', label: '현재 1·2위 팀 모두에 별을 준 참여자' },
+  { value: 'top3', label: '현재 1·2·3위 팀 모두에 별을 준 참여자' },
+  { value: 'multi', label: '3개 이상 팀에 별을 나눠 준 참여자' },
+  { value: 'big', label: '한 팀에 별 7개 이상을 준 참여자' },
+]
+
+const raffleStyleOptions: Array<{ value: RaffleStyle; label: string }> = [
+  { value: 'roulette', label: '룰렛 쇼업' },
+  { value: 'lotto', label: '로또볼 쇼업' },
+]
 type Point = {
   x: number
   y: number
@@ -455,12 +471,12 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${mode === 'wall' ? 'wall-shell-app' : ''}`}>
       <Header mode={mode} connection={connection} state={state} />
       {mode === 'admin' ? (
         <AdminView state={state} connection={connection} post={post} />
       ) : mode === 'wall' ? (
-        <PublicWallView state={state} connection={connection} />
+        <PublicWallView state={state} post={post} />
       ) : (
         <VoteView
           state={state}
@@ -899,6 +915,7 @@ function AdminView({
   post: (path: string, body: unknown) => Promise<EventState | null>
 }) {
   const [raffleRule, setRaffleRule] = useState<RaffleRule>('all')
+  const [raffleStyle, setRaffleStyle] = useState<RaffleStyle>('roulette')
   const [winnerCount, setWinnerCount] = useState(4)
   const [isDrawing, setIsDrawing] = useState(false)
   const [showCheerConstellation, setShowCheerConstellation] = useState(
@@ -917,9 +934,13 @@ function AdminView({
     return state.cheers.some((message) => message.participantId === person.id && !message.hidden)
   }).length
 
-  const drawWinners = async () => {
+  const startDrawing = () => {
     setIsDrawing(true)
-    await new Promise((resolve) => window.setTimeout(resolve, 1600))
+  }
+
+  const stopDrawing = async () => {
+    if (!isDrawing) setIsDrawing(true)
+    await new Promise((resolve) => window.setTimeout(resolve, isDrawing ? 320 : 900))
     await post('/api/raffle', { rule: raffleRule, winnerCount })
     setIsDrawing(false)
   }
@@ -963,9 +984,12 @@ function AdminView({
               raffleRule={raffleRule}
               winnerCount={winnerCount}
               isDrawing={isDrawing}
+              raffleStyle={raffleStyle}
               onRuleChange={setRaffleRule}
+              onStyleChange={setRaffleStyle}
               onWinnerCountChange={setWinnerCount}
-              onDraw={drawWinners}
+              onStart={startDrawing}
+              onStop={stopDrawing}
             />
           ) : null}
         </AdminDetailPanel>
@@ -1113,9 +1137,12 @@ function AdminView({
             raffleRule={raffleRule}
             winnerCount={winnerCount}
             isDrawing={isDrawing}
+            raffleStyle={raffleStyle}
             onRuleChange={setRaffleRule}
+            onStyleChange={setRaffleStyle}
             onWinnerCountChange={setWinnerCount}
-            onDraw={drawWinners}
+            onStart={startDrawing}
+            onStop={stopDrawing}
             onOpen={() => setActivePanel('raffle')}
           />
         </aside>
@@ -1124,13 +1151,43 @@ function AdminView({
   )
 }
 
-function PublicWallView({ state, connection }: { state: EventState; connection: ConnectionState }) {
+function PublicWallView({
+  state,
+  post,
+}: {
+  state: EventState
+  post: (path: string, body: unknown) => Promise<EventState | null>
+}) {
+  const [wallPanel, setWallPanel] = useState<WallPanel>('overview')
+  const [selectedTeamId, setSelectedTeamId] = useState<string>('all')
+  const [raffleRule, setRaffleRule] = useState<RaffleRule>('all')
+  const [raffleStyle, setRaffleStyle] = useState<RaffleStyle>('roulette')
+  const [winnerCount, setWinnerCount] = useState(4)
+  const [isDrawing, setIsDrawing] = useState(false)
   const [showCheerConstellation, setShowCheerConstellation] = useState(
     () => new URLSearchParams(window.location.search).get('showCheer') === '1',
   )
   const starBudget = getStarBudget(state)
   const totalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
   const visibleCheers = state.cheers.filter((message) => !message.hidden)
+  const selectedTeam = selectedTeamId === 'all' ? null : state.teams.find((team) => team.id === selectedTeamId) ?? null
+
+  const startDrawing = () => {
+    setWallPanel('raffle')
+    setIsDrawing(true)
+  }
+
+  const stopDrawing = async () => {
+    if (!isDrawing) setIsDrawing(true)
+    await new Promise((resolve) => window.setTimeout(resolve, isDrawing ? 320 : 900))
+    await post('/api/raffle', { rule: raffleRule, winnerCount })
+    setIsDrawing(false)
+  }
+
+  const selectTeamMessages = (teamId: string) => {
+    setSelectedTeamId(teamId)
+    if (wallPanel === 'raffle') setWallPanel('overview')
+  }
 
   return (
     <>
@@ -1140,105 +1197,140 @@ function PublicWallView({ state, connection }: { state: EventState; connection: 
 
       <section className="public-wall-shell" aria-label="관객 송출 보드">
         <div className="public-wall-header">
-          <div>
-            <h2>실시간 별 현황과 응원 메시지</h2>
-            <p>관객이 보낸 별과 응원 메시지를 함께 보여줍니다.</p>
+          <div className="public-wall-title">
+            <h2>실시간 현황</h2>
+          </div>
+          <div className="public-wall-metrics" aria-label="관객 공개 지표">
+            <div>
+              <span>누적 별</span>
+              <strong>{totalStars}</strong>
+            </div>
+            <div>
+              <span>응원 메시지</span>
+              <strong>{visibleCheers.length}</strong>
+            </div>
+            <div>
+              <span>참여 팀</span>
+              <strong>{state.teams.filter((team) => team.totalStars > 0).length}</strong>
+            </div>
           </div>
           <div className="public-wall-actions">
+            <button type="button" className={wallPanel === 'overview' ? 'active' : ''} onClick={() => setWallPanel('overview')}>
+              실시간 현황
+            </button>
+            <button type="button" className={wallPanel === 'cheer' ? 'active' : ''} onClick={() => setWallPanel('cheer')}>
+              응원메세지
+            </button>
+            <button type="button" className={wallPanel === 'raffle' ? 'active' : ''} onClick={() => setWallPanel('raffle')}>
+              행운권추첨
+            </button>
             <button type="button" onClick={() => setShowCheerConstellation(true)}>
               <Sparkles size={17} />
               말풍선 Showup
             </button>
-            <div className={`connection ${connection}`}>
-              <span className="live-dot" />
-              <span>{connection === 'live' ? 'Live' : connection === 'connecting' ? '연결 중' : '오프라인'}</span>
-            </div>
           </div>
         </div>
 
-        <div className="public-wall-metrics" aria-label="관객 공개 지표">
-          <div>
-            <span>누적 별</span>
-            <strong>{totalStars}</strong>
-          </div>
-          <div>
-            <span>응원 메시지</span>
-            <strong>{visibleCheers.length}</strong>
-          </div>
-          <div>
-            <span>참여 팀</span>
-            <strong>{state.teams.filter((team) => team.totalStars > 0).length}</strong>
-          </div>
-        </div>
-
-        <div className="public-wall-grid">
-          <section className="public-arena-board" aria-label="실시간 별 현황">
-            <div className="section-heading compact">
+        {wallPanel === 'raffle' ? (
+          <section className="public-raffle-board" aria-label="관객 행운권 추첨 쇼업">
+            <div className="wall-panel-toolbar">
               <div>
-                <p className="section-kicker">Live Arena Wall</p>
-                <h2>실시간 별 현황</h2>
+                <p className="section-kicker">Lucky Draw Showup</p>
+                <h2>행운권 추첨</h2>
               </div>
+              <button type="button" onClick={() => setWallPanel('overview')}>
+                <X size={16} />
+                닫기
+              </button>
             </div>
-            <div className="public-ranking-list">
-              {state.teams.map((team) => {
-                const recentEvent = state.voteEvents.find((event) => event.teamId === team.id)
-                return (
-                  <TeamRow
-                    key={team.id}
-                    team={team}
-                    recentEvent={recentEvent}
-                    starBudget={starBudget}
-                    showScore={false}
-                    showVoteAuthor={false}
-                  />
-                )
-              })}
-            </div>
+            <RaffleDetailPanel
+              state={state}
+              raffleRule={raffleRule}
+              winnerCount={winnerCount}
+              isDrawing={isDrawing}
+              raffleStyle={raffleStyle}
+              onRuleChange={setRaffleRule}
+              onStyleChange={setRaffleStyle}
+              onWinnerCountChange={setWinnerCount}
+              onStart={startDrawing}
+              onStop={stopDrawing}
+              publicMode
+            />
           </section>
+        ) : (
+          <div className={`public-wall-grid ${wallPanel === 'cheer' ? 'cheer-focus' : ''}`}>
+            {wallPanel === 'overview' ? (
+              <section className="public-arena-board" aria-label="실시간 별 현황">
+                <div className="section-heading compact">
+                  <div>
+                    <p className="section-kicker">Live Arena Wall</p>
+                    <h2>실시간 별 현황</h2>
+                  </div>
+                  {selectedTeam ? <span className="selected-team-note">{selectedTeam.name} 응원 보기</span> : null}
+                </div>
+                <div className="public-ranking-list">
+                  {state.teams.map((team) => {
+                    const recentEvent = state.voteEvents.find((event) => event.teamId === team.id)
+                    return (
+                      <TeamRow
+                        key={team.id}
+                        team={team}
+                        recentEvent={recentEvent}
+                        starBudget={starBudget}
+                        showScore={false}
+                        showVoteAuthor={false}
+                        showScoreStack={false}
+                        showEventLabel={false}
+                        selected={selectedTeamId === team.id}
+                        onSelect={() => selectTeamMessages(team.id)}
+                      />
+                    )
+                  })}
+                </div>
+              </section>
+            ) : null}
 
-          <PublicCheerBoard state={state} onShowup={() => setShowCheerConstellation(true)} />
-        </div>
+            <PublicCheerBoard
+              state={state}
+              selectedTeamId={selectedTeamId}
+              onSelectAll={() => setSelectedTeamId('all')}
+              large={wallPanel === 'cheer'}
+            />
+          </div>
+        )}
       </section>
     </>
   )
 }
 
-function PublicCheerBoard({ state, onShowup }: { state: EventState; onShowup: () => void }) {
-  const [selectedTeamId, setSelectedTeamId] = useState<string>('all')
+function PublicCheerBoard({
+  state,
+  selectedTeamId,
+  onSelectAll,
+  large = false,
+}: {
+  state: EventState
+  selectedTeamId: string
+  onSelectAll: () => void
+  large?: boolean
+}) {
   const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams])
   const visibleCheers = state.cheers.filter((message) => !message.hidden)
   const selectedCheers = visibleCheers
     .filter((message) => selectedTeamId === 'all' || message.teamId === selectedTeamId)
-    .slice(0, 36)
+    .slice(0, large ? 80 : 36)
+  const selectedTeam = selectedTeamId === 'all' ? null : teamMap.get(selectedTeamId)
 
   return (
-    <section className="public-cheer-board" aria-label="응원 메시지 보드">
+    <section className={`public-cheer-board ${large ? 'large' : ''}`} aria-label="응원 메시지 보드">
       <div className="section-heading compact">
         <div>
           <p className="section-kicker">Cheer Board</p>
-          <h2>응원 메시지</h2>
+          <h2>{selectedTeam ? `${selectedTeam.name} 응원 메시지` : '응원 메시지'}</h2>
         </div>
-        <button type="button" className="panel-open-button" onClick={onShowup}>
-          <Sparkles size={14} />
-          Showup
-        </button>
-      </div>
-
-      <div className="team-filter-strip" aria-label="응원 메시지 팀 필터">
-        <button type="button" className={selectedTeamId === 'all' ? 'active' : ''} onClick={() => setSelectedTeamId('all')}>
+        <button type="button" className="panel-open-button" onClick={onSelectAll}>
           전체
         </button>
-        {state.teams.map((team) => (
-          <button
-            type="button"
-            key={team.id}
-            className={selectedTeamId === team.id ? 'active' : ''}
-            style={{ '--team-color': team.color } as CSSProperties}
-            onClick={() => setSelectedTeamId(team.id)}
-          >
-            {team.name}
-          </button>
-        ))}
       </div>
 
       <div className="public-cheer-stream" aria-live="polite">
@@ -1335,6 +1427,10 @@ function TeamRow({
   compact = false,
   showScore = true,
   showVoteAuthor = true,
+  showScoreStack = true,
+  showEventLabel = true,
+  selected = false,
+  onSelect,
 }: {
   team: Team
   recentEvent?: VoteEvent
@@ -1342,16 +1438,31 @@ function TeamRow({
   compact?: boolean
   showScore?: boolean
   showVoteAuthor?: boolean
+  showScoreStack?: boolean
+  showEventLabel?: boolean
+  selected?: boolean
+  onSelect?: () => void
 }) {
   const burstCount = recentEvent ? Math.min(starBudget, MAX_STARS_PER_TEAM, Math.abs(recentEvent.delta)) : 0
   const rankDelta = team.rankDelta ?? 0
   const rankMoveClass = rankDelta > 0 ? 'up' : rankDelta < 0 ? 'down' : 'same'
   const normalizedScore = formatPointScore(team.score ?? team.share / 10)
   const progressLabel = showScore ? `${normalizedScore}점` : `${team.totalStars}★`
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!onSelect) return
+    if (event.key !== 'Enter' && event.key !== ' ') return
+
+    event.preventDefault()
+    onSelect()
+  }
 
   return (
     <div
-      className={`team-row ${compact ? 'compact-row' : ''}`}
+      className={`team-row ${compact ? 'compact-row' : ''} ${showScoreStack ? '' : 'no-score-stack'} ${onSelect ? 'is-clickable' : ''} ${selected ? 'is-selected' : ''}`}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onClick={onSelect}
+      onKeyDown={handleKeyDown}
       style={
         {
           '--team-color': team.color,
@@ -1376,12 +1487,14 @@ function TeamRow({
           <em>{progressLabel}</em>
         </div>
       </div>
-      <div className="score-stack">
-        <div className="score-main">
-          <strong>{team.totalStars}</strong>
+      {showScoreStack ? (
+        <div className="score-stack">
+          <div className="score-main">
+            <strong>{team.totalStars}</strong>
+          </div>
+          <span>stars</span>
         </div>
-        <span>stars</span>
-      </div>
+      ) : null}
 
       {recentEvent && burstCount > 0 ? (
         <div
@@ -1389,11 +1502,11 @@ function TeamRow({
           key={recentEvent.id}
           aria-hidden="true"
         >
-          <small>{showVoteAuthor ? recentEvent.author : recentEvent.delta > 0 ? '별 추가' : '별 회수'}</small>
+          {showEventLabel ? <small>{showVoteAuthor ? recentEvent.author : recentEvent.delta > 0 ? '별 추가' : '별 회수'}</small> : null}
           <div>
             {Array.from({ length: burstCount }).map((_, index) => (
               <span key={index} style={{ '--i': index } as CSSProperties}>
-                {recentEvent.delta > 0 ? '★' : '-'}
+                ★
               </span>
             ))}
           </div>
@@ -2363,18 +2476,24 @@ function RafflePanel({
   raffleRule,
   winnerCount,
   isDrawing,
+  raffleStyle,
   onRuleChange,
+  onStyleChange,
   onWinnerCountChange,
-  onDraw,
+  onStart,
+  onStop,
   onOpen,
 }: {
   state: EventState
   raffleRule: RaffleRule
   winnerCount: number
   isDrawing: boolean
+  raffleStyle: RaffleStyle
   onRuleChange: (rule: RaffleRule) => void
+  onStyleChange: (style: RaffleStyle) => void
   onWinnerCountChange: (count: number) => void
-  onDraw: () => void
+  onStart: () => void
+  onStop: () => void
   onOpen: () => void
 }) {
   const previewCandidates = getRaffleCandidatesForRule(state, raffleRule)
@@ -2400,10 +2519,21 @@ function RafflePanel({
         <label>
           <span>추첨 룰</span>
           <select value={raffleRule} onChange={(event) => onRuleChange(event.target.value as RaffleRule)}>
-            <option value="all">별 + 공개 응원 메시지 참여자</option>
-            <option value="leader">현재 1위 팀에 별을 준 참여자</option>
-            <option value="top3">현재 TOP3 모두에 별을 준 참여자</option>
-            <option value="cheer">공개 응원 메시지 참여자</option>
+            {raffleRuleOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>쇼업 방식</span>
+          <select value={raffleStyle} onChange={(event) => onStyleChange(event.target.value as RaffleStyle)}>
+            {raffleStyleOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </label>
         <label>
@@ -2416,9 +2546,13 @@ function RafflePanel({
             onChange={(event) => onWinnerCountChange(Number(event.target.value))}
           />
         </label>
-        <button type="button" className={`draw-button ${isDrawing ? 'drawing' : ''}`} onClick={onDraw} disabled={isDrawing}>
+        <button type="button" className={`draw-button start ${isDrawing ? 'drawing' : ''}`} onClick={onStart} disabled={isDrawing}>
           <Sparkles size={17} />
-          {isDrawing ? '추첨 중' : '추첨 시작'}
+          추첨 시작
+        </button>
+        <button type="button" className="draw-button stop" onClick={onStop} disabled={!isDrawing}>
+          <Trophy size={17} />
+          정지
         </button>
       </div>
 
@@ -2473,17 +2607,25 @@ function RaffleDetailPanel({
   raffleRule,
   winnerCount,
   isDrawing,
+  raffleStyle,
   onRuleChange,
+  onStyleChange,
   onWinnerCountChange,
-  onDraw,
+  onStart,
+  onStop,
+  publicMode = false,
 }: {
   state: EventState
   raffleRule: RaffleRule
   winnerCount: number
   isDrawing: boolean
+  raffleStyle: RaffleStyle
   onRuleChange: (rule: RaffleRule) => void
+  onStyleChange: (style: RaffleStyle) => void
   onWinnerCountChange: (count: number) => void
-  onDraw: () => void
+  onStart: () => void
+  onStop: () => void
+  publicMode?: boolean
 }) {
   const previewCandidates = getRaffleCandidatesForRule(state, raffleRule)
   const reelNames = previewCandidates.slice(0, 12)
@@ -2494,13 +2636,13 @@ function RaffleDetailPanel({
   const hasWinners = winners.length > 0
 
   return (
-    <div className="raffle-detail">
-      <section className={`raffle-showcase ${isDrawing ? 'drawing' : ''} ${hasWinners ? 'has-winners' : ''}`} aria-live="polite">
+    <div className={`raffle-detail ${publicMode ? 'public-mode' : ''}`}>
+      <section className={`raffle-showcase style-${raffleStyle} ${isDrawing ? 'drawing' : ''} ${hasWinners ? 'has-winners' : ''}`} aria-live="polite">
         <CelebrationConfetti active={hasWinners} seedKey={state.lastRaffle?.createdAt ?? 0} />
         <div className="raffle-globe" aria-hidden="true">
           {Array.from({ length: 18 }).map((_, index) => (
             <span key={index} style={{ '--i': index } as CSSProperties}>
-              {index % 3 === 0 ? '★' : index % 3 === 1 ? '◆' : '•'}
+              {raffleStyle === 'lotto' ? ((index % 9) + 1) : index % 3 === 0 ? '★' : index % 3 === 1 ? '◆' : '•'}
             </span>
           ))}
           <div className="raffle-core">
@@ -2547,10 +2689,21 @@ function RaffleDetailPanel({
           <label>
             <span>추첨 룰</span>
             <select value={raffleRule} onChange={(event) => onRuleChange(event.target.value as RaffleRule)}>
-              <option value="all">별 + 공개 응원 메시지 참여자</option>
-              <option value="leader">현재 1위 팀에 별을 준 참여자</option>
-              <option value="top3">현재 TOP3 모두에 별을 준 참여자</option>
-              <option value="cheer">공개 응원 메시지 참여자</option>
+              {raffleRuleOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>쇼업 방식</span>
+            <select value={raffleStyle} onChange={(event) => onStyleChange(event.target.value as RaffleStyle)}>
+              {raffleStyleOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
           <label>
@@ -2563,9 +2716,13 @@ function RaffleDetailPanel({
               onChange={(event) => onWinnerCountChange(Number(event.target.value))}
             />
           </label>
-          <button type="button" className={`draw-button ${isDrawing ? 'drawing' : ''}`} onClick={onDraw} disabled={isDrawing}>
+          <button type="button" className={`draw-button start ${isDrawing ? 'drawing' : ''}`} onClick={onStart} disabled={isDrawing}>
             <Sparkles size={17} />
-            {isDrawing ? '추첨 중' : '추첨 시작'}
+            추첨 시작
+          </button>
+          <button type="button" className="draw-button stop" onClick={onStop} disabled={!isDrawing}>
+            <Trophy size={17} />
+            정지
           </button>
         </div>
 
@@ -2706,15 +2863,20 @@ function CelebrationConfetti({ active, seedKey }: { active: boolean; seedKey: nu
 
 function getRaffleCandidatesForRule(state: EventState, rule: RaffleRule) {
   const leaderId = state.teams[0]?.id
+  const topTwoIds = state.teams.slice(0, 2).map((team) => team.id)
   const topThreeIds = state.teams.slice(0, 3).map((team) => team.id)
 
   return state.participants.filter((person) => {
     const spent = sumStars(person.allocations)
     if (spent <= 0) return false
     if (!person.cheered) return false
+    const allocationValues = Object.values(person.allocations || {}).filter((value) => value > 0)
 
     if (rule === 'leader') return Boolean(leaderId && person.allocations[leaderId])
+    if (rule === 'top2') return topTwoIds.every((teamId) => Boolean(person.allocations[teamId]))
     if (rule === 'top3') return topThreeIds.every((teamId) => Boolean(person.allocations[teamId]))
+    if (rule === 'multi') return allocationValues.length >= 3
+    if (rule === 'big') return allocationValues.some((value) => value >= 7)
     if (rule === 'cheer') return person.cheered
     return true
   })
