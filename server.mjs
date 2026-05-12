@@ -12,6 +12,7 @@ const defaultStarBudget = 20
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const maxStarsPerTeam = 10
+const cheerMessageMaxLength = 240
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const teamsConfigPath = path.join(__dirname, 'teams.json')
@@ -888,7 +889,7 @@ async function handleApi(request, response, url) {
     const deviceId = getRequestDeviceId(request, body)
     const person = upsertParticipant(deviceId, body.name, body.group)
     const teamId = String(body.teamId || '')
-    const text = sanitizeText(body.text, 64)
+    const text = sanitizeText(body.text, cheerMessageMaxLength)
 
     if (!person || !validTeamIds.has(teamId) || !text) {
       sendJson(response, 400, { error: 'invalid cheer' })

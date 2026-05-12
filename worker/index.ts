@@ -4,6 +4,7 @@ const defaultStarBudget = 20
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const maxStarsPerTeam = 10
+const cheerMessageMaxLength = 240
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const snapshotKey = 'event-state-v1'
@@ -331,7 +332,7 @@ export class ArenaRoom {
       const deviceId = this.getRequestDeviceId(request, body)
       const person = this.upsertParticipant(deviceId, body.name, body.group)
       const teamId = String(body.teamId || '')
-      const text = sanitizeText(body.text, 64)
+      const text = sanitizeText(body.text, cheerMessageMaxLength)
 
       if (!person || !this.validTeamIds.has(teamId) || !text) return json({ error: 'invalid cheer' }, 400)
       if ((person.allocations[teamId] || 0) <= 0) return json({ error: 'star allocation required' }, 409)

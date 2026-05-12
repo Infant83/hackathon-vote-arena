@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import {
+  ArrowRight,
   Check,
   Clock3,
   Download,
@@ -212,6 +213,7 @@ const DEFAULT_STAR_BUDGET = 20
 const DEFAULT_DURATION_MINUTES = 10
 const DEFAULT_MIN_SCORE = 5
 const MAX_STARS_PER_TEAM = 10
+const CHEER_MESSAGE_MAX_LENGTH = 240
 const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
 const copyLabels: Record<keyof EventCopy, string> = {
   appTitle: '앱 제목',
@@ -499,8 +501,8 @@ const messageTimeFormatter = new Intl.DateTimeFormat('ko-KR', {
 
 function App() {
   const mode = getAppMode()
-  const { state, connection, post } = useEventState(mode)
   const [participantId] = useState(getOrCreateParticipantId)
+  const { state, connection, post } = useEventState(mode, participantId)
   const [name, setName] = useState(() => getStoredValue(nameKey))
   const [group, setGroup] = useState(() => getStoredValue(groupKey))
   const [wallPanel, setWallPanel] = useState<WallPanel>('overview')
@@ -736,6 +738,12 @@ function VoteView({
       : spentStars > 0 && hasSubmittedCheer
         ? state.copy.raffleRemovedDisqualified
         : state.copy.raffleGuide
+  const moderationNoticeText =
+    spentStars > 0 && !raffleReady && hasSubmittedCheer
+      ? hasHiddenCheer
+        ? state.copy.raffleHiddenDisqualified
+        : state.copy.raffleRemovedDisqualified
+      : ''
 
   useEffect(() => {
     if (!expandedTeamId) return
@@ -887,6 +895,12 @@ function VoteView({
               <Gift size={18} />
               <span>{raffleStatusText}</span>
             </div>
+            {moderationNoticeText ? (
+              <div className="inline-alert moderation-alert" role="status" aria-live="assertive">
+                <EyeOff size={17} />
+                <span>{moderationNoticeText}</span>
+              </div>
+            ) : null}
 
             {state.closed ? <p className="inline-alert">{state.copy.voteClosedAlert}</p> : null}
 
@@ -977,7 +991,7 @@ function VoteView({
 
                         <div className="cheer-composer">
                           <textarea
-                            maxLength={64}
+                            maxLength={CHEER_MESSAGE_MAX_LENGTH}
                             value={cheerTexts[team.id] ?? ''}
                             onChange={(event) =>
                               setCheerTexts((current) => ({ ...current, [team.id]: event.target.value }))
@@ -1306,7 +1320,7 @@ function PublicWallView({
   }
 
   const selectTeamMessages = (teamId: string) => {
-    setSelectedTeamId(teamId)
+    setSelectedTeamId((current) => (current === teamId ? 'all' : teamId))
     if (wallPanel === 'raffle') setWallPanel('overview')
   }
 
@@ -1434,9 +1448,11 @@ function PublicCheerBoard({
             return (
               <article className="public-cheer-message" key={message.id} style={{ '--team-color': team.color } as CSSProperties}>
                 <strong>
-                  {authorLabel}
-                  <span> ==&gt; </span>
-                  {team.name}
+                  <span className="cheer-route-author">{authorLabel}</span>
+                  <span className="cheer-route-arrow" aria-hidden="true">
+                    <ArrowRight size={14} strokeWidth={2.5} />
+                  </span>
+                  <span className="cheer-route-team">{team.name}</span>
                 </strong>
                 <p>{message.text}</p>
               </article>
@@ -3166,9 +3182,10 @@ function FloatingStars() {
   )
 }
 
-function useEventState(mode: AppMode) {
+function useEventState(mode: AppMode, participantId?: string) {
   const [state, setState] = useState<EventState>(fallbackState)
   const [connection, setConnection] = useState<ConnectionState>('connecting')
+  const [voteRealtime, setVoteRealtime] = useState(false)
   const lastRankStateRef = useRef<EventState | null>(null)
 
   const applyState = useCallback((nextState: EventState) => {
@@ -3189,13 +3206,19 @@ function useEventState(mode: AppMode) {
 
     lastRankStateRef.current = nextWithRankMovement
     setState(nextWithRankMovement)
-  }, [])
+    if (mode === 'vote' && participantId) {
+      const currentParticipant = nextWithRankMovement.participants.find((person) => {
+        return person.id === participantId || getParticipantDeviceIds(person).includes(participantId)
+      })
+      setVoteRealtime(Boolean(currentParticipant?.cheerSubmitted || currentParticipant?.visibleCheerCount || currentParticipant?.hiddenCheerCount))
+    }
+  }, [mode, participantId])
 
   useEffect(() => {
     let active = true
     let events: EventSource | null = null
     let pollTimer: number | undefined
-    const realtime = mode !== 'vote'
+    const realtime = mode !== 'vote' || voteRealtime
 
     const fetchState = async () => {
       try {
@@ -3253,7 +3276,7 @@ function useEventState(mode: AppMode) {
       if (pollTimer) window.clearInterval(pollTimer)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [applyState, mode])
+  }, [applyState, mode, voteRealtime])
 
   const post = useCallback(async (path: string, body: unknown) => {
     try {

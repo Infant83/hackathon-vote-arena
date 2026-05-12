@@ -1000,6 +1000,21 @@ a:focus-visible {
   font-weight: 760;
 }
 
+.moderation-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-color: rgba(165, 0, 52, 0.28);
+  background:
+    linear-gradient(90deg, rgba(165, 0, 52, 0.08), rgba(255, 255, 255, 0.9)),
+    #fff;
+}
+
+.moderation-alert svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
 .eligibility {
   width: 100%;
   justify-content: center;
@@ -1527,7 +1542,7 @@ a:focus-visible {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  padding: 5px;
+  padding: 3px;
 }
 
 .logo-mark:has(img)::before,
@@ -2349,7 +2364,7 @@ a:focus-visible {
 
 .public-ranking-list .team-row {
   min-height: 0;
-  grid-template-columns: 32px 40px minmax(0, 1fr);
+  grid-template-columns: 32px 46px minmax(0, 1fr);
   gap: 8px;
   padding: 4px 8px;
   border-width: 1.5px;
@@ -2369,8 +2384,12 @@ a:focus-visible {
 }
 
 .public-ranking-list .logo-mark {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
+}
+
+.public-ranking-list .logo-mark img {
+  padding: 2px;
 }
 
 .public-ranking-list .team-meta {
@@ -2434,11 +2453,13 @@ a:focus-visible {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-content: start;
+  align-items: start;
 }
 
 .public-cheer-message {
   position: relative;
   display: grid;
+  align-content: start;
   gap: 5px;
   min-height: 66px;
   padding: 9px 12px 9px 18px;
@@ -2466,13 +2487,42 @@ a:focus-visible {
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-.public-cheer-message strong span {
+.public-cheer-message .cheer-route-author,
+.public-cheer-message .cheer-route-team {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-cheer-message .cheer-route-author {
+  flex: 0 1 auto;
+}
+
+.public-cheer-message .cheer-route-team {
+  flex: 1 1 auto;
   color: var(--team-color);
 }
 
+.public-cheer-message .cheer-route-arrow {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--team-color);
+  border: 1px solid color-mix(in srgb, var(--team-color) 28%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--team-color) 8%, #fff);
+}
+
 .public-cheer-message p {
+  --cheer-message-lines: 3;
   margin: 0;
   overflow: hidden;
   color: var(--ink);
@@ -2481,7 +2531,13 @@ a:focus-visible {
   font-weight: 760;
   line-height: 1.25;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
+  -webkit-line-clamp: var(--cheer-message-lines);
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.public-cheer-board.large .public-cheer-message p {
+  --cheer-message-lines: 4;
 }
 
 .selected-team-preview {
