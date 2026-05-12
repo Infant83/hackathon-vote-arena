@@ -503,6 +503,10 @@ function App() {
   const [participantId] = useState(getOrCreateParticipantId)
   const [name, setName] = useState(() => getStoredValue(nameKey))
   const [group, setGroup] = useState(() => getStoredValue(groupKey))
+  const [wallPanel, setWallPanel] = useState<WallPanel>('overview')
+  const [showCheerConstellation, setShowCheerConstellation] = useState(
+    () => new URLSearchParams(window.location.search).get('showCheer') === '1',
+  )
 
   const participant = state.participants.find((person) => isSameParticipantIdentity(person, participantId, name, group))
   const allocations = participant?.allocations ?? {}
@@ -522,11 +526,25 @@ function App() {
 
   return (
     <main className={`app-shell ${mode === 'wall' ? 'wall-shell-app' : ''}`}>
-      <Header mode={mode} connection={connection} state={state} />
+      <Header
+        mode={mode}
+        connection={connection}
+        state={state}
+        wallPanel={wallPanel}
+        onWallPanelChange={setWallPanel}
+        onOpenCheerConstellation={() => setShowCheerConstellation(true)}
+      />
       {mode === 'admin' ? (
         <AdminView state={state} connection={connection} post={post} />
       ) : mode === 'wall' ? (
-        <PublicWallView state={state} post={post} />
+        <PublicWallView
+          state={state}
+          post={post}
+          wallPanel={wallPanel}
+          onWallPanelChange={setWallPanel}
+          showCheerConstellation={showCheerConstellation}
+          onShowCheerConstellationChange={setShowCheerConstellation}
+        />
       ) : (
         <VoteView
           state={state}
@@ -553,7 +571,21 @@ function getAppMode(): AppMode {
   return 'vote'
 }
 
-function Header({ mode, connection, state }: { mode: AppMode; connection: ConnectionState; state: EventState }) {
+function Header({
+  mode,
+  connection,
+  state,
+  wallPanel,
+  onWallPanelChange,
+  onOpenCheerConstellation,
+}: {
+  mode: AppMode
+  connection: ConnectionState
+  state: EventState
+  wallPanel: WallPanel
+  onWallPanelChange: (panel: WallPanel) => void
+  onOpenCheerConstellation: () => void
+}) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -564,6 +596,8 @@ function Header({ mode, connection, state }: { mode: AppMode; connection: Connec
   const secondsLeft = Math.max(0, Math.floor((state.closesAt - now) / 1000))
   const connectionLabel = connection === 'live' ? 'Live' : connection === 'connecting' ? '연결 중' : '오프라인 데모'
   const voteUrl = `${window.location.host}/vote`
+  const wallTotalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
+  const wallVisibleCheers = state.cheers.filter((message) => !message.hidden).length
 
   return (
     <header className={`topbar ${mode === 'admin' ? 'admin-topbar' : 'audience-topbar'} ${mode === 'wall' ? 'wall-topbar' : ''}`} aria-label="행사 상태">
@@ -601,10 +635,33 @@ function Header({ mode, connection, state }: { mode: AppMode; connection: Connec
             </div>
           </>
         ) : mode === 'wall' ? (
-          <div className="audience-status-pill" aria-label="현재 화면">
-            <Radio size={16} />
-            <span>관객 송출 보드</span>
-          </div>
+          <>
+            <div className="public-wall-metrics wall-topbar-metrics" aria-label="관객 공개 지표">
+              <div>
+                <span>{state.copy.wallMetricStars}</span>
+                <strong>{wallTotalStars}</strong>
+              </div>
+              <div>
+                <span>{state.copy.wallMetricCheers}</span>
+                <strong>{wallVisibleCheers}</strong>
+              </div>
+            </div>
+            <div className="public-wall-actions wall-topbar-actions">
+              <button type="button" className={wallPanel === 'overview' ? 'active' : ''} onClick={() => onWallPanelChange('overview')}>
+                {state.copy.wallOverviewLabel}
+              </button>
+              <button type="button" className={wallPanel === 'cheer' ? 'active' : ''} onClick={() => onWallPanelChange('cheer')}>
+                {state.copy.wallCheerLabel}
+              </button>
+              <button type="button" className={wallPanel === 'raffle' ? 'active' : ''} onClick={() => onWallPanelChange('raffle')}>
+                {state.copy.wallRaffleLabel}
+              </button>
+              <button type="button" onClick={onOpenCheerConstellation}>
+                <Sparkles size={17} />
+                {state.copy.wallShowupLabel}
+              </button>
+            </div>
+          </>
         ) : (
           <div className="audience-status-pill" aria-label="현재 화면">
             <Radio size={16} />
@@ -965,7 +1022,7 @@ function AdminView({
   post: (path: string, body: unknown) => Promise<EventState | null>
 }) {
   const [raffleRule, setRaffleRule] = useState<RaffleRule>('all')
-  const [raffleStyle, setRaffleStyle] = useState<RaffleStyle>('roulette')
+  const [raffleStyle, setRaffleStyle] = useState<RaffleStyle>('lotto')
   const [winnerCount, setWinnerCount] = useState(4)
   const [isDrawing, setIsDrawing] = useState(false)
   const [showCheerConstellation, setShowCheerConstellation] = useState(
@@ -1213,23 +1270,27 @@ function AdminView({
 function PublicWallView({
   state,
   post,
+  wallPanel,
+  onWallPanelChange,
+  showCheerConstellation,
+  onShowCheerConstellationChange,
 }: {
   state: EventState
   post: (path: string, body: unknown) => Promise<EventState | null>
+  wallPanel: WallPanel
+  onWallPanelChange: (panel: WallPanel) => void
+  showCheerConstellation: boolean
+  onShowCheerConstellationChange: (show: boolean) => void
 }) {
-  const [wallPanel, setWallPanel] = useState<WallPanel>('overview')
   const [selectedTeamId, setSelectedTeamId] = useState<string>('all')
   const [raffleRule, setRaffleRule] = useState<RaffleRule>('all')
-  const [raffleStyle, setRaffleStyle] = useState<RaffleStyle>('roulette')
+  const [raffleStyle, setRaffleStyle] = useState<RaffleStyle>('lotto')
   const [winnerCount, setWinnerCount] = useState(4)
   const [isDrawing, setIsDrawing] = useState(false)
-  const [showCheerConstellation, setShowCheerConstellation] = useState(
-    () => new URLSearchParams(window.location.search).get('showCheer') === '1',
-  )
+  const setWallPanel = onWallPanelChange
+  const setShowCheerConstellation = onShowCheerConstellationChange
   const starBudget = getStarBudget(state)
   const cheerNameMode = getCheerNameMode(state)
-  const totalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
-  const visibleCheers = state.cheers.filter((message) => !message.hidden)
   const selectedTeam = selectedTeamId === 'all' ? null : state.teams.find((team) => team.id === selectedTeamId) ?? null
 
   const startDrawing = () => {
@@ -1256,34 +1317,6 @@ function PublicWallView({
       ) : null}
 
       <section className="public-wall-shell" aria-label="관객 송출 보드">
-        <div className="public-wall-header">
-          <div className="public-wall-metrics" aria-label="관객 공개 지표">
-            <div>
-              <span>{state.copy.wallMetricStars}</span>
-              <strong>{totalStars}</strong>
-            </div>
-            <div>
-              <span>{state.copy.wallMetricCheers}</span>
-              <strong>{visibleCheers.length}</strong>
-            </div>
-          </div>
-          <div className="public-wall-actions">
-            <button type="button" className={wallPanel === 'overview' ? 'active' : ''} onClick={() => setWallPanel('overview')}>
-              {state.copy.wallOverviewLabel}
-            </button>
-            <button type="button" className={wallPanel === 'cheer' ? 'active' : ''} onClick={() => setWallPanel('cheer')}>
-              {state.copy.wallCheerLabel}
-            </button>
-            <button type="button" className={wallPanel === 'raffle' ? 'active' : ''} onClick={() => setWallPanel('raffle')}>
-              {state.copy.wallRaffleLabel}
-            </button>
-            <button type="button" onClick={() => setShowCheerConstellation(true)}>
-              <Sparkles size={17} />
-              {state.copy.wallShowupLabel}
-            </button>
-          </div>
-        </div>
-
         {wallPanel === 'raffle' ? (
           <section className="public-raffle-board" aria-label="관객 행운권 추첨 쇼업">
             <div className="wall-panel-toolbar">
@@ -2734,16 +2767,41 @@ function RaffleDetailPanel({
         <CelebrationConfetti active={hasWinners} seedKey={state.lastRaffle?.createdAt ?? 0} />
         {raffleStyle === 'lotto' ? (
           <div className="lotto-machine" aria-hidden="true">
+            <span className="lotto-stand left" />
+            <span className="lotto-stand right" />
             <div className="lotto-bowl">
+              <div className="lotto-vortex">
+                <span />
+                <span />
+                <span />
+              </div>
               {candidateBalls.map((person, index) => (
-                <span key={`${person.id}-ball-${index}`} style={{ '--i': index } as CSSProperties}>
+                <span
+                  className="lotto-ball"
+                  key={`${person.id}-ball-${index}`}
+                  style={
+                    {
+                      '--i': index,
+                      '--x': `${22 + ((index * 37) % 56)}%`,
+                      '--y': `${20 + ((index * 53) % 56)}%`,
+                      '--dx': `${((index % 5) - 2) * 18}px`,
+                      '--dy': `${((index % 7) - 3) * 13}px`,
+                      '--ball-tone': `hsl(${(index * 41 + 344) % 360} 72% 66%)`,
+                    } as CSSProperties
+                  }
+                >
                   <strong>{person.name}</strong>
                 </span>
               ))}
             </div>
-            <div className="lotto-neck" />
-            <div className="lotto-result-ball">
-              <strong>{hasWinners ? winners[0]?.name : isDrawing ? '선정 중' : '대기'}</strong>
+            <div className="lotto-chute">
+              <span />
+              <i />
+            </div>
+            <div className="lotto-result-tray">
+              <div className="lotto-result-ball">
+                <strong>{hasWinners ? winners[0]?.name : isDrawing ? '선정 중' : '대기'}</strong>
+              </div>
             </div>
           </div>
         ) : raffleStyle === 'target' ? (

@@ -52,9 +52,36 @@
 }
 
 .wall-topbar .event-controls > .timer,
-.wall-topbar .event-controls > .connection,
-.wall-topbar .event-controls > .audience-status-pill {
+.wall-topbar .event-controls > .connection {
   min-height: 31px;
+  font-size: 12px;
+}
+
+.wall-topbar .event-controls {
+  flex: 1;
+  gap: 7px;
+}
+
+.wall-topbar .public-wall-metrics {
+  flex: 0 0 auto;
+}
+
+.wall-topbar .public-wall-metrics > div {
+  min-width: 78px;
+  padding: 5px 9px;
+}
+
+.wall-topbar .public-wall-metrics strong {
+  font-size: clamp(21px, 1.65vw, 27px);
+}
+
+.wall-topbar .public-wall-actions {
+  flex: 0 1 auto;
+}
+
+.wall-topbar .public-wall-actions button {
+  min-height: 31px;
+  padding: 0 9px;
   font-size: 12px;
 }
 
@@ -2190,8 +2217,8 @@ a:focus-visible {
 
 .public-wall-shell {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 6px;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
   height: calc(100vh - 86px);
   min-height: 0;
   overflow: hidden;
@@ -3733,19 +3760,18 @@ a:focus-visible {
 }
 
 .raffle-detail.public-mode .lotto-bowl {
-  width: 340px;
-  height: 340px;
+  width: 350px;
+  height: 350px;
 }
 
-.raffle-detail.public-mode .lotto-bowl span {
+.raffle-detail.public-mode .lotto-ball {
   width: 58px;
   height: 58px;
-  transform: rotate(calc(var(--i) * 51deg)) translateX(96px) rotate(calc(var(--i) * -68deg)) translate(-50%, -50%);
 }
 
 .raffle-detail.public-mode .lotto-result-ball {
-  width: 94px;
-  height: 94px;
+  width: 116px;
+  height: 116px;
 }
 
 .raffle-detail.public-mode .target-board {
@@ -3776,8 +3802,8 @@ a:focus-visible {
 
 .raffle-showcase.style-lotto {
   background:
-    radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.96), transparent 25%),
-    radial-gradient(circle at 20% 18%, rgba(244, 185, 66, 0.2), transparent 30%),
+    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.98), transparent 24%),
+    radial-gradient(circle at 20% 18%, rgba(165, 0, 52, 0.13), transparent 30%),
     radial-gradient(circle at 78% 76%, rgba(46, 111, 158, 0.16), transparent 30%),
     linear-gradient(180deg, #fff, #f5f9fd);
 }
@@ -3910,12 +3936,32 @@ a:focus-visible {
 .lotto-machine {
   position: relative;
   z-index: 2;
-  width: min(520px, 86%);
-  min-height: 430px;
+  width: min(560px, 90%);
+  min-height: 450px;
   display: grid;
   justify-items: center;
   align-content: center;
   gap: 0;
+}
+
+.lotto-stand {
+  position: absolute;
+  top: 52%;
+  width: 16px;
+  height: 178px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(45, 45, 49, 0.18), rgba(45, 45, 49, 0.06));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.lotto-stand.left {
+  left: 18%;
+  transform: rotate(9deg);
+}
+
+.lotto-stand.right {
+  right: 18%;
+  transform: rotate(-9deg);
 }
 
 .lotto-bowl {
@@ -3925,16 +3971,18 @@ a:focus-visible {
   max-width: 420px;
   max-height: 420px;
   overflow: hidden;
-  border: 2px solid rgba(46, 111, 158, 0.18);
+  border: 2px solid rgba(46, 111, 158, 0.24);
   border-radius: 48% 52% 50% 50% / 48% 48% 52% 52%;
   background:
-    radial-gradient(circle at 34% 22%, rgba(255, 255, 255, 0.98), transparent 18%),
-    radial-gradient(circle at 64% 70%, rgba(255, 255, 255, 0.54), transparent 24%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(225, 239, 247, 0.4));
+    radial-gradient(circle at 32% 22%, rgba(255, 255, 255, 0.98), transparent 17%),
+    radial-gradient(circle at 66% 68%, rgba(255, 255, 255, 0.52), transparent 24%),
+    radial-gradient(circle at 50% 50%, rgba(253, 49, 46, 0.08), transparent 46%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(222, 240, 247, 0.44));
   box-shadow:
-    inset 18px 20px 32px rgba(255, 255, 255, 0.7),
-    inset -20px -18px 42px rgba(46, 111, 158, 0.1),
-    0 28px 80px rgba(28, 28, 31, 0.1);
+    inset 18px 20px 32px rgba(255, 255, 255, 0.72),
+    inset -20px -18px 42px rgba(46, 111, 158, 0.12),
+    inset 0 0 0 12px rgba(255, 255, 255, 0.2),
+    0 30px 86px rgba(28, 28, 31, 0.12);
 }
 
 .lotto-bowl::before {
@@ -3950,10 +3998,50 @@ a:focus-visible {
   transform: rotate(-24deg);
 }
 
-.lotto-bowl span {
+.lotto-bowl::after {
+  content: '';
+  position: absolute;
+  inset: 11%;
+  border: 1px dashed rgba(46, 111, 158, 0.14);
+  border-radius: 50%;
+  animation: drawRingSpin 6.8s linear infinite reverse;
+}
+
+.lotto-vortex {
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  opacity: 0.62;
+  animation: drawRingSpin 3.2s linear infinite;
+}
+
+.lotto-vortex span {
   position: absolute;
   left: 50%;
   top: 50%;
+  width: 52%;
+  height: 4px;
+  transform-origin: left center;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(165, 0, 52, 0.0), rgba(165, 0, 52, 0.18), rgba(46, 111, 158, 0.0));
+}
+
+.lotto-vortex span:nth-child(1) {
+  transform: rotate(0deg);
+}
+
+.lotto-vortex span:nth-child(2) {
+  transform: rotate(120deg);
+}
+
+.lotto-vortex span:nth-child(3) {
+  transform: rotate(240deg);
+}
+
+.lotto-ball {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
   width: clamp(58px, 6vw, 78px);
   height: clamp(58px, 6vw, 78px);
   display: grid;
@@ -3963,14 +4051,16 @@ a:focus-visible {
   color: var(--ink);
   background:
     radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.96), transparent 24%),
-    color-mix(in srgb, hsl(calc(var(--i) * 34deg) 72% 62%) 36%, white);
-  box-shadow: 0 12px 28px rgba(28, 28, 31, 0.12);
-  transform: rotate(calc(var(--i) * 51deg)) translateX(118px) rotate(calc(var(--i) * -68deg)) translate(-50%, -50%);
-  animation: lottoBallTumble 1.85s ease-in-out infinite alternate;
+    color-mix(in srgb, var(--ball-tone) 42%, white);
+  box-shadow:
+    inset -7px -9px 16px rgba(45, 45, 49, 0.07),
+    0 12px 28px rgba(28, 28, 31, 0.13);
+  transform: translate(-50%, -50%) translate3d(var(--dx), var(--dy), 0) rotate(calc(var(--i) * 21deg));
+  animation: lottoBallTumble 1.55s cubic-bezier(0.32, 0.72, 0.28, 1.04) infinite alternate;
   animation-delay: calc(var(--i) * -90ms);
 }
 
-.lotto-bowl span strong {
+.lotto-ball strong {
   max-width: 80%;
   overflow: hidden;
   font-size: clamp(11px, 0.9vw, 14px);
@@ -3980,19 +4070,67 @@ a:focus-visible {
   white-space: nowrap;
 }
 
-.raffle-showcase.drawing .lotto-bowl span {
-  animation-duration: 560ms;
+.raffle-showcase.drawing .lotto-vortex {
+  animation-duration: 780ms;
 }
 
-.lotto-neck {
-  width: 118px;
+.raffle-showcase.drawing .lotto-ball {
+  animation-name: lottoBallScramble;
+  animation-duration: 720ms;
+}
+
+.lotto-chute {
+  position: relative;
+  z-index: 2;
+  width: 132px;
   height: 48px;
-  margin-top: -8px;
+  margin-top: -10px;
   border: 1px solid rgba(46, 111, 158, 0.18);
   border-top: 0;
   border-radius: 0 0 36px 36px;
-  background: rgba(255, 255, 255, 0.7);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(220, 237, 245, 0.44));
   box-shadow: inset 0 -14px 24px rgba(46, 111, 158, 0.08);
+}
+
+.lotto-chute span {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 15px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(46, 111, 158, 0.18);
+}
+
+.lotto-chute i {
+  position: absolute;
+  left: 50%;
+  bottom: -14px;
+  width: 48px;
+  height: 22px;
+  transform: translateX(-50%);
+  border-radius: 0 0 24px 24px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(46, 111, 158, 0.16);
+  border-top: 0;
+}
+
+.lotto-result-tray {
+  position: relative;
+  z-index: 3;
+  min-width: 230px;
+  min-height: 126px;
+  display: grid;
+  place-items: center;
+  margin-top: 10px;
+  border-radius: 42px 42px 52px 52px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 232, 240, 0.62)),
+    #fff;
+  border: 1px solid rgba(165, 0, 52, 0.13);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 18px 46px rgba(165, 0, 52, 0.11);
 }
 
 .lotto-result-ball {
@@ -4007,12 +4145,14 @@ a:focus-visible {
   background:
     radial-gradient(circle at 32% 22%, rgba(255, 255, 255, 0.96), transparent 24%),
     linear-gradient(135deg, #fff, #ffe5ee);
-  box-shadow: 0 18px 44px rgba(165, 0, 52, 0.16);
+  box-shadow:
+    inset -10px -10px 22px rgba(165, 0, 52, 0.08),
+    0 18px 44px rgba(165, 0, 52, 0.16);
   animation: lottoResultDrop 860ms cubic-bezier(0.18, 0.88, 0.28, 1.18) both;
 }
 
 .raffle-showcase.drawing .lotto-result-ball {
-  animation: drawPulse 420ms ease infinite alternate;
+  animation: lottoResultWaiting 620ms ease infinite alternate;
 }
 
 .lotto-result-ball strong {
@@ -4497,31 +4637,62 @@ a:focus-visible {
 }
 
 @keyframes lottoBallTumble {
-  from {
-    translate: -7px 7px;
+  0% {
     filter: saturate(0.96);
+    transform: translate(-50%, -50%) translate3d(var(--dx), var(--dy), 0) rotate(calc(var(--i) * 21deg)) scale(0.98);
   }
-  to {
-    translate: 8px -8px;
-    filter: saturate(1.08);
+  45% {
+    filter: saturate(1.05);
+    transform: translate(-50%, -50%) translate3d(calc(var(--dx) * -0.45), calc(var(--dy) * 0.62), 0) rotate(calc(var(--i) * -17deg)) scale(1.03);
+  }
+  100% {
+    filter: saturate(1.1);
+    transform: translate(-50%, -50%) translate3d(calc(var(--dx) * 0.35), calc(var(--dy) * -0.7), 0) rotate(calc(var(--i) * 18deg + 48deg)) scale(1);
+  }
+}
+
+@keyframes lottoBallScramble {
+  0% {
+    transform: translate(-50%, -50%) translate3d(var(--dx), var(--dy), 0) rotate(calc(var(--i) * 21deg)) scale(0.96);
+  }
+  32% {
+    transform: translate(-50%, -50%) translate3d(calc(var(--dy) * -1.5), calc(var(--dx) * 1.2), 0) rotate(calc(var(--i) * 34deg + 112deg)) scale(1.05);
+  }
+  68% {
+    transform: translate(-50%, -50%) translate3d(calc(var(--dx) * -1.08), calc(var(--dy) * -1.15), 0) rotate(calc(var(--i) * -39deg - 76deg)) scale(0.98);
+  }
+  100% {
+    transform: translate(-50%, -50%) translate3d(calc(var(--dy) * 1.35), calc(var(--dx) * -1.1), 0) rotate(calc(var(--i) * 30deg + 220deg)) scale(1.04);
   }
 }
 
 @keyframes lottoResultDrop {
   0% {
     opacity: 0;
-    translate: 0 -68px;
-    scale: 0.72;
+    transform: translate3d(0, -84px, 0) scale(0.6) rotate(-18deg);
   }
   72% {
     opacity: 1;
-    translate: 0 8px;
-    scale: 1.08;
+    transform: translate3d(0, 10px, 0) scale(1.09) rotate(5deg);
   }
   100% {
     opacity: 1;
-    translate: 0 0;
-    scale: 1;
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes lottoResultWaiting {
+  from {
+    transform: translate3d(0, -4px, 0) scale(0.97);
+    box-shadow:
+      inset -10px -10px 22px rgba(165, 0, 52, 0.08),
+      0 18px 44px rgba(165, 0, 52, 0.1);
+  }
+  to {
+    transform: translate3d(0, 4px, 0) scale(1.03);
+    box-shadow:
+      inset -10px -10px 22px rgba(165, 0, 52, 0.12),
+      0 22px 52px rgba(165, 0, 52, 0.2);
   }
 }
 
