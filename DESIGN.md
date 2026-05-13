@@ -39,6 +39,8 @@ Rules:
 - Avoid decorative orbs/blobs; use broad light-ribbon gradients and glass-like panels when referencing the external 간지.
 - In dark mode, avoid plain white panels inside `/admin`, `/wall`, `/vote`, raffle, cheer, and quiz surfaces. Use translucent navy glass panels, cyan-blue borders, white/off-white text, muted blue secondary text, and coral/magenta only for live emphasis or primary action.
 - Ranking badges in dark mode should be legible cyan/white chips, not small red dots. Gauge tracks should be dark translucent, with team-color-to-coral/cyan fills so they remain visible against the navy background.
+- Guidance text in dark mode must not rely on deep red, purple, or low-saturation team colors. Use a bright rose/coral guide color on a translucent dark panel, or mix team colors toward off-white/cyan so labels remain readable without losing team identity.
+- Participant vote cards, cheer threads, quiz standby cards, raffle showup, and cheer showup must all be audited together when dark mode changes. No surface should retain a plain white card unless it is an intentional logo/photo well.
 
 ## Typography
 
