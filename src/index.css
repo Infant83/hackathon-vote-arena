@@ -8,6 +8,13 @@
   --line-strong: #d9d6d6;
   --surface: #ffffff;
   --canvas: #f7f7f8;
+  --event-night: #030611;
+  --event-navy: #07142f;
+  --event-blue: #3f63ff;
+  --event-cyan: #8fd6ff;
+  --event-violet: #7a3ff2;
+  --event-magenta: #e447a8;
+  --event-coral: #ff7a7a;
   --radius: 8px;
   --font-sans:
     Inter, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;

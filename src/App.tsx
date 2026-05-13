@@ -4,6 +4,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import {
   ArrowRight,
   Check,
+  CircleHelp,
   Clock3,
   Download,
   Eye,
@@ -12,13 +13,16 @@ import {
   Gift,
   Maximize2,
   Megaphone,
+  MessageCircle,
   MoveHorizontal,
   Radio,
+  RadioTower,
   Save,
   Search,
   Settings2,
   Sparkles,
   Star,
+  Ticket,
   Trophy,
   Trash2,
   Upload,
@@ -199,6 +203,22 @@ type EventCopy = {
   wallSelectedCheerSuffix: string
   wallRaffleEyeline: string
   wallRaffleTitle: string
+  wallQuizEyeline: string
+  wallQuizTitle: string
+  quizStandbyHeadline: string
+  quizStandbySubhead: string
+  quizStandbyHint: string
+  quizCurrentQuestionLabel: string
+  quizPendingQuestion: string
+  quizAnswerEmpty: string
+  showupEyeline: string
+  showupTitle: string
+  showupShuffleLabel: string
+  contentPanelEyeline: string
+  contentPanelTitle: string
+  contentPanelSummary: string
+  rafflePanelEyeline: string
+  rafflePanelTitle: string
 }
 
 type CheerNameMode = 'masked' | 'real'
@@ -298,7 +318,128 @@ const copyLabels: Record<keyof EventCopy, string> = {
   wallSelectedCheerSuffix: '송출 선택 팀 응원 제목 접미사',
   wallRaffleEyeline: '송출 추첨 패널 라벨',
   wallRaffleTitle: '송출 추첨 패널 제목',
+  wallQuizEyeline: '송출 퀴즈 패널 라벨',
+  wallQuizTitle: '송출 퀴즈 패널 제목',
+  quizStandbyHeadline: '퀴즈 대기 화면 큰 제목',
+  quizStandbySubhead: '퀴즈 대기 화면 설명',
+  quizStandbyHint: '퀴즈 대기 화면 보조 안내',
+  quizCurrentQuestionLabel: '퀴즈 현재 문제 라벨',
+  quizPendingQuestion: '퀴즈 문제 대기 문구',
+  quizAnswerEmpty: '퀴즈 답변 없음 문구',
+  showupEyeline: '말풍선 쇼업 라벨',
+  showupTitle: '말풍선 쇼업 제목',
+  showupShuffleLabel: '말풍선 섞기 버튼',
+  contentPanelEyeline: '운영 콘텐츠 관리 라벨',
+  contentPanelTitle: '운영 콘텐츠 관리 제목',
+  contentPanelSummary: '운영 콘텐츠 관리 요약',
+  rafflePanelEyeline: '관리자 추첨 패널 라벨',
+  rafflePanelTitle: '관리자 추첨 패널 제목',
 }
+
+const copyHelp: Partial<Record<keyof EventCopy, string>> = {
+  appTitle: '모든 화면의 좌측 상단 큰 제목입니다.',
+  audienceHeroTitle: '/vote 첫 화면의 별 배분 안내 제목입니다. {starBudget}, {maxStarsPerTeam} 사용 가능.',
+  audienceHeroSubtitle: '/vote 첫 화면의 사용법 안내 문구입니다.',
+  raffleGuide: '/vote 투표 보드 상단의 추첨 응모 안내입니다.',
+  cheerButtonLabel: '/vote 팀 행을 열 때 보이는 응원 메시지 버튼입니다.',
+  wallOverviewLabel: '/wall 상단 실시간 현황 버튼입니다.',
+  wallCheerLabel: '/wall 상단 응원 메시지 버튼입니다.',
+  wallRaffleLabel: '/wall 상단 행운권 추첨 버튼입니다.',
+  wallShowupLabel: '/wall 상단 말풍선 쇼업 버튼입니다.',
+  wallQuizLabel: '/wall 상단 퀴즈 버튼입니다.',
+  quizStandbyHeadline: '/wall과 /vote 퀴즈 대기 화면의 가장 큰 안내입니다.',
+  quizStandbySubhead: '/wall 퀴즈 대기 화면에서 참가자 전환 상태를 설명합니다.',
+  quizStandbyHint: '/wall과 /vote 퀴즈 대기 화면의 짧은 참여 방법 안내입니다.',
+  contentPanelSummary: '/admin 운영 콘텐츠 카드의 설명 문구입니다.',
+}
+
+const copyGroups: Array<{
+  id: string
+  eyeline: string
+  title: string
+  description: string
+  keys: Array<keyof EventCopy>
+}> = [
+  {
+    id: 'global',
+    eyeline: 'Global',
+    title: '전체 공통',
+    description: '모든 화면의 상단 제목과 역할 라벨입니다.',
+    keys: ['appTitle', 'audienceEyeline', 'adminEyeline', 'wallEyeline'],
+  },
+  {
+    id: 'vote',
+    eyeline: '/vote',
+    title: '관객 투표 화면',
+    description: '참가자가 등록, 별 배분, 응원 메시지를 작성할 때 보는 문구입니다.',
+    keys: [
+      'audienceHeroTitle',
+      'audienceHeroSubtitle',
+      'checkInEyeline',
+      'checkInTitle',
+      'registrationReady',
+      'registrationConnecting',
+      'teamVoteEyeline',
+      'teamVoteTitle',
+      'cheerButtonLabel',
+      'raffleReady',
+      'raffleGuide',
+      'raffleHiddenDisqualified',
+      'raffleRemovedDisqualified',
+      'voteClosedAlert',
+    ],
+  },
+  {
+    id: 'admin',
+    eyeline: '/admin',
+    title: '관리자 콘솔',
+    description: '운영 콘솔 첫 화면과 콘텐츠 관리 카드에서 보이는 문구입니다.',
+    keys: ['adminHeroTitle', 'adminHeroSubtitle', 'contentPanelEyeline', 'contentPanelTitle', 'contentPanelSummary'],
+  },
+  {
+    id: 'wall',
+    eyeline: '/wall',
+    title: '관객 송출 보드',
+    description: '발표장 화면 상단 버튼, 실시간 별 현황, 응원 메시지 패널의 문구입니다.',
+    keys: [
+      'wallMetricStars',
+      'wallMetricCheers',
+      'wallOverviewLabel',
+      'wallCheerLabel',
+      'wallRaffleLabel',
+      'wallShowupLabel',
+      'wallQuizLabel',
+      'wallArenaEyeline',
+      'wallArenaTitle',
+      'wallCheerEyeline',
+      'wallCheerTitle',
+      'wallSelectedCheerSuffix',
+    ],
+  },
+  {
+    id: 'showup',
+    eyeline: 'Showup',
+    title: '말풍선/행운권 쇼업',
+    description: '말풍선 쇼업과 행운권 추첨 송출 화면에서 사용하는 문구입니다.',
+    keys: ['showupEyeline', 'showupTitle', 'showupShuffleLabel', 'wallRaffleEyeline', 'wallRaffleTitle', 'rafflePanelEyeline', 'rafflePanelTitle'],
+  },
+  {
+    id: 'quiz',
+    eyeline: 'Quiz',
+    title: '퀴즈 진행 화면',
+    description: '퀴즈 대기, 문제, 답변 스트림에서 보이는 문구입니다.',
+    keys: [
+      'wallQuizEyeline',
+      'wallQuizTitle',
+      'quizStandbyHeadline',
+      'quizStandbySubhead',
+      'quizStandbyHint',
+      'quizCurrentQuestionLabel',
+      'quizPendingQuestion',
+      'quizAnswerEmpty',
+    ],
+  },
+]
 const storageKey = 'vibe-vote-participant'
 const nameKey = 'vibe-vote-name'
 const groupKey = 'vibe-vote-group'
@@ -347,6 +488,22 @@ const fallbackCopy: EventCopy = {
   wallSelectedCheerSuffix: '응원 메시지',
   wallRaffleEyeline: 'Lucky Draw Showup',
   wallRaffleTitle: '행운권 추첨',
+  wallQuizEyeline: 'Live Quiz',
+  wallQuizTitle: '퀴즈',
+  quizStandbyHeadline: '퀴즈를 준비 중입니다',
+  quizStandbySubhead: '참가자 화면이 퀴즈 대기 모드로 전환되었습니다',
+  quizStandbyHint: '참가자는 3/2/1 카운트다운 뒤 정답을 입력할 수 있습니다.',
+  quizCurrentQuestionLabel: 'Current Question',
+  quizPendingQuestion: '퀴즈 대기 중입니다.',
+  quizAnswerEmpty: '아직 도착한 답변이 없습니다.',
+  showupEyeline: 'Cheer Bubble',
+  showupTitle: '응원 메시지',
+  showupShuffleLabel: '섞기',
+  contentPanelEyeline: 'Content Setup',
+  contentPanelTitle: '운영 콘텐츠',
+  contentPanelSummary: '팀 정보, 화면 문구, 퀴즈 문제를 한 곳에서 수정합니다.',
+  rafflePanelEyeline: 'Lucky Draw',
+  rafflePanelTitle: '행운권 추첨',
 }
 
 const fallbackTeams: Team[] = [
@@ -635,6 +792,9 @@ function App() {
         onPrepareQuiz={() => {
           if (mode === 'wall') void post('/api/quiz/prepare', {})
         }}
+        onEndQuiz={() => {
+          if (mode === 'wall') void post('/api/quiz/clear', {})
+        }}
       />
       {mode === 'admin' ? (
         <AdminView state={state} connection={connection} post={post} />
@@ -680,6 +840,18 @@ function getInitialWallPanel(): WallPanel {
   return panel === 'cheer' || panel === 'raffle' || panel === 'quiz' ? panel : 'overview'
 }
 
+function getInitialAdminPanel(): AdminPanel | null {
+  const panel = new URLSearchParams(window.location.search).get('panel')
+  return panel === 'arena' ||
+    panel === 'participants' ||
+    panel === 'messages' ||
+    panel === 'raffle' ||
+    panel === 'teams' ||
+    panel === 'quiz'
+    ? panel
+    : null
+}
+
 function Header({
   mode,
   connection,
@@ -688,6 +860,7 @@ function Header({
   onWallPanelChange,
   onOpenCheerConstellation,
   onPrepareQuiz,
+  onEndQuiz,
 }: {
   mode: AppMode
   connection: ConnectionState
@@ -696,6 +869,7 @@ function Header({
   onWallPanelChange: (panel: WallPanel) => void
   onOpenCheerConstellation: () => void
   onPrepareQuiz?: () => void
+  onEndQuiz?: () => void
 }) {
   const [now, setNow] = useState(() => Date.now())
 
@@ -709,6 +883,7 @@ function Header({
   const voteUrl = `${window.location.host}/vote`
   const wallTotalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
   const wallVisibleCheers = state.cheers.filter((message) => !message.hidden).length
+  const adminPanel = new URLSearchParams(window.location.search).get('panel')
 
   return (
     <header className={`topbar ${mode === 'admin' ? 'admin-topbar' : 'audience-topbar'} ${mode === 'wall' ? 'wall-topbar' : ''}`} aria-label="행사 상태">
@@ -728,16 +903,24 @@ function Header({
       <div className="event-controls">
         {mode === 'admin' ? (
           <>
-            <a className="role-nav-link active" href="/admin">
+            <a className={`role-nav-link ${adminPanel ? '' : 'active'}`} href="/admin">
+              <RadioTower size={15} />
               실시간 현황
             </a>
+            <a className={`role-nav-link ${adminPanel === 'quiz' ? 'active' : ''}`} href="/admin?panel=quiz">
+              <CircleHelp size={15} />
+              퀴즈 운영
+            </a>
             <a className="role-nav-link" href="/admin?showCheer=1">
+              <Sparkles size={15} />
               Showup
             </a>
             <a className="role-nav-link" href="/wall" target="_blank" rel="noreferrer">
+              <Radio size={15} />
               관객 송출 보드
             </a>
             <a className="role-nav-link" href="/vote" target="_blank" rel="noreferrer">
+              <Megaphone size={15} />
               관객 화면 미리보기
             </a>
             <div className="short-url" aria-label="모바일 접속 주소">
@@ -758,13 +941,23 @@ function Header({
               </div>
             </div>
             <div className="public-wall-actions wall-topbar-actions">
-              <button type="button" className={wallPanel === 'overview' ? 'active' : ''} onClick={() => onWallPanelChange('overview')}>
+              <button
+                type="button"
+                className={wallPanel === 'overview' ? 'active' : ''}
+                onClick={() => {
+                  if (state.quiz.mode !== 'idle') onEndQuiz?.()
+                  onWallPanelChange('overview')
+                }}
+              >
+                <RadioTower size={16} />
                 {state.copy.wallOverviewLabel}
               </button>
               <button type="button" className={wallPanel === 'cheer' ? 'active' : ''} onClick={() => onWallPanelChange('cheer')}>
+                <MessageCircle size={16} />
                 {state.copy.wallCheerLabel}
               </button>
               <button type="button" className={wallPanel === 'raffle' ? 'active' : ''} onClick={() => onWallPanelChange('raffle')}>
+                <Ticket size={16} />
                 {state.copy.wallRaffleLabel}
               </button>
               <button type="button" onClick={onOpenCheerConstellation}>
@@ -779,6 +972,7 @@ function Header({
                   onPrepareQuiz?.()
                 }}
               >
+                <CircleHelp size={16} />
                 {state.copy.wallQuizLabel}
               </button>
             </div>
@@ -1140,6 +1334,7 @@ function VoteView({
       ) : quizActive ? (
         <QuizParticipationView
           quiz={state.quiz}
+          copy={state.copy}
           serverTime={state.serverTime}
           receivedAt={state.receivedAt}
           name={name}
@@ -1340,6 +1535,7 @@ function QuizWinnerNotice({ winner, onDismiss }: { winner: QuizAnswer; onDismiss
 
 function QuizParticipationView({
   quiz,
+  copy,
   serverTime,
   receivedAt,
   name,
@@ -1356,6 +1552,7 @@ function QuizParticipationView({
   attemptLimit,
 }: {
   quiz: QuizState
+  copy: EventCopy
   serverTime?: number
   receivedAt?: number
   name: string
@@ -1398,9 +1595,9 @@ function QuizParticipationView({
       {phase === 'standby' ? (
         <div className="quiz-start-screen standby">
           <Sparkles size={34} />
-          <p>퀴즈를 준비 중입니다</p>
+          <p>{copy.quizStandbyHeadline}</p>
           <h2>문제가 출제되면 3/2/1 카운트다운 뒤 답변창이 열립니다</h2>
-          <span>이 화면은 자동으로 바뀝니다. 잠시만 기다려 주세요.</span>
+          <span>{copy.quizStandbyHint}</span>
         </div>
       ) : null}
       {phase === 'intro' ? (
@@ -1419,12 +1616,15 @@ function QuizParticipationView({
       ) : null}
       <div className="quiz-question-card">
         <p className="section-kicker">Live Quiz #{quiz.round || 1}</p>
-        <h2>
+        <h2 className="quiz-question-heading">
+          <span className="quiz-question-prefix">Q.</span>
+          <span>
           {phase === 'standby'
-            ? '관리자가 곧 퀴즈를 출제합니다.'
+            ? copy.quizPendingQuestion
             : phase === 'intro' || phase === 'countdown'
               ? '문제가 곧 공개됩니다.'
-              : quiz.question || '관리자가 곧 퀴즈를 출제합니다.'}
+              : quiz.question || copy.quizPendingQuestion}
+          </span>
         </h2>
         <div className="quiz-player-row">
           <strong>{name}</strong>
@@ -1497,7 +1697,7 @@ function AdminView({
   const [showCheerConstellation, setShowCheerConstellation] = useState(
     () => new URLSearchParams(window.location.search).get('showCheer') === '1',
   )
-  const [activePanel, setActivePanel] = useState<AdminPanel | null>(null)
+  const [activePanel, setActivePanel] = useState<AdminPanel | null>(getInitialAdminPanel)
   const starBudget = getStarBudget(state)
   const durationMinutes = getDurationMinutes(state)
   const minScore = getMinScore(state)
@@ -1954,8 +2154,8 @@ function QuizWallBoard({ state }: { state: EventState }) {
 
       <div className="section-heading compact">
         <div>
-          <p className="section-kicker">Live Quiz</p>
-          <h2>퀴즈</h2>
+          <p className="section-kicker">{state.copy.wallQuizEyeline}</p>
+          <h2>{state.copy.wallQuizTitle}</h2>
         </div>
         <span className={`quiz-mode-pill ${phase}`}>
           {phase === 'open'
@@ -1973,13 +2173,13 @@ function QuizWallBoard({ state }: { state: EventState }) {
       {phase === 'idle' || phase === 'standby' ? (
         <div className="quiz-wall-start-screen idle">
           <Sparkles size={44} />
-          <p>퀴즈를 준비 중입니다</p>
+          <p>{state.copy.quizStandbyHeadline}</p>
           <h3>
             {phase === 'standby'
-              ? '참가자 화면이 퀴즈 대기 모드로 전환되었습니다'
+              ? state.copy.quizStandbySubhead
               : '관리자가 문제를 출제하면 모든 참가자 화면이 동시에 퀴즈 모드로 전환됩니다'}
           </h3>
-          <span>참가자는 3/2/1 카운트다운 뒤 정답을 입력할 수 있습니다.</span>
+          <span>{state.copy.quizStandbyHint}</span>
         </div>
       ) : null}
 
@@ -2000,13 +2200,16 @@ function QuizWallBoard({ state }: { state: EventState }) {
       ) : null}
 
       <div className="quiz-current-panel">
-        <p className="section-kicker">Current Question</p>
-        <h3>
-          {phase === 'idle' || phase === 'standby'
-            ? '퀴즈 대기 중입니다.'
-            : phase === 'intro' || phase === 'countdown'
-              ? '문제가 곧 공개됩니다.'
-              : state.quiz.question || '퀴즈를 준비 중입니다.'}
+        <p className="section-kicker">{state.copy.quizCurrentQuestionLabel}</p>
+        <h3 className="quiz-question-heading">
+          <span className="quiz-question-prefix">Q.</span>
+          <span>
+            {phase === 'idle' || phase === 'standby'
+              ? state.copy.quizPendingQuestion
+              : phase === 'intro' || phase === 'countdown'
+                ? '문제가 곧 공개됩니다.'
+                : state.quiz.question || state.copy.quizPendingQuestion}
+          </span>
         </h3>
         <div className="quiz-stats">
           <span>답변 {answerCount}</span>
@@ -2030,14 +2233,14 @@ function QuizWallBoard({ state }: { state: EventState }) {
           state.quiz.answers.map((item) => (
             <article className={`quiz-answer-message ${item.correct ? 'correct' : ''}`} key={`${item.quizId}-${item.id}`}>
               <strong>
-                <span>{[item.author, item.group || 'ID 없음', item.department || '부서 미입력', item.participantId.slice(-6)].join(' · ')}</span>
+                <span>{[item.author, item.group || 'ID 없음', item.department].filter(Boolean).join(' · ')}</span>
                 {item.rank ? <em>{item.rank}등 정답</em> : item.correct ? <em>정답</em> : null}
               </strong>
               <p>{item.text}</p>
             </article>
           ))
         ) : (
-          <p className="empty-state compact">아직 도착한 답변이 없습니다.</p>
+          <p className="empty-state compact">{state.copy.quizAnswerEmpty}</p>
         )}
       </div>
     </section>
@@ -2210,7 +2413,7 @@ function QuizAdminPanel({
             state.quiz.answers.map((item) => (
               <article className={`quiz-answer-message ${item.correct ? 'correct' : ''}`} key={`${item.quizId}-${item.id}`}>
                 <strong>
-                  <span>{[item.author, item.group || 'ID 없음', item.department || '부서 미입력'].join(' · ')}</span>
+                  <span>{[item.author, item.group || 'ID 없음', item.department].filter(Boolean).join(' · ')}</span>
                   {item.rank ? <em>{item.rank}등 정답</em> : item.correct ? <em>정답</em> : null}
                 </strong>
                 <p>{item.text}</p>
@@ -2341,7 +2544,7 @@ function getAdminPanelTitle(panel: AdminPanel) {
   if (panel === 'arena') return '실시간 별 현황 전체화면'
   if (panel === 'participants') return '실참여자 전체 리스트'
   if (panel === 'messages') return '응원 메시지 전체 관리'
-  if (panel === 'teams') return '팀 정보 관리'
+  if (panel === 'teams') return '운영 콘텐츠 관리'
   if (panel === 'quiz') return '퀴즈 운영'
   return '행운권 추첨 쇼업'
 }
@@ -2863,11 +3066,11 @@ function MessageManagerDetail({
 
 function TeamConfigPanel({ state, onOpen }: { state: EventState; onOpen: () => void }) {
   return (
-    <section className="team-config-panel" aria-label="팀 정보 관리">
+    <section className="team-config-panel" aria-label="운영 콘텐츠 관리">
       <div className="section-heading compact">
         <div>
-          <p className="section-kicker">Team Setup</p>
-          <h2>팀 정보</h2>
+          <p className="section-kicker">{state.copy.contentPanelEyeline}</p>
+          <h2>{state.copy.contentPanelTitle}</h2>
         </div>
         <button type="button" className="panel-open-button" onClick={onOpen}>
           <Settings2 size={14} />
@@ -2876,7 +3079,7 @@ function TeamConfigPanel({ state, onOpen }: { state: EventState; onOpen: () => v
       </div>
       <div className="config-summary">
         <strong>{state.teams.length}개 팀</strong>
-        <span>팀명, 프로젝트명, 팀원, 로고, 안내 문구를 수정합니다.</span>
+        <span>{state.copy.contentPanelSummary}</span>
       </div>
     </section>
   )
@@ -2997,15 +3200,29 @@ function TeamConfigDetail({
       <section className="copy-config-grid" aria-label="화면 문구 관리">
         <div className="section-heading compact">
           <div>
-            <p className="section-kicker">Copy</p>
-            <h2>화면 문구</h2>
+            <p className="section-kicker">Screen Copy</p>
+            <h2>화면별 문구 관리</h2>
           </div>
         </div>
-        {(Object.keys(fallbackCopy) as Array<keyof EventCopy>).map((key) => (
-          <label key={key}>
-            <span>{copyLabels[key]}</span>
-            <textarea value={draftCopy[key]} onChange={(event) => updateCopy(key, event.target.value)} />
-          </label>
+        {copyGroups.map((group) => (
+          <article className="copy-config-group" key={group.id}>
+            <div className="copy-group-heading">
+              <p className="section-kicker">{group.eyeline}</p>
+              <h3>{group.title}</h3>
+              <span>{group.description}</span>
+            </div>
+            <div className="copy-field-grid">
+              {group.keys.map((key) => (
+                <label key={key}>
+                  <span>
+                    <strong>{copyLabels[key]}</strong>
+                    {copyHelp[key] ? <em>{copyHelp[key]}</em> : null}
+                  </span>
+                  <textarea value={draftCopy[key]} onChange={(event) => updateCopy(key, event.target.value)} />
+                </label>
+              ))}
+            </div>
+          </article>
         ))}
       </section>
 
@@ -3421,13 +3638,13 @@ function CheerConstellation({
     <div className={`cheer-constellation ${isScattering ? 'is-scattering' : ''}`} role="dialog" aria-modal="true" aria-label="응원 메시지 쇼업">
       <div className="constellation-toolbar">
         <div>
-          <p className="section-kicker">Cheer Showup</p>
-          <h2>팀별 응원 메시지 구름</h2>
+          <p className="section-kicker">{state.copy.showupEyeline}</p>
+          <h2>{state.copy.showupTitle}</h2>
         </div>
         <div className="constellation-actions">
           <button type="button" className="shuffle-button" onClick={scatterBubbles}>
             <Sparkles size={16} />
-            버블 섞기
+            {state.copy.showupShuffleLabel}
           </button>
           <button type="button" className="close-button" onClick={onClose}>
             닫기
@@ -3577,8 +3794,8 @@ function RafflePanel({
     <section className="raffle-panel" aria-label="행운권 추첨">
       <div className="section-heading compact">
         <div>
-          <p className="section-kicker">Lucky Draw</p>
-          <h2>행운권 추첨</h2>
+          <p className="section-kicker">{state.copy.rafflePanelEyeline}</p>
+          <h2>{state.copy.rafflePanelTitle}</h2>
         </div>
         <button type="button" className="panel-open-button" onClick={onOpen}>
           <Maximize2 size={14} />
@@ -3627,14 +3844,10 @@ function RafflePanel({
         </button>
       </div>
 
-      <div className={`draw-stage ${isDrawing ? 'drawing' : ''}`}>
+      <div className={`draw-stage compact ${isDrawing ? 'drawing' : ''}`}>
         <div>
           <span>후보</span>
           <strong>{state.lastRaffle?.candidates ?? getRaffleCandidatesForRule(state, raffleRule).length}명</strong>
-        </div>
-        <div>
-          <span>현재 1위</span>
-          <strong>{state.teams[0]?.name ?? '-'}</strong>
         </div>
       </div>
 
@@ -3705,7 +3918,8 @@ function RaffleDetailPanel({
     : [{ id: 'standby', name: '후보 대기', group: '', allocations: {}, cheered: false, updatedAt: 0 }]
   const winners = !isDrawing ? (state.lastRaffle?.winners ?? []) : []
   const hasWinners = winners.length > 0
-  const candidateBalls = Array.from({ length: 14 }, (_, index) => rollingNames[index % rollingNames.length])
+  const visualBallCount = rollingNames.length > 1 ? clamp(previewCandidates.length, 14, publicMode ? 30 : 22) : 14
+  const candidateBalls = Array.from({ length: visualBallCount }, (_, index) => rollingNames[index % rollingNames.length])
   const targetCandidates = Array.from({ length: 6 }, (_, index) => rollingNames[index % rollingNames.length])
 
   return (
@@ -3860,21 +4074,24 @@ function RaffleDetailPanel({
           </button>
         </div>
 
-        <div className={`draw-stage ${isDrawing ? 'drawing' : ''}`}>
+        <div className={`draw-stage compact ${isDrawing ? 'drawing' : ''}`}>
           <div>
             <span>후보</span>
             <strong>{previewCandidates.length}명</strong>
           </div>
-          <div>
-            <span>현재 1위</span>
-            <strong>{state.teams[0]?.name ?? '-'}</strong>
-          </div>
         </div>
 
         <div className="candidate-strip">
-          {rollingNames.map((person) => (
-            <span key={person.id}>{person.name}</span>
-          ))}
+          <strong>후보 명단</strong>
+          <div>
+            {previewCandidates.length ? (
+              previewCandidates.map((person) => (
+                <span key={person.id}>{person.group ? `${person.name} · ${person.group}` : person.name}</span>
+              ))
+            ) : (
+              <span>후보가 없습니다</span>
+            )}
+          </div>
         </div>
       </aside>
     </div>
