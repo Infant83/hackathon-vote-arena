@@ -774,7 +774,7 @@ function VoteView({
   const perTeamStarLimit = Math.min(starBudget, MAX_STARS_PER_TEAM)
   const currentParticipantId = participant?.id ?? participantId
   const participantMessages = state.cheers.filter((message) => message.participantId === currentParticipantId)
-  const quizActive = state.quiz.mode !== 'idle'
+  const quizActive = state.quiz.mode === 'open'
   const quizAnswerText = quizAnswerDraft.quizId === state.quiz.id ? quizAnswerDraft.text : ''
   const quizFeedback = quizFeedbackDraft.quizId === state.quiz.id ? quizFeedbackDraft.text : ''
   const myQuizAnswers = state.quiz.answers.filter((answer) => answer.participantId === currentParticipantId)
