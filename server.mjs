@@ -78,6 +78,12 @@ const defaultCopy = {
   rafflePanelEyeline: 'Lucky Draw',
   rafflePanelTitle: '행운권 추첨',
   rafflePrizeImageFile: '',
+  rafflePrizeImageAll: '',
+  rafflePrizeImageLeader: '',
+  rafflePrizeImageTop2: '',
+  rafflePrizeImageTop3: '',
+  rafflePrizeImageMulti: '',
+  rafflePrizeImageBig: '',
 }
 
 const defaultTeams = [
@@ -210,6 +216,7 @@ const defaultQuizBank = [
     question: '오늘 행사의 관객 참여 시스템 이름은 무엇일까요?',
     answer: 'Vibe Vote Arena',
     acceptedAnswers: ['vibevotearena', '바이브보트아레나'],
+    prizeImageFile: '',
     winnerCount: 2,
     enabled: true,
   },
@@ -219,6 +226,7 @@ const defaultQuizBank = [
     question: '한 참가자가 한 팀에 줄 수 있는 별의 최대 개수는 몇 개일까요?',
     answer: '10',
     acceptedAnswers: ['10개', '열개'],
+    prizeImageFile: '',
     winnerCount: 2,
     enabled: true,
   },
@@ -239,6 +247,7 @@ const emptyQuizState = {
   mode: 'idle',
   selectedQuizId: '',
   question: '',
+  prizeImageFile: '',
   winnerCount: 2,
   answers: [],
   winners: [],
@@ -297,7 +306,7 @@ function normalizeCopy(input) {
 
   for (const key of Object.keys(defaultCopy)) {
     if (typeof input?.[key] === 'string') {
-      next[key] = key === 'appLogoFile' || key === 'rafflePrizeImageFile'
+      next[key] = isImageCopyKey(key)
         ? sanitizeLogoPath(input[key])
         : sanitizeText(input[key], 240)
     }
@@ -350,9 +359,14 @@ function normalizeQuizConfig(input, fallback = defaultQuizBank[0], index = 0) {
     question: sanitizeText(source.question ?? fallback.question, quizQuestionMaxLength),
     answer,
     acceptedAnswers: acceptedAnswers.slice(0, 8),
+    prizeImageFile: sanitizeLogoPath(source.prizeImageFile ?? fallback.prizeImageFile ?? ''),
     winnerCount: Math.max(1, Math.min(10, Math.floor(Number(source.winnerCount ?? fallback.winnerCount ?? 2)))),
     enabled: source.enabled === false ? false : fallback.enabled !== false,
   }
+}
+
+function isImageCopyKey(key) {
+  return key === 'appLogoFile' || key.startsWith('rafflePrizeImage')
 }
 
 function sanitizeSlug(value) {
@@ -509,6 +523,7 @@ async function persistTeamConfig() {
       question: quiz.question,
       answer: quiz.answer,
       acceptedAnswers: quiz.acceptedAnswers,
+      prizeImageFile: quiz.prizeImageFile,
       winnerCount: quiz.winnerCount,
       enabled: quiz.enabled,
     })),
@@ -737,6 +752,7 @@ function openQuiz(body) {
   const acceptedAnswers = Array.isArray(body.acceptedAnswers)
     ? body.acceptedAnswers.map((value) => sanitizeText(value, quizAnswerMaxLength)).filter(Boolean)
     : selectedQuiz?.acceptedAnswers || []
+  const prizeImageFile = sanitizeLogoPath(body.prizeImageFile ?? selectedQuiz?.prizeImageFile ?? '')
   const winnerCount = Math.max(1, Math.min(10, Math.floor(Number(body.winnerCount ?? selectedQuiz?.winnerCount) || 2)))
   const answerKeys = normalizeQuizAnswerKeys([answer, ...acceptedAnswers].join('\n'))
   const now = Date.now()
@@ -749,6 +765,7 @@ function openQuiz(body) {
     mode: 'countdown',
     selectedQuizId: selectedQuiz?.id || selectedQuizId || '',
     question,
+    prizeImageFile,
     winnerCount,
     answers: [],
     winners: [],

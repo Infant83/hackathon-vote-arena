@@ -129,6 +129,7 @@ type QuizState = {
   mode: QuizMode
   selectedQuizId: string
   question: string
+  prizeImageFile: string
   winnerCount: number
   answers: QuizAnswer[]
   winners: QuizAnswer[]
@@ -144,6 +145,7 @@ type QuizConfig = {
   question: string
   answer: string
   acceptedAnswers: string[]
+  prizeImageFile: string
   winnerCount: number
   enabled: boolean
 }
@@ -230,7 +232,24 @@ type EventCopy = {
   rafflePanelEyeline: string
   rafflePanelTitle: string
   rafflePrizeImageFile: string
+  rafflePrizeImageAll: string
+  rafflePrizeImageLeader: string
+  rafflePrizeImageTop2: string
+  rafflePrizeImageTop3: string
+  rafflePrizeImageMulti: string
+  rafflePrizeImageBig: string
 }
+
+type EventCopyImageKey =
+  | 'appLogoFile'
+  | 'rafflePrizeImageFile'
+  | 'rafflePrizeImageAll'
+  | 'rafflePrizeImageLeader'
+  | 'rafflePrizeImageTop2'
+  | 'rafflePrizeImageTop3'
+  | 'rafflePrizeImageMulti'
+  | 'rafflePrizeImageBig'
+type RafflePrizeImageKey = Exclude<EventCopyImageKey, 'appLogoFile'>
 
 type CheerNameMode = 'masked' | 'real'
 type RaffleRule = 'all' | 'leader' | 'top2' | 'top3' | 'multi' | 'big' | 'cheer'
@@ -247,6 +266,54 @@ const raffleRuleOptions: Array<{ value: RaffleRule; label: string }> = [
   { value: 'top3', label: '현재 1·2·3위 팀 모두에 별을 준 참여자' },
   { value: 'multi', label: '3개 이상 팀에 별을 나눠 준 참여자' },
   { value: 'big', label: '한 팀에 별 7개 이상을 준 참여자' },
+]
+
+const rafflePrizeImageKeyByRule: Record<RaffleRule, RafflePrizeImageKey> = {
+  all: 'rafflePrizeImageAll',
+  leader: 'rafflePrizeImageLeader',
+  top2: 'rafflePrizeImageTop2',
+  top3: 'rafflePrizeImageTop3',
+  multi: 'rafflePrizeImageMulti',
+  big: 'rafflePrizeImageBig',
+  cheer: 'rafflePrizeImageAll',
+}
+
+const rafflePrizeImageFields: Array<{ key: RafflePrizeImageKey; label: string; description: string }> = [
+  {
+    key: 'rafflePrizeImageFile',
+    label: '기본 행운권 상품 이미지',
+    description: '추첨 룰별 상품 이미지가 비어 있을 때 대신 보여줄 기본 이미지입니다.',
+  },
+  {
+    key: 'rafflePrizeImageAll',
+    label: '공개 응원 메시지 참여자 상품',
+    description: '추첨 룰이 “공개 응원 메시지 참여자”일 때 보여줄 상품 이미지입니다.',
+  },
+  {
+    key: 'rafflePrizeImageLeader',
+    label: '현재 1위 팀 참여자 상품',
+    description: '추첨 룰이 “현재 1위 팀에 별을 준 참여자”일 때 보여줄 상품 이미지입니다.',
+  },
+  {
+    key: 'rafflePrizeImageTop2',
+    label: '1·2위 팀 참여자 상품',
+    description: '추첨 룰이 “현재 1·2위 팀 모두에 별을 준 참여자”일 때 보여줄 상품 이미지입니다.',
+  },
+  {
+    key: 'rafflePrizeImageTop3',
+    label: '1·2·3위 팀 참여자 상품',
+    description: '추첨 룰이 “현재 1·2·3위 팀 모두에 별을 준 참여자”일 때 보여줄 상품 이미지입니다.',
+  },
+  {
+    key: 'rafflePrizeImageMulti',
+    label: '3개 이상 팀 참여자 상품',
+    description: '추첨 룰이 “3개 이상 팀에 별을 나눠 준 참여자”일 때 보여줄 상품 이미지입니다.',
+  },
+  {
+    key: 'rafflePrizeImageBig',
+    label: '한 팀 7개 이상 참여자 상품',
+    description: '추첨 룰이 “한 팀에 별 7개 이상을 준 참여자”일 때 보여줄 상품 이미지입니다.',
+  },
 ]
 
 const raffleStyleOptions: Array<{ value: RaffleStyle; label: string }> = [
@@ -347,6 +414,12 @@ const copyLabels: Record<keyof EventCopy, string> = {
   rafflePanelEyeline: '관리자 추첨 패널 라벨',
   rafflePanelTitle: '관리자 추첨 패널 제목',
   rafflePrizeImageFile: '행운권 상품 이미지',
+  rafflePrizeImageAll: '공개 응원 메시지 참여자 상품 이미지',
+  rafflePrizeImageLeader: '현재 1위 팀 참여자 상품 이미지',
+  rafflePrizeImageTop2: '1·2위 팀 참여자 상품 이미지',
+  rafflePrizeImageTop3: '1·2·3위 팀 참여자 상품 이미지',
+  rafflePrizeImageMulti: '3개 이상 팀 참여자 상품 이미지',
+  rafflePrizeImageBig: '한 팀 7개 이상 참여자 상품 이미지',
 }
 
 const copyHelp: Partial<Record<keyof EventCopy, string>> = {
@@ -366,6 +439,12 @@ const copyHelp: Partial<Record<keyof EventCopy, string>> = {
   quizStandbyHint: '/wall과 /vote 퀴즈 대기 화면의 짧은 참여 방법 안내입니다.',
   contentPanelSummary: '/admin 운영 콘텐츠 카드의 설명 문구입니다.',
   rafflePrizeImageFile: '행운권 추첨 화면의 선물 아이콘을 눌렀을 때 보여줄 상품 이미지입니다.',
+  rafflePrizeImageAll: '공개 응원 메시지 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeImageLeader: '현재 1위 팀 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeImageTop2: '1·2위 팀 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeImageTop3: '1·2·3위 팀 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeImageMulti: '3개 이상 팀 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeImageBig: '한 팀 7개 이상 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
 }
 
 const copyGroups: Array<{
@@ -521,6 +600,12 @@ const fallbackCopy: EventCopy = {
   rafflePanelEyeline: 'Lucky Draw',
   rafflePanelTitle: '행운권 추첨',
   rafflePrizeImageFile: '',
+  rafflePrizeImageAll: '',
+  rafflePrizeImageLeader: '',
+  rafflePrizeImageTop2: '',
+  rafflePrizeImageTop3: '',
+  rafflePrizeImageMulti: '',
+  rafflePrizeImageBig: '',
 }
 
 const fallbackTeams: Team[] = [
@@ -693,6 +778,7 @@ const fallbackQuizBank: QuizConfig[] = [
     question: '오늘 행사의 관객 참여 시스템 이름은 무엇일까요?',
     answer: 'Vibe Vote Arena',
     acceptedAnswers: ['vibevotearena', '바이브보트아레나'],
+    prizeImageFile: '',
     winnerCount: 2,
     enabled: true,
   },
@@ -702,6 +788,7 @@ const fallbackQuizBank: QuizConfig[] = [
     question: '한 참가자가 한 팀에 줄 수 있는 별의 최대 개수는 몇 개일까요?',
     answer: '10',
     acceptedAnswers: ['10개', '열개'],
+    prizeImageFile: '',
     winnerCount: 2,
     enabled: true,
   },
@@ -736,6 +823,7 @@ const fallbackState: EventState = {
     mode: 'idle',
     selectedQuizId: '',
     question: '',
+    prizeImageFile: '',
     winnerCount: 2,
     answers: [],
     winners: [],
@@ -1659,17 +1747,22 @@ function QuizParticipationView({
         </div>
       ) : null}
       <div className="quiz-question-card">
-        <p className="section-kicker">Live Quiz #{quiz.round || 1}</p>
-        <h2 className="quiz-question-heading">
-          <span className="quiz-question-prefix">Q.</span>
-          <span>
-          {phase === 'standby'
-            ? copy.quizPendingQuestion
-            : phase === 'intro' || phase === 'countdown'
-              ? '문제가 곧 공개됩니다.'
-              : quiz.question || copy.quizPendingQuestion}
-          </span>
-        </h2>
+        <div className="quiz-question-layout participant">
+          <div className="quiz-question-copy">
+            <p className="section-kicker">Live Quiz #{quiz.round || 1}</p>
+            <h2 className="quiz-question-heading">
+              <span className="quiz-question-prefix">Q.</span>
+              <span>
+                {phase === 'standby'
+                  ? copy.quizPendingQuestion
+                  : phase === 'intro' || phase === 'countdown'
+                    ? '문제가 곧 공개됩니다.'
+                    : quiz.question || copy.quizPendingQuestion}
+              </span>
+            </h2>
+          </div>
+          <QuizPrizeCard image={quiz.prizeImageFile} label="퀴즈 상품" />
+        </div>
       </div>
 
       <div className={`quiz-answer-card ${hasWon ? 'is-winner' : ''}`}>
@@ -2312,21 +2405,26 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
       ) : null}
 
       <div className="quiz-current-panel">
-        <p className="section-kicker">{state.copy.quizCurrentQuestionLabel}</p>
-        <h3 className="quiz-question-heading">
-          <span className="quiz-question-prefix">Q.</span>
-          <span>
-            {phase === 'idle' || phase === 'standby'
-              ? state.copy.quizPendingQuestion
-              : phase === 'intro' || phase === 'countdown'
-                ? '문제가 곧 공개됩니다.'
-                : state.quiz.question || state.copy.quizPendingQuestion}
-          </span>
-        </h3>
-        <div className="quiz-stats">
-          <span>답변 {answerCount}</span>
-          <span>정답 {correctCount}</span>
-          <span>정답자 {state.quiz.winners.length}/{state.quiz.winnerCount}</span>
+        <div className="quiz-question-layout wall">
+          <div className="quiz-question-copy">
+            <p className="section-kicker">{state.copy.quizCurrentQuestionLabel}</p>
+            <h3 className="quiz-question-heading">
+              <span className="quiz-question-prefix">Q.</span>
+              <span>
+                {phase === 'idle' || phase === 'standby'
+                  ? state.copy.quizPendingQuestion
+                  : phase === 'intro' || phase === 'countdown'
+                    ? '문제가 곧 공개됩니다.'
+                    : state.quiz.question || state.copy.quizPendingQuestion}
+              </span>
+            </h3>
+            <div className="quiz-stats">
+              <span>답변 {answerCount}</span>
+              <span>정답 {correctCount}</span>
+              <span>정답자 {state.quiz.winners.length}/{state.quiz.winnerCount}</span>
+            </div>
+          </div>
+          <QuizPrizeCard image={state.quiz.prizeImageFile} label="퀴즈 상품" />
         </div>
       </div>
 
@@ -2373,6 +2471,34 @@ function QuizWinnerSpotlight({ winner }: { winner: QuizAnswer }) {
   )
 }
 
+function QuizPrizeCard({ image, label }: { image?: string; label: string }) {
+  const [open, setOpen] = useState(false)
+
+  if (!image) return null
+
+  return (
+    <div className="quiz-prize-card">
+      <button type="button" onClick={() => setOpen(true)} aria-label={`${label} 크게 보기`}>
+        <span>
+          <Gift size={16} />
+          {label}
+        </span>
+        <img src={image} alt="" />
+      </button>
+      {open ? (
+        <div className="prize-image-overlay global" role="dialog" aria-modal="true" aria-label={label}>
+          <div>
+            <button type="button" onClick={() => setOpen(false)} aria-label={`${label} 닫기`}>
+              <X size={18} />
+            </button>
+            <img src={image} alt={label} />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function QuizAdminPanel({
   state,
   post,
@@ -2411,6 +2537,7 @@ function QuizAdminPanel({
       question,
       answer,
       acceptedAnswers: selectedQuiz.acceptedAnswers,
+      prizeImageFile: selectedQuiz.prizeImageFile,
       winnerCount,
     })
   }
@@ -3220,7 +3347,7 @@ function TeamConfigDetail({
     setDraftCopy((current) => ({ ...current, [key]: value }))
   }
 
-  const updateCopyImage = (key: 'appLogoFile' | 'rafflePrizeImageFile', value: string) => {
+  const updateCopyImage = (key: EventCopyImageKey, value: string) => {
     updateCopy(key, normalizeLogoSourceValue(value))
   }
 
@@ -3246,7 +3373,7 @@ function TeamConfigDetail({
     }
   }
 
-  const uploadCopyImage = async (key: 'appLogoFile' | 'rafflePrizeImageFile', file: File | undefined) => {
+  const uploadCopyImage = async (key: EventCopyImageKey, file: File | undefined) => {
     if (!file) return
 
     try {
@@ -3262,6 +3389,22 @@ function TeamConfigDetail({
     setDraftQuizzes((current) =>
       current.map((quiz, quizIndex) => (quizIndex === index ? { ...quiz, [field]: value } : quiz)),
     )
+  }
+
+  const updateQuizPrizeImage = (index: number, value: string) => {
+    updateQuiz(index, 'prizeImageFile', normalizeLogoSourceValue(value))
+  }
+
+  const uploadQuizPrizeImage = async (index: number, file: File | undefined) => {
+    if (!file) return
+
+    try {
+      const dataUrl = await readLogoFileAsDataUrl(file)
+      updateQuiz(index, 'prizeImageFile', dataUrl)
+      setStatusText(`${draftQuizzes[index]?.title || `퀴즈 ${index + 1}`} 상품 이미지를 불러왔습니다.`)
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : '이미지 파일을 불러오지 못했습니다.')
+    }
   }
 
   const saveConfig = async () => {
@@ -3343,16 +3486,19 @@ function TeamConfigDetail({
             onUpload={(file) => uploadCopyImage('appLogoFile', file)}
             onClear={() => updateCopy('appLogoFile', '')}
           />
-          <ImageSourceField
-            label="행운권 상품 이미지"
-            description="행운권 추첨 화면의 선물 아이콘을 눌렀을 때 크게 보여줄 이미지입니다."
-            value={draftCopy.rafflePrizeImageFile}
-            previewLabel="상품 이미지 미리보기"
-            onRawChange={(value) => updateCopy('rafflePrizeImageFile', value)}
-            onChange={(value) => updateCopyImage('rafflePrizeImageFile', value)}
-            onUpload={(file) => uploadCopyImage('rafflePrizeImageFile', file)}
-            onClear={() => updateCopy('rafflePrizeImageFile', '')}
-          />
+          {rafflePrizeImageFields.map((field) => (
+            <ImageSourceField
+              key={field.key}
+              label={field.label}
+              description={field.description}
+              value={draftCopy[field.key]}
+              previewLabel="상품 이미지 미리보기"
+              onRawChange={(value) => updateCopy(field.key, value)}
+              onChange={(value) => updateCopyImage(field.key, value)}
+              onUpload={(file) => uploadCopyImage(field.key, file)}
+              onClear={() => updateCopy(field.key, '')}
+            />
+          ))}
         </div>
       </section>
 
@@ -3502,6 +3648,16 @@ function TeamConfigDetail({
                 <span>추가 인정 답</span>
                 <textarea value={quiz.acceptedAnswersText} onChange={(event) => updateQuiz(index, 'acceptedAnswersText', event.target.value)} />
               </label>
+              <ImageSourceField
+                label="퀴즈 상품 이미지"
+                description="이 문제를 출제했을 때 /wall과 참가자 화면에 보여줄 상품 이미지입니다."
+                value={quiz.prizeImageFile}
+                previewLabel="퀴즈 상품 이미지 미리보기"
+                onRawChange={(value) => updateQuiz(index, 'prizeImageFile', value)}
+                onChange={(value) => updateQuizPrizeImage(index, value)}
+                onUpload={(file) => uploadQuizPrizeImage(index, file)}
+                onClear={() => updateQuiz(index, 'prizeImageFile', '')}
+              />
             </div>
           </article>
         ))}
@@ -4220,7 +4376,7 @@ function RaffleDetailPanel({
   const visualBallCount = rollingNames.length > 1 ? clamp(previewCandidates.length, 14, publicMode ? 30 : 22) : 14
   const candidateBalls = Array.from({ length: visualBallCount }, (_, index) => rollingNames[index % rollingNames.length])
   const targetCandidates = Array.from({ length: 6 }, (_, index) => rollingNames[index % rollingNames.length])
-  const prizeImage = state.copy.rafflePrizeImageFile
+  const prizeImage = getRafflePrizeImage(state.copy, raffleRule)
 
   return (
     <div className={`raffle-detail ${publicMode ? 'public-mode' : ''}`}>
@@ -4555,6 +4711,11 @@ function getRaffleCandidatesForRule(state: EventState, rule: RaffleRule) {
   })
 }
 
+function getRafflePrizeImage(copy: EventCopy, rule: RaffleRule) {
+  const ruleImageKey = rafflePrizeImageKeyByRule[rule] || 'rafflePrizeImageFile'
+  return copy[ruleImageKey] || copy.rafflePrizeImageFile
+}
+
 function getParticipantSummaries(state: EventState): ParticipantSummary[] {
   const teamMap = new Map(state.teams.map((team) => [team.id, team]))
   const cheerCounts = new Map<string, { total: number; visible: number }>()
@@ -4806,6 +4967,7 @@ type QuizConfigDraft = {
   question: string
   answer: string
   acceptedAnswersText: string
+  prizeImageFile: string
   winnerCount: string
   enabled: boolean
 }
@@ -4936,6 +5098,7 @@ function createQuizDrafts(quizzes: QuizConfig[]): QuizConfigDraft[] {
     question: quiz.question,
     answer: quiz.answer,
     acceptedAnswersText: quiz.acceptedAnswers.join('\n'),
+    prizeImageFile: quiz.prizeImageFile || '',
     winnerCount: String(quiz.winnerCount || 2),
     enabled: quiz.enabled !== false,
   }))
@@ -4948,6 +5111,7 @@ function createBlankQuizDraft(index: number): QuizConfigDraft {
     question: '',
     answer: '',
     acceptedAnswersText: '',
+    prizeImageFile: '',
     winnerCount: '2',
     enabled: true,
   }
@@ -5006,6 +5170,7 @@ function quizDraftToConfig(quiz: QuizConfigDraft, index: number): QuizConfig {
       .map((item) => item.trim().slice(0, 120))
       .filter(Boolean)
       .slice(0, 8),
+    prizeImageFile: normalizeLogoSourceValue(quiz.prizeImageFile),
     winnerCount: clamp(Math.floor(Number(quiz.winnerCount) || 2), 1, 10),
     enabled: quiz.enabled,
   }
