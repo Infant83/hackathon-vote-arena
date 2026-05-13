@@ -262,6 +262,7 @@ let settings = {
   durationMinutes: defaultDurationMinutes,
   minScore: defaultMinScore,
   cheerNameMode: 'masked',
+  themeMode: 'light',
 }
 
 function loadConfig() {
@@ -356,13 +357,58 @@ function sanitizeSlug(value) {
 }
 
 function sanitizeLogoPath(value) {
-  const pathValue = String(value || '').trim()
-  if (!pathValue || pathValue.includes('..')) return ''
+  const pathValue = normalizeLogoSourceValue(String(value || '').trim())
+  if (!pathValue) return ''
+  if (isRemoteLogoUrl(pathValue)) return pathValue
+  if (pathValue.includes('..')) return ''
   if (/^data:image\/(png|jpeg|jpg|webp|svg\+xml|x-icon);base64,[a-zA-Z0-9+/=]+$/i.test(pathValue) && pathValue.length < 600_000) {
     return pathValue
   }
   if (!/^\/?[a-zA-Z0-9_./-]+\.(png|jpe?g|webp|svg|ico)$/i.test(pathValue)) return ''
   return pathValue.startsWith('/') ? pathValue : `/${pathValue}`
+}
+
+function normalizeLogoSourceValue(value) {
+  const trimmed = String(value || '').trim()
+  const driveId = extractGoogleDriveFileId(trimmed)
+  return driveId ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(driveId)}&sz=w1200` : trimmed
+}
+
+function extractGoogleDriveFileId(value) {
+  if (!value) return ''
+
+  try {
+    const url = new URL(value)
+    if (!/(\.|^)google\.com$/i.test(url.hostname) && !/(\.|^)googleusercontent\.com$/i.test(url.hostname)) return ''
+
+    const idParam = url.searchParams.get('id')
+    if (idParam) return sanitizeDriveFileId(idParam)
+
+    const fileMatch = url.pathname.match(/\/file\/d\/([^/]+)/i)
+    if (fileMatch?.[1]) return sanitizeDriveFileId(fileMatch[1])
+
+    const shortMatch = url.pathname.match(/\/d\/([^/]+)/i)
+    if (shortMatch?.[1]) return sanitizeDriveFileId(shortMatch[1])
+  } catch {
+    return ''
+  }
+
+  return ''
+}
+
+function sanitizeDriveFileId(value) {
+  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128)
+}
+
+function isRemoteLogoUrl(value) {
+  if (String(value || '').length > 2000) return false
+
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || url.protocol === 'http:'
+  } catch {
+    return false
+  }
 }
 
 function sanitizeColor(value) {
@@ -469,7 +515,7 @@ async function persistTeamConfig() {
         name: team.name,
         title: team.title,
         members: team.members,
-        logoFile: team.logoFile.startsWith('data:') ? '' : team.logoFile,
+        logoFile: team.logoFile,
         color: team.color,
         logo: team.logo,
         baseStars: team.baseStars,
@@ -933,6 +979,10 @@ function normalizeCheerNameMode(value, fallback = 'masked') {
   return value === 'real' ? 'real' : value === 'masked' ? 'masked' : fallback
 }
 
+function normalizeThemeMode(value, fallback = 'light') {
+  return value === 'stage' ? 'stage' : value === 'light' ? 'light' : fallback
+}
+
 function parseCookies(cookieHeader = '') {
   return Object.fromEntries(
     cookieHeader
@@ -1333,6 +1383,7 @@ async function handleApi(request, response, url) {
       durationMinutes: nextDurationMinutes,
       minScore: nextMinScore,
       cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, settings.cheerNameMode),
+      themeMode: normalizeThemeMode(body.themeMode, settings.themeMode),
     }
     normalizeAllParticipantAllocations()
     closed = false

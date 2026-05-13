@@ -4,10 +4,10 @@
 
 An LG-inspired internal event platform with two coordinated surfaces:
 
-- **Operational UI** (`/vote`, most of `/admin`): white product UI, restrained LG Red accents, and dark gray typography.
-- **Projection / show surfaces** (`/wall` quiz, raffle showup, cheer showup): dark event-stage UI based on the external hackathon "간지" slide, with midnight navy, electric blue, violet, magenta, and coral light accents.
+- **Current mode** (`light`): white product UI, restrained LG Red accents, and dark gray typography.
+- **Dark mode** (`stage`): event-stage UI based on `ppt_sample/EDM_(일반진행)해커톤 간지 선정_양식(외부)_v0.1.pptx`, with midnight navy, electric blue, violet, magenta, and coral light accents.
 
-The interface should feel polished, useful, and live without becoming noisy. The dark stage style is for auditorium focus and should not reduce mobile voting readability.
+The administrator can switch the global theme from the control desk. The interface should feel polished, useful, and live without becoming noisy. The dark stage style is for auditorium focus and should not reduce mobile voting readability.
 
 ## Colors
 
@@ -34,7 +34,7 @@ Rules:
 
 - Red is a point color in operational UI, not a background theme.
 - Keep the participant voting screen white and light gray with dark text.
-- Use the dark event palette only where the room is meant to watch a shared screen: quiz, raffle, and showup surfaces.
+- Use the dark event palette either for shared-screen surfaces or when the administrator intentionally switches the global theme to dark mode.
 - The dark palette should read as black/navy with luminous blue-magenta ribbons, not a generic purple dashboard.
 - Avoid decorative orbs/blobs; use broad light-ribbon gradients and glass-like panels when referencing the external 간지.
 
@@ -65,6 +65,7 @@ Rules:
 - Admin cheer showup: clicking the cheer panel opens a full-screen message cloud where team messages cluster around team-specific color centers. It may use the dark event palette when projected.
 - Admin controls: voting close/reopen, live star movement feed, real participant list with expanded panel, cheer message moderation with keyword filtering and bulk actions, raffle rule select, winner count input, draw button, animated draw state, winner list, and large raffle showup panel. A participant remains raffle-eligible only when they have spent at least one star and still have at least one visible cheer message.
 - Content management: `/admin` has a single 운영 콘텐츠 panel for team data, screen copy, quiz bank, import/export, and publish. Screen copy fields are grouped by where they appear (`/vote`, `/wall`, showup, quiz) so an operator can edit without guessing.
+- Team imagery: team logo fields accept bundled `/team-logos/...` paths, public image URLs, Google Drive image links, and local image uploads. When a team is selected on `/wall`, show this image as a larger team photo/card preview rather than only a small mark.
 
 ## Motion
 

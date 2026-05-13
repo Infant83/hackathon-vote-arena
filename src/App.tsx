@@ -11,6 +11,8 @@ import {
   EyeOff,
   FileSpreadsheet,
   Gift,
+  ImagePlus,
+  Link2,
   Maximize2,
   Megaphone,
   MessageCircle,
@@ -145,6 +147,8 @@ type QuizConfig = {
   enabled: boolean
 }
 
+type ThemeMode = 'light' | 'stage'
+
 type EventState = {
   teams: Team[]
   participants: Participant[]
@@ -164,6 +168,7 @@ type EventState = {
     durationMinutes: number
     minScore: number
     cheerNameMode: CheerNameMode
+    themeMode: ThemeMode
   }
   copy: EventCopy
 }
@@ -737,6 +742,7 @@ const fallbackState: EventState = {
     durationMinutes: DEFAULT_DURATION_MINUTES,
     minScore: DEFAULT_MIN_SCORE,
     cheerNameMode: 'masked',
+    themeMode: 'light',
   },
   copy: fallbackCopy,
 }
@@ -751,6 +757,7 @@ function App() {
   const mode = getAppMode()
   const [participantId] = useState(getOrCreateParticipantId)
   const { state, connection, post } = useEventState(mode, participantId)
+  const themeMode = getThemeMode(state)
   const [name, setName] = useState(() => getStoredValue(nameKey))
   const [group, setGroup] = useState(() => getStoredValue(groupKey))
   const [department, setDepartment] = useState(() => getStoredValue(departmentKey))
@@ -764,6 +771,10 @@ function App() {
   const starBudget = getStarBudget(state)
   const spentStars = sumStars(allocations)
   const remainingStars = Math.max(0, starBudget - spentStars)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode
+  }, [themeMode])
 
   const saveName = (nextName: string) => {
     setName(nextName)
@@ -781,7 +792,7 @@ function App() {
   }
 
   return (
-    <main className={`app-shell ${mode === 'wall' ? 'wall-shell-app' : ''}`}>
+    <main className={`app-shell theme-${themeMode} ${mode === 'wall' ? 'wall-shell-app' : ''}`}>
       <Header
         mode={mode}
         connection={connection}
@@ -1702,6 +1713,7 @@ function AdminView({
   const durationMinutes = getDurationMinutes(state)
   const minScore = getMinScore(state)
   const cheerNameMode = getCheerNameMode(state)
+  const themeMode = getThemeMode(state)
   const totalRegistered = state.participants.length
   const totalDynamicVoters = state.participants.filter((person) => sumStars(person.allocations) > 0).length
   const totalDynamicStars = state.participants.reduce((sum, person) => sum + sumStars(person.allocations), 0)
@@ -1734,6 +1746,17 @@ function AdminView({
       durationMinutes: data.get('durationMinutes'),
       minScore: data.get('minScore'),
       cheerNameMode: data.get('cheerNameMode'),
+      themeMode: data.get('themeMode'),
+    })
+  }
+
+  const applyThemeMode = (nextThemeMode: ThemeMode) => {
+    post('/api/settings', {
+      starBudget,
+      durationMinutes,
+      minScore,
+      cheerNameMode,
+      themeMode: nextThemeMode,
     })
   }
 
@@ -1815,7 +1838,7 @@ function AdminView({
         </div>
         <form
           className="control-grid"
-          key={`${starBudget}:${durationMinutes}:${minScore}:${cheerNameMode}`}
+          key={`${starBudget}:${durationMinutes}:${minScore}:${cheerNameMode}:${themeMode}`}
           onSubmit={(event) => {
             event.preventDefault()
             applySettings(event.currentTarget)
@@ -1865,6 +1888,33 @@ function AdminView({
               <option value="real">실명모드</option>
             </select>
           </label>
+          <fieldset className="theme-toggle-field">
+            <legend>화면 테마</legend>
+            <label>
+              <input
+                type="radio"
+                name="themeMode"
+                value="light"
+                defaultChecked={themeMode === 'light'}
+                onChange={(event) => {
+                  if (event.currentTarget.checked) applyThemeMode('light')
+                }}
+              />
+              <span>현재 모드</span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="themeMode"
+                value="stage"
+                defaultChecked={themeMode === 'stage'}
+                onChange={(event) => {
+                  if (event.currentTarget.checked) applyThemeMode('stage')
+                }}
+              />
+              <span>어두운 모드</span>
+            </label>
+          </fieldset>
           <button type="submit">
             <Clock3 size={16} />
             설정 적용
@@ -2528,7 +2578,7 @@ function PublicCheerBoard({
           onClick={onSelectAll}
           aria-label={`${selectedTeam.name} 선택 해제`}
         >
-          <LogoMark team={selectedTeam} />
+          <TeamPhotoPreview team={selectedTeam} />
           <div>
             <strong>{selectedTeam.name}</strong>
             <p>{selectedTeam.title}</p>
@@ -3130,6 +3180,22 @@ function TeamConfigDetail({
     )
   }
 
+  const updateTeamLogo = (index: number, value: string) => {
+    updateTeam(index, 'logoFile', normalizeLogoSourceValue(value))
+  }
+
+  const uploadTeamLogo = async (index: number, file: File | undefined) => {
+    if (!file) return
+
+    try {
+      const dataUrl = await readLogoFileAsDataUrl(file)
+      updateTeam(index, 'logoFile', dataUrl)
+      setStatusText(`${draftTeams[index]?.name || `Team ${index + 1}`} 로고/사진 파일을 불러왔습니다.`)
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : '이미지 파일을 불러오지 못했습니다.')
+    }
+  }
+
   const updateQuiz = (index: number, field: string, value: string | boolean) => {
     setDraftQuizzes((current) =>
       current.map((quiz, quizIndex) => (quizIndex === index ? { ...quiz, [field]: value } : quiz)),
@@ -3260,14 +3326,18 @@ function TeamConfigDetail({
                 <span>프로젝트명</span>
                 <input value={team.title} onChange={(event) => updateTeam(index, 'title', event.target.value)} />
               </label>
-              <label>
+              <label className="wide">
                 <span>팀원</span>
                 <textarea value={team.membersText} onChange={(event) => updateTeam(index, 'membersText', event.target.value)} />
               </label>
-              <label>
-                <span>로고 경로</span>
-                <input value={team.logoFile} onChange={(event) => updateTeam(index, 'logoFile', event.target.value)} />
-              </label>
+              <LogoSourceField
+                team={team}
+                index={index}
+                onChange={(value) => updateTeamLogo(index, value)}
+                onRawChange={(value) => updateTeam(index, 'logoFile', value)}
+                onUpload={(file) => uploadTeamLogo(index, file)}
+                onClear={() => updateTeam(index, 'logoFile', '')}
+              />
               <label>
                 <span>색상</span>
                 <input value={team.color} onChange={(event) => updateTeam(index, 'color', event.target.value)} />
@@ -3358,6 +3428,71 @@ function TeamConfigDetail({
           </button>
         ) : null}
       </section>
+    </div>
+  )
+}
+
+function LogoSourceField({
+  team,
+  index,
+  onChange,
+  onRawChange,
+  onUpload,
+  onClear,
+}: {
+  team: TeamConfigDraft
+  index: number
+  onChange: (value: string) => void
+  onRawChange: (value: string) => void
+  onUpload: (file: File | undefined) => void
+  onClear: () => void
+}) {
+  const preview = teamEditorPreview(team)
+
+  return (
+    <div className="logo-source-field">
+      <div className="logo-source-head">
+        <span>로고/팀 사진</span>
+        <small>인터넷 이미지 주소, Google Drive 공유 링크, 내 PC 이미지 파일을 사용할 수 있습니다.</small>
+      </div>
+      <div className="logo-source-row">
+        <input
+          value={team.logoFile}
+          placeholder="https://... 또는 /team-logos/T1-logo.png"
+          onChange={(event) => onRawChange(event.target.value)}
+          onBlur={(event) => onChange(event.target.value)}
+          aria-label={`${team.name || `Team ${index + 1}`} 로고 또는 팀 사진 주소`}
+        />
+        <button type="button" onClick={() => onChange(team.logoFile)}>
+          <Link2 size={14} />
+          링크 정리
+        </button>
+        <label className="logo-file-button">
+          <ImagePlus size={14} />
+          파일
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon"
+            onChange={(event) => {
+              onUpload(event.currentTarget.files?.[0])
+              event.currentTarget.value = ''
+            }}
+          />
+        </label>
+        {team.logoFile ? (
+          <button type="button" onClick={onClear}>
+            <X size={14} />
+            비우기
+          </button>
+        ) : null}
+      </div>
+      <div className="logo-source-preview">
+        <TeamPhotoPreview team={preview} />
+        <p>
+          Google Drive 링크는 공개 공유된 파일 링크를 붙여넣으면 표시용 이미지 주소로 자동 정리됩니다. 발표장에서는 팀을 클릭했을 때 이
+          이미지가 크게 보입니다.
+        </p>
+      </div>
     </div>
   )
 }
@@ -4309,6 +4444,18 @@ function LogoMark({ team }: { team: Pick<Team, 'name' | 'logo' | 'color' | 'logo
   )
 }
 
+function TeamPhotoPreview({ team }: { team: Pick<Team, 'name' | 'logo' | 'color' | 'logoFile'> }) {
+  return (
+    <div
+      className={`team-photo-preview ${team.logoFile ? 'has-photo' : ''}`}
+      style={{ '--team-color': team.color } as CSSProperties}
+      aria-label={`${team.name} 로고 또는 팀 사진`}
+    >
+      {team.logoFile ? <img src={team.logoFile} alt="" /> : <LogoMark team={team} />}
+    </div>
+  )
+}
+
 function FloatingStars() {
   return (
     <div className="floating-stars" aria-hidden="true">
@@ -4484,6 +4631,114 @@ type TeamInfoUpload = {
     fileName: string
     dataUrl: string
   }>
+}
+
+const logoUploadMaxDataUrlLength = 220_000
+
+function normalizeLogoSourceValue(value: string) {
+  const trimmed = value.trim()
+  const driveId = extractGoogleDriveFileId(trimmed)
+
+  if (driveId) {
+    return `https://drive.google.com/thumbnail?id=${encodeURIComponent(driveId)}&sz=w1200`
+  }
+
+  return trimmed
+}
+
+function extractGoogleDriveFileId(value: string) {
+  if (!value) return ''
+
+  try {
+    const url = new URL(value)
+    if (!/(\.|^)google\.com$/i.test(url.hostname) && !/(\.|^)googleusercontent\.com$/i.test(url.hostname)) return ''
+
+    const idParam = url.searchParams.get('id')
+    if (idParam) return sanitizeDriveFileId(idParam)
+
+    const fileMatch = url.pathname.match(/\/file\/d\/([^/]+)/i)
+    if (fileMatch?.[1]) return sanitizeDriveFileId(fileMatch[1])
+
+    const foldersMatch = url.pathname.match(/\/d\/([^/]+)/i)
+    if (foldersMatch?.[1]) return sanitizeDriveFileId(foldersMatch[1])
+  } catch {
+    return ''
+  }
+
+  return ''
+}
+
+function sanitizeDriveFileId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128)
+}
+
+async function readLogoFileAsDataUrl(file: File) {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('이미지 파일만 업로드할 수 있습니다.')
+  }
+
+  if (file.size <= 360_000 || file.type === 'image/svg+xml' || file.type === 'image/x-icon') {
+    const rawDataUrl = await readFileAsDataUrl(file)
+    if (rawDataUrl.length <= logoUploadMaxDataUrlLength) return rawDataUrl
+    if (file.type === 'image/svg+xml' || file.type === 'image/x-icon') {
+      throw new Error('이미지 파일이 너무 큽니다. 500KB 이하 파일이나 인터넷 URL을 사용해주세요.')
+    }
+  }
+
+  return compressRasterImageFile(file)
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('파일을 읽지 못했습니다.'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImageElement(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('이미지를 불러오지 못했습니다.'))
+    image.src = src
+  })
+}
+
+async function compressRasterImageFile(file: File) {
+  const objectUrl = URL.createObjectURL(file)
+
+  try {
+    const image = await loadImageElement(objectUrl)
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('이미지 변환을 지원하지 않는 브라우저입니다.')
+
+    const attempts = [
+      { maxSide: 1280, quality: 0.82 },
+      { maxSide: 980, quality: 0.76 },
+      { maxSide: 760, quality: 0.7 },
+      { maxSide: 560, quality: 0.66 },
+    ]
+
+    for (const attempt of attempts) {
+      const scale = Math.min(1, attempt.maxSide / Math.max(image.naturalWidth, image.naturalHeight))
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+      context.clearRect(0, 0, canvas.width, canvas.height)
+      context.fillStyle = '#ffffff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+      const dataUrl = canvas.toDataURL('image/jpeg', attempt.quality)
+      if (dataUrl.length <= logoUploadMaxDataUrlLength) return dataUrl
+    }
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+
+  throw new Error('이미지 파일이 너무 큽니다. 더 작은 파일이나 인터넷 URL을 사용해주세요.')
 }
 
 function createQuizDrafts(quizzes: QuizConfig[]): QuizConfigDraft[] {
@@ -5028,6 +5283,10 @@ function getMinScore(state: EventState) {
 
 function getCheerNameMode(state: EventState): CheerNameMode {
   return state.settings.cheerNameMode === 'real' ? 'real' : 'masked'
+}
+
+function getThemeMode(state: EventState): ThemeMode {
+  return state.settings.themeMode === 'stage' ? 'stage' : 'light'
 }
 
 function formatCheerAuthor(name: string, mode: CheerNameMode) {

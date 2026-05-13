@@ -147,6 +147,7 @@ type Settings = {
   durationMinutes: number
   minScore: number
   cheerNameMode: 'masked' | 'real'
+  themeMode: 'light' | 'stage'
 }
 
 type Snapshot = {
@@ -324,6 +325,7 @@ export class ArenaRoom {
     durationMinutes: defaultDurationMinutes,
     minScore: defaultMinScore,
     cheerNameMode: 'masked',
+    themeMode: 'light',
   }
   private teams: TeamConfig[] = initialConfig.teams
   private copy: EventCopy = initialConfig.copy
@@ -393,6 +395,7 @@ export class ArenaRoom {
       durationMinutes: clamp(Math.floor(Number(snapshot.settings?.durationMinutes || defaultDurationMinutes)), 1, 240),
       minScore: clamp(Number(snapshot.settings?.minScore ?? defaultMinScore), 0, 9.9),
       cheerNameMode: normalizeCheerNameMode(snapshot.settings?.cheerNameMode),
+      themeMode: normalizeThemeMode(snapshot.settings?.themeMode),
     }
   }
 
@@ -598,6 +601,7 @@ export class ArenaRoom {
         durationMinutes: clamp(Math.floor(Number(body.durationMinutes) || this.settings.durationMinutes), 1, 240),
         minScore: clamp(Number(body.minScore ?? this.settings.minScore), 0, 9.9),
         cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, this.settings.cheerNameMode),
+        themeMode: normalizeThemeMode(body.themeMode, this.settings.themeMode),
       }
       this.normalizeAllParticipantAllocations()
       this.closesAt = Date.now() + this.settings.durationMinutes * 60 * 1000
@@ -1278,14 +1282,58 @@ function sanitizeSlug(value: unknown) {
 }
 
 function sanitizeLogoPath(value: string) {
-  const pathValue = value.trim()
+  const pathValue = normalizeLogoSourceValue(value.trim())
   if (!pathValue) return ''
+  if (isRemoteLogoUrl(pathValue)) return pathValue
   if (/^data:image\/(png|jpeg|jpg|webp|svg\+xml|x-icon);base64,[a-zA-Z0-9+/=]+$/i.test(pathValue) && pathValue.length < 600_000) {
     return pathValue
   }
-  if (!/^\/?team-logos\/[a-zA-Z0-9._-]+\.(png|jpe?g|webp|svg|ico)$/i.test(pathValue)) return ''
+  if (pathValue.includes('..') || !/^\/?[a-zA-Z0-9_./-]+\.(png|jpe?g|webp|svg|ico)$/i.test(pathValue)) return ''
 
   return pathValue.startsWith('/') ? pathValue : `/${pathValue}`
+}
+
+function normalizeLogoSourceValue(value: string) {
+  const trimmed = String(value || '').trim()
+  const driveId = extractGoogleDriveFileId(trimmed)
+  return driveId ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(driveId)}&sz=w1200` : trimmed
+}
+
+function extractGoogleDriveFileId(value: string) {
+  if (!value) return ''
+
+  try {
+    const url = new URL(value)
+    if (!/(\.|^)google\.com$/i.test(url.hostname) && !/(\.|^)googleusercontent\.com$/i.test(url.hostname)) return ''
+
+    const idParam = url.searchParams.get('id')
+    if (idParam) return sanitizeDriveFileId(idParam)
+
+    const fileMatch = url.pathname.match(/\/file\/d\/([^/]+)/i)
+    if (fileMatch?.[1]) return sanitizeDriveFileId(fileMatch[1])
+
+    const shortMatch = url.pathname.match(/\/d\/([^/]+)/i)
+    if (shortMatch?.[1]) return sanitizeDriveFileId(shortMatch[1])
+  } catch {
+    return ''
+  }
+
+  return ''
+}
+
+function sanitizeDriveFileId(value: string) {
+  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128)
+}
+
+function isRemoteLogoUrl(value: string) {
+  if (String(value || '').length > 2000) return false
+
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || url.protocol === 'http:'
+  } catch {
+    return false
+  }
 }
 
 function resolveLogoDataUrl(team: Record<string, unknown>, index: number, logos: unknown[]) {
@@ -1416,6 +1464,10 @@ function clamp(value: number, min: number, max: number) {
 
 function normalizeCheerNameMode(value: unknown, fallback: Settings['cheerNameMode'] = 'masked'): Settings['cheerNameMode'] {
   return value === 'real' ? 'real' : value === 'masked' ? 'masked' : fallback
+}
+
+function normalizeThemeMode(value: unknown, fallback: Settings['themeMode'] = 'light'): Settings['themeMode'] {
+  return value === 'stage' ? 'stage' : value === 'light' ? 'light' : fallback
 }
 
 function normalizeQuizState(value: unknown): QuizState {
