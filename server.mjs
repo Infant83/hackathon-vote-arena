@@ -466,7 +466,9 @@ async function persistTeamConfig() {
 }
 
 function getState() {
-  if (!closed && Date.now() > closesAt) {
+  const serverTime = Date.now()
+
+  if (!closed && serverTime > closesAt) {
     closed = true
   }
 
@@ -519,6 +521,7 @@ function getState() {
     lastRaffle,
     quiz: sanitizeQuizState(),
     quizBank,
+    serverTime,
     sessionId,
     testMode,
     settings,
@@ -554,12 +557,13 @@ function normalizeAllParticipantAllocations() {
   }
 }
 
-function upsertParticipant(deviceId, name, group) {
+function upsertParticipant(deviceId, name, group, department = '') {
   const browserDeviceId = sanitizeIdentifier(deviceId, 96)
   if (!browserDeviceId) return null
 
   const nextName = sanitizeText(name, 18)
   const nextGroup = sanitizeLetsId(group, 48)
+  const nextDepartment = sanitizeText(department, 40)
   if (!nextName || !nextGroup) return null
 
   const identityKey = getParticipantIdentityKey(browserDeviceId, nextName, nextGroup)
@@ -574,6 +578,7 @@ function upsertParticipant(deviceId, name, group) {
       deviceIds: [browserDeviceId],
       name: nextName,
       group: nextGroup,
+      department: nextDepartment,
       allocations: {},
       cheered: false,
       cheerSubmitted: false,
@@ -583,6 +588,9 @@ function upsertParticipant(deviceId, name, group) {
   attachParticipantDevice(person, browserDeviceId)
   person.name = nextName
   person.group = nextGroup
+  if (nextDepartment || !person.department) {
+    person.department = nextDepartment
+  }
   person.updatedAt = Date.now()
   participants.set(id, person)
   return person
@@ -638,6 +646,21 @@ function advanceQuizPhase(now = Date.now()) {
   }
 }
 
+function prepareQuiz() {
+  advanceQuizPhase()
+  if (quiz.mode !== 'idle') return
+
+  const now = Date.now()
+  quiz = {
+    ...emptyQuizState,
+    mode: 'standby',
+    createdAt: now,
+    updatedAt: now,
+  }
+  quizAnswerKeys = []
+  quizAnswerId = 1
+}
+
 function openQuiz(body) {
   const selectedQuizId = sanitizeSlug(body.quizId)
   const selectedQuiz = selectedQuizId ? quizBank.find((item) => item.id === selectedQuizId && item.enabled !== false) : null
@@ -672,7 +695,7 @@ function openQuiz(body) {
 }
 
 function closeQuiz() {
-  if (quiz.mode === 'idle') return
+  if (quiz.mode === 'idle' || quiz.mode === 'standby') return
   quiz = {
     ...quiz,
     mode: 'closed',
@@ -690,6 +713,7 @@ function submitQuizAnswer(person, textValue) {
   const text = sanitizeText(textValue, quizAnswerMaxLength)
   advanceQuizPhase()
   if (!person || quiz.mode !== 'open' || !quiz.id || !text) return null
+  if (quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) return null
 
   const normalized = normalizeQuizAnswer(text)
   const alreadyWon = quiz.winners.some((winner) => winner.participantId === person.id)
@@ -701,6 +725,7 @@ function submitQuizAnswer(person, textValue) {
     participantId: person.id,
     author: person.name,
     group: person.group,
+    department: person.department || '',
     text,
     correct,
     rank,
@@ -1069,7 +1094,7 @@ async function handleApi(request, response, url) {
     }
 
     const deviceId = getRequestDeviceId(request, body)
-    const person = upsertParticipant(deviceId, body.name, body.group)
+    const person = upsertParticipant(deviceId, body.name, body.group, body.department)
     if (!person) {
       sendJson(response, 400, { error: 'name, group, and device required' })
       return
@@ -1097,7 +1122,7 @@ async function handleApi(request, response, url) {
     }
 
     const deviceId = getRequestDeviceId(request, body)
-    const person = upsertParticipant(deviceId, body.name, body.group)
+    const person = upsertParticipant(deviceId, body.name, body.group, body.department)
     const teamId = String(body.teamId || '')
     const text = sanitizeText(body.text, cheerMessageMaxLength)
 
@@ -1182,6 +1207,7 @@ async function handleApi(request, response, url) {
         id: person.id,
         name: person.name,
         group: person.group,
+        department: person.department || '',
         cheered: person.cheered,
       }))
 
@@ -1209,6 +1235,13 @@ async function handleApi(request, response, url) {
     return
   }
 
+  if (url.pathname === '/api/quiz/prepare') {
+    prepareQuiz()
+    broadcast()
+    sendJson(response, 200, getState())
+    return
+  }
+
   if (url.pathname === '/api/quiz/answer') {
     if (!isCurrentSession(body)) {
       sendJson(response, 409, { error: 'session expired' })
@@ -1216,7 +1249,7 @@ async function handleApi(request, response, url) {
     }
 
     const deviceId = getRequestDeviceId(request, body)
-    const person = upsertParticipant(deviceId, body.name, body.group)
+    const person = upsertParticipant(deviceId, body.name, body.group, body.department)
     const answer = submitQuizAnswer(person, body.text)
 
     if (!answer) {
@@ -1260,7 +1293,7 @@ async function handleApi(request, response, url) {
     }
 
     const deviceId = getRequestDeviceId(request, body)
-    const person = upsertParticipant(deviceId, body.name, body.group)
+    const person = upsertParticipant(deviceId, body.name, body.group, body.department)
     if (!person) {
       sendJson(response, 400, { error: 'name and group required' })
       return

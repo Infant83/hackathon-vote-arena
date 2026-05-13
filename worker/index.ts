@@ -52,6 +52,7 @@ type Participant = {
   deviceIds?: string[]
   name: string
   group: string
+  department?: string
   allocations: Record<string, number>
   cheered: boolean
   cheerSubmitted: boolean
@@ -94,12 +95,13 @@ type LastRaffle = {
     id: string
     name: string
     group: string
+    department?: string
     cheered: boolean
   }>
   createdAt: number
 }
 
-type QuizMode = 'idle' | 'countdown' | 'open' | 'closed'
+type QuizMode = 'idle' | 'standby' | 'countdown' | 'open' | 'closed'
 
 type QuizAnswer = {
   id: number
@@ -107,6 +109,7 @@ type QuizAnswer = {
   participantId: string
   author: string
   group: string
+  department?: string
   text: string
   correct: boolean
   rank?: number
@@ -408,7 +411,7 @@ export class ArenaRoom {
       if (!this.isCurrentSession(body)) return json({ error: 'session expired' }, 409)
 
       const deviceId = this.getRequestDeviceId(request, body)
-      const person = this.upsertParticipant(deviceId, body.name, body.group)
+      const person = this.upsertParticipant(deviceId, body.name, body.group, body.department)
       if (!person) return json({ error: 'name, group, and device required' }, 400)
 
       const previousAllocations = { ...person.allocations }
@@ -426,7 +429,7 @@ export class ArenaRoom {
       if (!this.isCurrentSession(body)) return json({ error: 'session expired' }, 409)
 
       const deviceId = this.getRequestDeviceId(request, body)
-      const person = this.upsertParticipant(deviceId, body.name, body.group)
+      const person = this.upsertParticipant(deviceId, body.name, body.group, body.department)
       const teamId = String(body.teamId || '')
       const text = sanitizeText(body.text, cheerMessageMaxLength)
 
@@ -494,6 +497,7 @@ export class ArenaRoom {
           id: person.id,
           name: person.name,
           group: person.group,
+          department: person.department || '',
           cheered: person.cheered,
         }))
 
@@ -516,11 +520,17 @@ export class ArenaRoom {
       return json(this.getState())
     }
 
+    if (pathname === '/api/quiz/prepare') {
+      this.prepareQuiz()
+      await this.commit()
+      return json(this.getState())
+    }
+
     if (pathname === '/api/quiz/answer') {
       if (!this.isCurrentSession(body)) return json({ error: 'session expired' }, 409)
 
       const deviceId = this.getRequestDeviceId(request, body)
-      const person = this.upsertParticipant(deviceId, body.name, body.group)
+      const person = this.upsertParticipant(deviceId, body.name, body.group, body.department)
       const answer = this.submitQuizAnswer(person, body.text)
 
       if (!answer) return json({ error: 'quiz answer rejected' }, 400)
@@ -554,7 +564,7 @@ export class ArenaRoom {
       if (!this.isCurrentSession(body)) return json({ error: 'session expired' }, 409)
 
       const deviceId = this.getRequestDeviceId(request, body)
-      const person = this.upsertParticipant(deviceId, body.name, body.group)
+      const person = this.upsertParticipant(deviceId, body.name, body.group, body.department)
       if (!person) return json({ error: 'name and group required' }, 400)
 
       await this.commit()
@@ -599,7 +609,9 @@ export class ArenaRoom {
   }
 
   private getState() {
-    if (!this.closed && Date.now() > this.closesAt) {
+    const serverTime = Date.now()
+
+    if (!this.closed && serverTime > this.closesAt) {
       this.closed = true
     }
 
@@ -655,6 +667,7 @@ export class ArenaRoom {
       lastRaffle: this.lastRaffle,
       quiz: this.sanitizeQuizState(),
       quizBank: this.quizBank,
+      serverTime,
       sessionId: this.sessionId,
       testMode: this.testMode,
       settings: this.settings,
@@ -769,12 +782,13 @@ export class ArenaRoom {
     }
   }
 
-  private upsertParticipant(deviceIdValue: unknown, nameValue: unknown, groupValue: unknown) {
+  private upsertParticipant(deviceIdValue: unknown, nameValue: unknown, groupValue: unknown, departmentValue: unknown = '') {
     const browserDeviceId = sanitizeIdentifier(deviceIdValue, 96)
     if (!browserDeviceId) return null
 
     const nextName = sanitizeText(nameValue, 18)
     const nextGroup = sanitizeLetsId(groupValue, 48)
+    const nextDepartment = sanitizeText(departmentValue, 40)
     if (!nextName || !nextGroup) return null
 
     const identityKey = getParticipantIdentityKey(browserDeviceId, nextName, nextGroup)
@@ -789,6 +803,7 @@ export class ArenaRoom {
         deviceIds: [browserDeviceId],
         name: nextName,
         group: nextGroup,
+        department: nextDepartment,
         allocations: {},
         cheered: false,
         cheerSubmitted: false,
@@ -798,6 +813,9 @@ export class ArenaRoom {
     attachParticipantDevice(person, browserDeviceId)
     person.name = nextName
     person.group = nextGroup
+    if (nextDepartment || !person.department) {
+      person.department = nextDepartment
+    }
     person.updatedAt = Date.now()
     this.participants.set(id, person)
     return person
@@ -861,6 +879,21 @@ export class ArenaRoom {
     }
   }
 
+  private prepareQuiz() {
+    this.advanceQuizPhase()
+    if (this.quiz.mode !== 'idle') return
+
+    const now = Date.now()
+    this.quiz = {
+      ...emptyQuizState,
+      mode: 'standby',
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.quizAnswerKeys = []
+    this.quizAnswerId = 1
+  }
+
   private openQuiz(body: RequestBody) {
     const selectedQuizId = sanitizeSlug(body.quizId)
     const selectedQuiz = selectedQuizId ? this.quizBank.find((item) => item.id === selectedQuizId && item.enabled !== false) : null
@@ -895,7 +928,7 @@ export class ArenaRoom {
   }
 
   private closeQuiz() {
-    if (this.quiz.mode === 'idle') return
+    if (this.quiz.mode === 'idle' || this.quiz.mode === 'standby') return
 
     this.quiz = {
       ...this.quiz,
@@ -914,6 +947,7 @@ export class ArenaRoom {
     const text = sanitizeText(textValue, quizAnswerMaxLength)
     this.advanceQuizPhase()
     if (!person || this.quiz.mode !== 'open' || !this.quiz.id || !text) return null
+    if (this.quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) return null
 
     const normalized = normalizeQuizAnswer(text)
     const alreadyWon = this.quiz.winners.some((winner) => winner.participantId === person.id)
@@ -925,6 +959,7 @@ export class ArenaRoom {
       participantId: person.id,
       author: person.name,
       group: person.group,
+      department: person.department || '',
       text,
       correct,
       rank,
@@ -1370,7 +1405,9 @@ function normalizeCheerNameMode(value: unknown, fallback: Settings['cheerNameMod
 function normalizeQuizState(value: unknown): QuizState {
   const source = normalizeObject(value)
   const mode: QuizMode =
-    source.mode === 'countdown' || source.mode === 'open' || source.mode === 'closed' ? source.mode : 'idle'
+    source.mode === 'standby' || source.mode === 'countdown' || source.mode === 'open' || source.mode === 'closed'
+      ? source.mode
+      : 'idle'
   const winnerCount = clamp(Math.floor(Number(source.winnerCount) || 2), 1, 10)
   const answers = Array.isArray(source.answers) ? source.answers.map(normalizeQuizAnswerRecord).filter(Boolean) as QuizAnswer[] : []
   const winners = Array.isArray(source.winners) ? source.winners.map(normalizeQuizAnswerRecord).filter(Boolean) as QuizAnswer[] : []
@@ -1408,6 +1445,7 @@ function normalizeQuizAnswerRecord(value: unknown): QuizAnswer | null {
     participantId,
     author,
     group: sanitizeLetsId(source.group, 48),
+    department: sanitizeText(source.department, 40),
     text,
     correct: Boolean(source.correct),
     rank: rankValue > 0 ? rankValue : undefined,

@@ -55,6 +55,7 @@ type Participant = {
   deviceIds?: string[]
   name: string
   group: string
+  department?: string
   allocations: Record<string, number>
   cheered: boolean
   cheerSubmitted?: boolean
@@ -88,6 +89,7 @@ type RaffleWinner = {
   id: string
   name: string
   group?: string
+  department?: string
   cheered: boolean
 }
 
@@ -99,7 +101,7 @@ type LastRaffle = {
   createdAt: number
 }
 
-type QuizMode = 'idle' | 'countdown' | 'open' | 'closed'
+type QuizMode = 'idle' | 'standby' | 'countdown' | 'open' | 'closed'
 
 type QuizAnswer = {
   id: number
@@ -107,6 +109,7 @@ type QuizAnswer = {
   participantId: string
   author: string
   group: string
+  department?: string
   text: string
   correct: boolean
   rank?: number
@@ -148,6 +151,8 @@ type EventState = {
   lastRaffle: LastRaffle | null
   quiz: QuizState
   quizBank: QuizConfig[]
+  serverTime: number
+  receivedAt?: number
   sessionId: number
   settings: {
     showScoresToAudience: boolean
@@ -297,6 +302,7 @@ const copyLabels: Record<keyof EventCopy, string> = {
 const storageKey = 'vibe-vote-participant'
 const nameKey = 'vibe-vote-name'
 const groupKey = 'vibe-vote-group'
+const departmentKey = 'vibe-vote-department'
 const registeredKey = 'vibe-vote-registered'
 const registeredSessionKey = 'vibe-vote-registered-session'
 const raffleDismissedKey = 'vibe-vote-raffle-dismissed-at'
@@ -565,6 +571,8 @@ const fallbackState: EventState = {
     updatedAt: 0,
   },
   quizBank: fallbackQuizBank,
+  serverTime: Date.now(),
+  receivedAt: Date.now(),
   sessionId: 0,
   settings: {
     showScoresToAudience: true,
@@ -588,6 +596,7 @@ function App() {
   const { state, connection, post } = useEventState(mode, participantId)
   const [name, setName] = useState(() => getStoredValue(nameKey))
   const [group, setGroup] = useState(() => getStoredValue(groupKey))
+  const [department, setDepartment] = useState(() => getStoredValue(departmentKey))
   const [wallPanel, setWallPanel] = useState<WallPanel>(getInitialWallPanel)
   const [showCheerConstellation, setShowCheerConstellation] = useState(
     () => new URLSearchParams(window.location.search).get('showCheer') === '1',
@@ -609,6 +618,11 @@ function App() {
     storeValue(groupKey, nextGroup)
   }
 
+  const saveDepartment = (nextDepartment: string) => {
+    setDepartment(nextDepartment)
+    storeValue(departmentKey, nextDepartment)
+  }
+
   return (
     <main className={`app-shell ${mode === 'wall' ? 'wall-shell-app' : ''}`}>
       <Header
@@ -618,6 +632,9 @@ function App() {
         wallPanel={wallPanel}
         onWallPanelChange={setWallPanel}
         onOpenCheerConstellation={() => setShowCheerConstellation(true)}
+        onPrepareQuiz={() => {
+          if (mode === 'wall') void post('/api/quiz/prepare', {})
+        }}
       />
       {mode === 'admin' ? (
         <AdminView state={state} connection={connection} post={post} />
@@ -637,8 +654,10 @@ function App() {
           participant={participant}
           name={name}
           group={group}
+          department={department}
           onNameChange={saveName}
           onGroupChange={saveGroup}
+          onDepartmentChange={saveDepartment}
           allocations={allocations}
           spentStars={spentStars}
           remainingStars={remainingStars}
@@ -668,6 +687,7 @@ function Header({
   wallPanel,
   onWallPanelChange,
   onOpenCheerConstellation,
+  onPrepareQuiz,
 }: {
   mode: AppMode
   connection: ConnectionState
@@ -675,6 +695,7 @@ function Header({
   wallPanel: WallPanel
   onWallPanelChange: (panel: WallPanel) => void
   onOpenCheerConstellation: () => void
+  onPrepareQuiz?: () => void
 }) {
   const [now, setNow] = useState(() => Date.now())
 
@@ -750,7 +771,14 @@ function Header({
                 <Sparkles size={17} />
                 {state.copy.wallShowupLabel}
               </button>
-              <button type="button" className={wallPanel === 'quiz' ? 'active' : ''} onClick={() => onWallPanelChange('quiz')}>
+              <button
+                type="button"
+                className={wallPanel === 'quiz' ? 'active' : ''}
+                onClick={() => {
+                  onWallPanelChange('quiz')
+                  onPrepareQuiz?.()
+                }}
+              >
                 {state.copy.wallQuizLabel}
               </button>
             </div>
@@ -774,24 +802,28 @@ function Header({
   )
 }
 
-type QuizDisplayPhase = 'idle' | 'intro' | 'countdown' | 'open' | 'closed'
+type QuizDisplayPhase = 'idle' | 'standby' | 'intro' | 'countdown' | 'open' | 'closed'
 
-function useQuizClock(quiz: QuizState) {
-  const [now, setNow] = useState(() => Date.now())
+function useQuizClock(quiz: QuizState, serverTime?: number, receivedAt?: number) {
+  const serverOffset =
+    typeof serverTime === 'number' && typeof receivedAt === 'number' ? serverTime - receivedAt : 0
+  const [now, setNow] = useState(() => Date.now() + serverOffset)
 
   useEffect(() => {
     if (quiz.mode !== 'countdown' && quiz.mode !== 'open') {
       return
     }
 
-    const timer = window.setInterval(() => setNow(Date.now()), 180)
+    const timer = window.setInterval(() => setNow(Date.now() + serverOffset), 180)
     return () => window.clearInterval(timer)
-  }, [quiz.id, quiz.mode])
+  }, [quiz.id, quiz.mode, serverOffset])
 
   return now
 }
 
 function getQuizDisplayPhase(quiz: QuizState, now = Date.now()): QuizDisplayPhase {
+  if (quiz.mode === 'standby') return 'standby'
+
   if (quiz.mode === 'countdown') {
     if (quiz.introEndsAt > 0 && now < quiz.introEndsAt) return 'intro'
     if (quiz.opensAt > 0 && now < quiz.opensAt) return 'countdown'
@@ -806,7 +838,8 @@ function getQuizCountdownValue(quiz: QuizState, now: number) {
 }
 
 function isQuizParticipationActive(quiz: QuizState, now = Date.now()) {
-  return quiz.mode === 'countdown' || getQuizDisplayPhase(quiz, now) === 'open'
+  const phase = getQuizDisplayPhase(quiz, now)
+  return phase === 'standby' || phase === 'intro' || phase === 'countdown' || phase === 'open' || phase === 'closed'
 }
 
 function VoteView({
@@ -815,8 +848,10 @@ function VoteView({
   participant,
   name,
   group,
+  department,
   onNameChange,
   onGroupChange,
+  onDepartmentChange,
   allocations,
   spentStars,
   remainingStars,
@@ -828,8 +863,10 @@ function VoteView({
   participant: Participant | undefined
   name: string
   group: string
+  department: string
   onNameChange: (name: string) => void
   onGroupChange: (group: string) => void
+  onDepartmentChange: (department: string) => void
   allocations: Record<string, number>
   spentStars: number
   remainingStars: number
@@ -850,6 +887,7 @@ function VoteView({
     return [...state.teams].sort((a, b) => (fallbackTeamOrder.get(a.id) ?? 0) - (fallbackTeamOrder.get(b.id) ?? 0))
   }, [state.teams])
   const hasRegistrationInfo = Boolean(name.trim() && normalizeLetsIdDisplay(group))
+  const departmentDisplay = department.trim() || participant?.department || ''
   const sessionReady = state.sessionId > 0
   const sessionRegistered = hasRegistered && registeredSession === String(state.sessionId)
   const isRegistered = hasRegistrationInfo && (sessionRegistered || Boolean(participant))
@@ -857,12 +895,14 @@ function VoteView({
   const perTeamStarLimit = Math.min(starBudget, MAX_STARS_PER_TEAM)
   const currentParticipantId = participant?.id ?? participantId
   const participantMessages = state.cheers.filter((message) => message.participantId === currentParticipantId)
-  const quizNow = useQuizClock(state.quiz)
+  const quizNow = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
   const quizPhase = getQuizDisplayPhase(state.quiz, quizNow)
   const quizActive = isQuizParticipationActive(state.quiz, quizNow)
   const quizAnswerText = quizAnswerDraft.quizId === state.quiz.id ? quizAnswerDraft.text : ''
   const quizFeedback = quizFeedbackDraft.quizId === state.quiz.id ? quizFeedbackDraft.text : ''
   const myQuizAnswers = state.quiz.answers.filter((answer) => answer.participantId === currentParticipantId)
+  const quizAttemptCount = myQuizAnswers.length
+  const quizAttemptLimit = 5
   const latestMyQuizAnswer = myQuizAnswers[0]
   const myWinningQuizAnswer = state.quiz.winners.find((answer) => answer.participantId === currentParticipantId)
   const quizWinnerNoticeKey = myWinningQuizAnswer ? `${myWinningQuizAnswer.quizId}:${myWinningQuizAnswer.id}` : ''
@@ -911,8 +951,9 @@ function VoteView({
       participantId,
       name: name.trim(),
       group: normalizeLetsIdDisplay(group),
+      department: departmentDisplay,
     })
-  }, [group, hasRegistrationInfo, name, participant, participantId, post, sessionReady, sessionRegistered, state.sessionId])
+  }, [departmentDisplay, group, hasRegistrationInfo, name, participant, participantId, post, sessionReady, sessionRegistered, state.sessionId])
 
   const setTeamStars = async (teamId: string, targetStars: number) => {
     if (!canVote) return
@@ -933,7 +974,7 @@ function VoteView({
       return
     }
 
-    await updateVote(post, state.sessionId, participantId, name, group, { ...allocations, [teamId]: nextStars })
+    await updateVote(post, state.sessionId, participantId, name, group, departmentDisplay, { ...allocations, [teamId]: nextStars })
   }
 
   const registerParticipant = async () => {
@@ -944,6 +985,7 @@ function VoteView({
       participantId,
       name: name.trim(),
       group: letsId,
+      department: departmentDisplay,
     })
     if (response) {
       onGroupChange(letsId)
@@ -963,6 +1005,7 @@ function VoteView({
       participantId,
       name: name.trim(),
       group: normalizeLetsIdDisplay(group),
+      department: departmentDisplay,
       teamId,
       text,
     })
@@ -981,6 +1024,14 @@ function VoteView({
 
   const sendQuizAnswer = async () => {
     const text = quizAnswerText.trim()
+    if (quizAttemptCount >= quizAttemptLimit) {
+      setQuizFeedbackDraft({
+        quizId: state.quiz.id,
+        text: `이 문제는 최대 ${quizAttemptLimit}번까지만 제출할 수 있습니다.`,
+      })
+      return
+    }
+
     if (!text || !isRegistered || quizPhase !== 'open') return
 
     const response = await post('/api/quiz/answer', {
@@ -988,6 +1039,7 @@ function VoteView({
       participantId,
       name: name.trim(),
       group: normalizeLetsIdDisplay(group),
+      department: departmentDisplay,
       text,
     })
 
@@ -999,7 +1051,7 @@ function VoteView({
     setQuizAnswerDraft({ quizId: state.quiz.id, text: '' })
     setQuizFeedbackDraft({
       quizId: state.quiz.id,
-      text: submittedAnswer?.correct ? '정답 후보로 접수되었습니다.' : '답변이 접수되었습니다.',
+      text: submittedAnswer?.correct ? '정답 후보로 접수되었습니다.' : '정답이 아닙니다.',
     })
   }
 
@@ -1067,6 +1119,15 @@ function VoteView({
                 placeholder="예: hyun-jung.kim"
               />
             </label>
+            <label>
+              <span>부서/소속</span>
+              <input
+                value={department}
+                maxLength={40}
+                onChange={(event) => onDepartmentChange(event.target.value)}
+                placeholder="예: DX팀"
+              />
+            </label>
             <button type="button" onClick={registerParticipant} disabled={!hasRegistrationInfo || !sessionReady}>
               <Check size={17} />
               등록하고 투표 시작
@@ -1079,8 +1140,11 @@ function VoteView({
       ) : quizActive ? (
         <QuizParticipationView
           quiz={state.quiz}
+          serverTime={state.serverTime}
+          receivedAt={state.receivedAt}
           name={name}
           group={normalizeLetsIdDisplay(group)}
+          department={departmentDisplay}
           answerText={quizAnswerText}
           onAnswerTextChange={(value) => setQuizAnswerDraft({ quizId: state.quiz.id, text: value })}
           onSubmit={sendQuizAnswer}
@@ -1088,6 +1152,8 @@ function VoteView({
           latestAnswer={latestMyQuizAnswer}
           winningAnswer={myWinningQuizAnswer}
           feedback={quizFeedback}
+          attemptCount={quizAttemptCount}
+          attemptLimit={quizAttemptLimit}
         />
       ) : (
         <section className="direct-vote-grid">
@@ -1099,7 +1165,7 @@ function VoteView({
               </div>
               <div className="participant-chip">
                 <strong>{name}</strong>
-                <span>{normalizeLetsIdDisplay(group)}</span>
+                <span>{[normalizeLetsIdDisplay(group), departmentDisplay].filter(Boolean).join(' · ')}</span>
               </div>
             </div>
 
@@ -1246,7 +1312,7 @@ function RaffleWinnerNotice({ winner, onDismiss }: { winner: RaffleWinner; onDis
         <p className="section-kicker">Lucky Draw</p>
         <h2>행운권에 당첨되었습니다!</h2>
         <strong>{winner.name}</strong>
-        {winner.group ? <span>{winner.group}</span> : null}
+        {[winner.group, winner.department].filter(Boolean).length ? <span>{[winner.group, winner.department].filter(Boolean).join(' · ')}</span> : null}
         <button type="button" onClick={onDismiss}>
           투표 화면으로 돌아가기
         </button>
@@ -1263,7 +1329,7 @@ function QuizWinnerNotice({ winner, onDismiss }: { winner: QuizAnswer; onDismiss
         <p className="section-kicker">Quiz Winner</p>
         <h2>정답을 맞혔습니다!</h2>
         <strong>{winner.author}</strong>
-        <span>{winner.rank ? `${winner.rank}번째 정답자` : '정답자'} · {winner.group || 'ID 없음'}</span>
+        <span>{winner.rank ? `${winner.rank}번째 정답자` : '정답자'} · {[winner.group || 'ID 없음', winner.department].filter(Boolean).join(' · ')}</span>
         <button type="button" onClick={onDismiss}>
           확인하고 돌아가기
         </button>
@@ -1274,8 +1340,11 @@ function QuizWinnerNotice({ winner, onDismiss }: { winner: QuizAnswer; onDismiss
 
 function QuizParticipationView({
   quiz,
+  serverTime,
+  receivedAt,
   name,
   group,
+  department,
   answerText,
   onAnswerTextChange,
   onSubmit,
@@ -1283,10 +1352,15 @@ function QuizParticipationView({
   latestAnswer,
   winningAnswer,
   feedback,
+  attemptCount,
+  attemptLimit,
 }: {
   quiz: QuizState
+  serverTime?: number
+  receivedAt?: number
   name: string
   group: string
+  department: string
   answerText: string
   onAnswerTextChange: (value: string) => void
   onSubmit: () => void
@@ -1294,19 +1368,26 @@ function QuizParticipationView({
   latestAnswer?: QuizAnswer
   winningAnswer?: QuizAnswer
   feedback: string
+  attemptCount: number
+  attemptLimit: number
 }) {
-  const now = useQuizClock(quiz)
+  const now = useQuizClock(quiz, serverTime, receivedAt)
   const phase = getQuizDisplayPhase(quiz, now)
   const countdownValue = getQuizCountdownValue(quiz, now)
   const isOpen = phase === 'open'
   const hasWon = Boolean(winningAnswer)
+  const reachedAttemptLimit = attemptCount >= attemptLimit
   const statusText = hasWon
     ? `${winningAnswer?.rank ?? 1}번째 정답자로 선정되었습니다.`
     : isOpen
-      ? '정답을 입력해 전송하세요.'
+      ? reachedAttemptLimit
+        ? '이 문제의 답변 기회를 모두 사용했습니다.'
+        : '정답을 입력해 전송하세요.'
       : phase === 'closed'
         ? '이 문제는 마감되었습니다.'
-        : '잠시 후 답변 입력창이 열립니다.'
+        : phase === 'standby'
+          ? '퀴즈를 준비 중입니다. 잠시 후 안내에 따라 참여하세요.'
+          : '잠시 후 답변 입력창이 열립니다.'
 
   return (
     <section className={`quiz-participation-shell phase-${phase}`} aria-label="퀴즈 모드">
@@ -1314,12 +1395,20 @@ function QuizParticipationView({
         <Sparkles size={18} />
         <span>Quiz Mode</span>
       </div>
+      {phase === 'standby' ? (
+        <div className="quiz-start-screen standby">
+          <Sparkles size={34} />
+          <p>퀴즈를 준비 중입니다</p>
+          <h2>문제가 출제되면 3/2/1 카운트다운 뒤 답변창이 열립니다</h2>
+          <span>이 화면은 자동으로 바뀝니다. 잠시만 기다려 주세요.</span>
+        </div>
+      ) : null}
       {phase === 'intro' ? (
         <div className="quiz-start-screen">
           <Sparkles size={34} />
           <p>곧 퀴즈가 시작됩니다</p>
           <h2>문제를 보고 정답을 입력해 전송하세요</h2>
-          <span>선착순 정답자는 관객 송출 화면에 바로 표시됩니다.</span>
+          <span>모든 화면은 서버 기준 시작 시각에 맞춰 3/2/1을 함께 카운트다운합니다.</span>
         </div>
       ) : null}
       {phase === 'countdown' ? (
@@ -1330,10 +1419,17 @@ function QuizParticipationView({
       ) : null}
       <div className="quiz-question-card">
         <p className="section-kicker">Live Quiz #{quiz.round || 1}</p>
-        <h2>{phase === 'intro' || phase === 'countdown' ? '문제가 곧 공개됩니다.' : quiz.question || '관리자가 곧 퀴즈를 출제합니다.'}</h2>
+        <h2>
+          {phase === 'standby'
+            ? '관리자가 곧 퀴즈를 출제합니다.'
+            : phase === 'intro' || phase === 'countdown'
+              ? '문제가 곧 공개됩니다.'
+              : quiz.question || '관리자가 곧 퀴즈를 출제합니다.'}
+        </h2>
         <div className="quiz-player-row">
           <strong>{name}</strong>
           <span>{group}</span>
+          {department ? <span>{department}</span> : null}
         </div>
       </div>
 
@@ -1342,7 +1438,7 @@ function QuizParticipationView({
           <strong>{statusText}</strong>
           {latestAnswer ? (
             <span>
-              마지막 답변: {latestAnswer.text} · {latestAnswer.correct ? '정답' : '확인 중'}
+              마지막 답변: {latestAnswer.text} · {latestAnswer.correct ? '정답' : '정답이 아닙니다'}
             </span>
           ) : (
             <span>문제가 바뀌면 이 화면도 자동으로 갱신됩니다.</span>
@@ -1354,11 +1450,19 @@ function QuizParticipationView({
             maxLength={120}
             onChange={(event) => onAnswerTextChange(event.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={isOpen ? '정답 입력' : phase === 'closed' ? '퀴즈가 마감되었습니다' : '카운트다운이 끝나면 입력할 수 있습니다'}
-            disabled={!isOpen || hasWon}
+            placeholder={
+              isOpen
+                ? '정답 입력'
+                : phase === 'closed'
+                  ? '퀴즈가 마감되었습니다'
+                  : phase === 'standby'
+                    ? '퀴즈 준비 중입니다'
+                    : '카운트다운이 끝나면 입력할 수 있습니다'
+            }
+            disabled={!isOpen || hasWon || reachedAttemptLimit}
           />
-          <button type="button" onClick={onSubmit} disabled={!isOpen || hasWon || !answerText.trim()}>
-            전송
+          <button type="button" onClick={onSubmit} disabled={!isOpen || hasWon || reachedAttemptLimit || !answerText.trim()}>
+            {attemptCount}/{attemptLimit} 전송
           </button>
         </div>
         {feedback ? <p className="quiz-feedback">{feedback}</p> : null}
@@ -1656,6 +1760,7 @@ function PublicWallView({
   const [isDrawing, setIsDrawing] = useState(false)
   const [wallSplit, setWallSplit] = useState(70)
   const wallGridRef = useRef<HTMLDivElement | null>(null)
+  const previousQuizModeRef = useRef(state.quiz.mode)
   const setWallPanel = onWallPanelChange
   const setShowCheerConstellation = onShowCheerConstellationChange
   const starBudget = getStarBudget(state)
@@ -1663,6 +1768,14 @@ function PublicWallView({
   const selectedTeam = selectedTeamId === 'all' ? null : state.teams.find((team) => team.id === selectedTeamId) ?? null
   const wallSplitMin = 54
   const wallSplitMax = 82
+
+  useEffect(() => {
+    const previousMode = previousQuizModeRef.current
+    if (wallPanel === 'quiz' && previousMode !== 'idle' && state.quiz.mode === 'idle') {
+      setWallPanel('overview')
+    }
+    previousQuizModeRef.current = state.quiz.mode
+  }, [setWallPanel, state.quiz.mode, wallPanel])
 
   const startDrawing = () => {
     setWallPanel('raffle')
@@ -1826,7 +1939,7 @@ function PublicWallView({
 }
 
 function QuizWallBoard({ state }: { state: EventState }) {
-  const now = useQuizClock(state.quiz)
+  const now = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
   const phase = getQuizDisplayPhase(state.quiz, now)
   const countdownValue = getQuizCountdownValue(state.quiz, now)
   const latestWinner = state.quiz.winners.at(-1) ?? null
@@ -1845,9 +1958,30 @@ function QuizWallBoard({ state }: { state: EventState }) {
           <h2>퀴즈</h2>
         </div>
         <span className={`quiz-mode-pill ${phase}`}>
-          {phase === 'open' ? '진행 중' : phase === 'intro' || phase === 'countdown' ? '곧 시작' : phase === 'closed' ? '마감' : '대기'}
+          {phase === 'open'
+            ? '진행 중'
+            : phase === 'intro' || phase === 'countdown'
+              ? '곧 시작'
+              : phase === 'closed'
+                ? '마감'
+                : phase === 'standby'
+                  ? '준비 중'
+                  : '대기'}
         </span>
       </div>
+
+      {phase === 'idle' || phase === 'standby' ? (
+        <div className="quiz-wall-start-screen idle">
+          <Sparkles size={44} />
+          <p>퀴즈를 준비 중입니다</p>
+          <h3>
+            {phase === 'standby'
+              ? '참가자 화면이 퀴즈 대기 모드로 전환되었습니다'
+              : '관리자가 문제를 출제하면 모든 참가자 화면이 동시에 퀴즈 모드로 전환됩니다'}
+          </h3>
+          <span>참가자는 3/2/1 카운트다운 뒤 정답을 입력할 수 있습니다.</span>
+        </div>
+      ) : null}
 
       {phase === 'intro' ? (
         <div className="quiz-wall-start-screen">
@@ -1867,7 +2001,13 @@ function QuizWallBoard({ state }: { state: EventState }) {
 
       <div className="quiz-current-panel">
         <p className="section-kicker">Current Question</p>
-        <h3>{phase === 'intro' || phase === 'countdown' ? '문제가 곧 공개됩니다.' : state.quiz.question || '아직 출제된 퀴즈가 없습니다.'}</h3>
+        <h3>
+          {phase === 'idle' || phase === 'standby'
+            ? '퀴즈 대기 중입니다.'
+            : phase === 'intro' || phase === 'countdown'
+              ? '문제가 곧 공개됩니다.'
+              : state.quiz.question || '퀴즈를 준비 중입니다.'}
+        </h3>
         <div className="quiz-stats">
           <span>답변 {answerCount}</span>
           <span>정답 {correctCount}</span>
@@ -1879,7 +2019,7 @@ function QuizWallBoard({ state }: { state: EventState }) {
         <div className="quiz-winner-list wall-stack">
           {state.quiz.winners.map((winner) => (
             <span key={`${winner.quizId}-${winner.id}`}>
-              {winner.rank}등 {winner.author} {winner.group ? `(${winner.group})` : ''}
+              {winner.rank}등 {winner.author} {[winner.group, winner.department].filter(Boolean).length ? `(${[winner.group, winner.department].filter(Boolean).join(' · ')})` : ''}
             </span>
           ))}
         </div>
@@ -1890,7 +2030,7 @@ function QuizWallBoard({ state }: { state: EventState }) {
           state.quiz.answers.map((item) => (
             <article className={`quiz-answer-message ${item.correct ? 'correct' : ''}`} key={`${item.quizId}-${item.id}`}>
               <strong>
-                <span>{item.author} · {item.group || 'ID 없음'} · {item.participantId.slice(-6)}</span>
+                <span>{[item.author, item.group || 'ID 없음', item.department || '부서 미입력', item.participantId.slice(-6)].join(' · ')}</span>
                 {item.rank ? <em>{item.rank}등 정답</em> : item.correct ? <em>정답</em> : null}
               </strong>
               <p>{item.text}</p>
@@ -1911,7 +2051,7 @@ function QuizWinnerSpotlight({ winner }: { winner: QuizAnswer }) {
         <Sparkles size={30} />
         <span>정답!</span>
         <strong>{winner.author}</strong>
-        {winner.group ? <p>{winner.group}</p> : null}
+        {[winner.group, winner.department].filter(Boolean).length ? <p>{[winner.group, winner.department].filter(Boolean).join(' · ')}</p> : null}
         {winner.rank ? <em>{winner.rank}번째 정답자</em> : null}
       </div>
     </div>
@@ -1937,7 +2077,7 @@ function QuizAdminPanel({
   const [question, setQuestion] = useState(selectedQuiz.question)
   const [answer, setAnswer] = useState(selectedQuiz.answer)
   const [winnerCount, setWinnerCount] = useState(selectedQuiz.winnerCount)
-  const now = useQuizClock(state.quiz)
+  const now = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
   const phase = getQuizDisplayPhase(state.quiz, now)
   const answerCount = state.quiz.answers.length
   const correctCount = state.quiz.answers.filter((item) => item.correct).length
@@ -1984,7 +2124,17 @@ function QuizAdminPanel({
       </div>
 
       <div className="quiz-admin-status">
-        <span className={`quiz-mode-pill ${phase}`}>{phase === 'open' ? '진행 중' : phase === 'countdown' || phase === 'intro' ? '카운트다운' : phase === 'closed' ? '마감' : '대기'}</span>
+        <span className={`quiz-mode-pill ${phase}`}>
+          {phase === 'open'
+            ? '진행 중'
+            : phase === 'countdown' || phase === 'intro'
+              ? '카운트다운'
+              : phase === 'closed'
+                ? '마감'
+                : phase === 'standby'
+                  ? '준비 중'
+                  : '대기'}
+        </span>
         <strong>답변 {answerCount}</strong>
         <strong>정답 {correctCount}</strong>
         <strong>정답자 {state.quiz.winners.length}/{state.quiz.winnerCount}</strong>
@@ -2028,23 +2178,26 @@ function QuizAdminPanel({
           <button type="button" className="primary-action" onClick={openQuiz} disabled={!question.trim() || !answer.trim()}>
             출제 / 다음 문제
           </button>
-          <button type="button" onClick={closeQuiz} disabled={state.quiz.mode === 'idle' || state.quiz.mode === 'closed'}>
-            마감
+          <button type="button" onClick={closeQuiz} disabled={state.quiz.mode === 'idle' || state.quiz.mode === 'standby' || state.quiz.mode === 'closed'}>
+            답변 마감
           </button>
           <button type="button" onClick={clearQuiz} disabled={state.quiz.mode === 'idle'}>
-            퀴즈 종료
+            퀴즈 종료 / 투표 복귀
           </button>
         </div>
+        <p className="quiz-accepted-answers">
+          답변 마감은 현재 문제 입력만 닫고, 퀴즈 종료는 참가자를 투표 화면으로 돌려보냅니다.
+        </p>
       </div>
 
       <div className="quiz-admin-current">
         <p className="section-kicker">Current Question</p>
-        <h3>{state.quiz.question || '아직 출제된 퀴즈가 없습니다.'}</h3>
+        <h3>{state.quiz.question || '퀴즈 대기 중입니다. 준비된 문제를 선택해 출제하세요.'}</h3>
         {state.quiz.winners.length ? (
           <div className="quiz-winner-list">
             {state.quiz.winners.map((winner) => (
               <span key={`${winner.quizId}-${winner.id}`}>
-                {winner.rank}등 {winner.author} {winner.group ? `(${winner.group})` : ''}
+                {winner.rank}등 {winner.author} {[winner.group, winner.department].filter(Boolean).length ? `(${[winner.group, winner.department].filter(Boolean).join(' · ')})` : ''}
               </span>
             ))}
           </div>
@@ -2057,7 +2210,7 @@ function QuizAdminPanel({
             state.quiz.answers.map((item) => (
               <article className={`quiz-answer-message ${item.correct ? 'correct' : ''}`} key={`${item.quizId}-${item.id}`}>
                 <strong>
-                  <span>{item.author} · {item.group || 'ID 없음'}</span>
+                  <span>{[item.author, item.group || 'ID 없음', item.department || '부서 미입력'].join(' · ')}</span>
                   {item.rank ? <em>{item.rank}등 정답</em> : item.correct ? <em>정답</em> : null}
                 </strong>
                 <p>{item.text}</p>
@@ -2085,25 +2238,24 @@ function PublicCheerBoard({
   cheerNameMode: CheerNameMode
   large?: boolean
 }) {
-  const [expandedCheerIds, setExpandedCheerIds] = useState<Set<number>>(() => new Set())
+  const [focusedCheerId, setFocusedCheerId] = useState<number | null>(null)
   const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams])
   const visibleCheers = state.cheers.filter((message) => !message.hidden)
   const selectedCheers = visibleCheers
     .filter((message) => selectedTeamId === 'all' || message.teamId === selectedTeamId)
     .slice(0, large ? 80 : 36)
   const selectedTeam = selectedTeamId === 'all' ? null : teamMap.get(selectedTeamId)
+  const focusedCheer = focusedCheerId
+    ? selectedCheers.find((message) => message.id === focusedCheerId) || visibleCheers.find((message) => message.id === focusedCheerId) || null
+    : null
+  const focusedTeam = focusedCheer ? teamMap.get(focusedCheer.teamId) ?? state.teams[0] : null
   const toggleCheerMessage = (messageId: number) => {
-    setExpandedCheerIds((current) => {
-      const next = new Set(current)
-      if (next.has(messageId)) next.delete(messageId)
-      else next.add(messageId)
-      return next
-    })
+    setFocusedCheerId((current) => (current === messageId ? null : messageId))
   }
 
   return (
     <section
-      className={`public-cheer-board ${large ? 'large' : ''} ${selectedTeam ? 'has-team-preview' : ''}`}
+      className={`public-cheer-board ${large ? 'large' : ''} ${selectedTeam ? 'has-team-preview' : ''} ${focusedCheer ? 'has-focus-card' : ''}`}
       aria-label="응원 메시지 보드"
     >
       <div className="section-heading compact">
@@ -2116,20 +2268,38 @@ function PublicCheerBoard({
         </button>
       </div>
 
+      {focusedCheer && focusedTeam ? (
+        <button
+          type="button"
+          className="public-cheer-focus-card"
+          style={{ '--team-color': focusedTeam.color } as CSSProperties}
+          onClick={() => setFocusedCheerId(null)}
+          aria-label="확대된 응원 메시지 접기"
+        >
+          <span className="focus-card-label">다시 클릭하면 목록으로 돌아갑니다</span>
+          <strong>
+            {formatCheerAuthor(focusedCheer.author, cheerNameMode)}
+            <ArrowRight size={18} strokeWidth={2.5} />
+            {focusedTeam.name}
+          </strong>
+          <p>{focusedCheer.text}</p>
+        </button>
+      ) : null}
+
       <div className="public-cheer-stream" aria-live="polite">
         {selectedCheers.length ? (
           selectedCheers.map((message) => {
             const team = teamMap.get(message.teamId) ?? state.teams[0]
             const authorLabel = formatCheerAuthor(message.author, cheerNameMode)
-            const isExpanded = expandedCheerIds.has(message.id)
+            const isFocused = focusedCheerId === message.id
             return (
               <button
                 type="button"
-                className={`public-cheer-message ${isExpanded ? 'is-expanded' : ''}`}
+                className={`public-cheer-message ${isFocused ? 'is-focused-source' : ''}`}
                 key={message.id}
                 style={{ '--team-color': team.color } as CSSProperties}
-                aria-expanded={isExpanded}
-                title={isExpanded ? '클릭해서 응원 메시지 접기' : '클릭해서 전체 응원 메시지 보기'}
+                aria-expanded={isFocused}
+                title={isFocused ? '클릭해서 응원 메시지 접기' : '클릭해서 전체 응원 메시지 보기'}
                 onClick={() => toggleCheerMessage(message.id)}
               >
                 <strong>
@@ -3958,6 +4128,8 @@ function useEventState(mode: AppMode, participantId?: string) {
       settings: { ...fallbackState.settings, ...(nextState.settings ?? {}) },
       quiz: { ...fallbackState.quiz, ...(nextState.quiz ?? {}) },
       quizBank: Array.isArray(nextState.quizBank) && nextState.quizBank.length ? nextState.quizBank : fallbackQuizBank,
+      serverTime: nextState.serverTime || Date.now(),
+      receivedAt: Date.now(),
       teams: nextState.teams.map((team) => {
         const previousRank = previousRanks?.get(team.id)
         return {
@@ -4526,6 +4698,7 @@ async function updateVote(
   participantId: string,
   name: string,
   group: string,
+  department: string,
   allocations: Record<string, number>,
 ) {
   await post('/api/vote', {
@@ -4533,6 +4706,7 @@ async function updateVote(
     participantId,
     name: name.trim(),
     group: normalizeLetsIdDisplay(group),
+    department,
     allocations,
   })
 }
