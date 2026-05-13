@@ -23,6 +23,7 @@ const teamsConfigPath = path.join(__dirname, 'teams.json')
 const teamLogoDir = path.join(__dirname, 'public', 'team-logos')
 const defaultCopy = {
   appTitle: 'Vibe Vote Arena',
+  appLogoFile: '',
   audienceEyeline: 'Audience Vote',
   adminEyeline: 'Admin Arena Wall',
   audienceHeroTitle: '별 {starBudget}개를 원하는 팀에 나눠 담으세요.',
@@ -64,7 +65,7 @@ const defaultCopy = {
   wallQuizTitle: '퀴즈',
   quizStandbyHeadline: '퀴즈를 준비 중입니다',
   quizStandbySubhead: '참가자 화면이 퀴즈 대기 모드로 전환되었습니다',
-  quizStandbyHint: '참가자는 3/2/1 카운트다운 뒤 정답을 입력할 수 있습니다.',
+  quizStandbyHint: '문제가 출제되면 3초 카운트다운 뒤 문제가 공개됩니다. 최대한 빨리 정답을 입력하세요. :)',
   quizCurrentQuestionLabel: 'Current Question',
   quizPendingQuestion: '퀴즈 대기 중입니다.',
   quizAnswerEmpty: '아직 도착한 답변이 없습니다.',
@@ -76,6 +77,7 @@ const defaultCopy = {
   contentPanelSummary: '팀 정보, 화면 문구, 퀴즈 문제를 한 곳에서 수정합니다.',
   rafflePanelEyeline: 'Lucky Draw',
   rafflePanelTitle: '행운권 추첨',
+  rafflePrizeImageFile: '',
 }
 
 const defaultTeams = [
@@ -260,6 +262,8 @@ let settings = {
   showScoresToAudience: true,
   starBudget: defaultStarBudget,
   durationMinutes: defaultDurationMinutes,
+  timerMode: 'duration',
+  targetTime: '',
   minScore: defaultMinScore,
   cheerNameMode: 'masked',
   themeMode: 'light',
@@ -293,7 +297,9 @@ function normalizeCopy(input) {
 
   for (const key of Object.keys(defaultCopy)) {
     if (typeof input?.[key] === 'string') {
-      next[key] = sanitizeText(input[key], 240)
+      next[key] = key === 'appLogoFile' || key === 'rafflePrizeImageFile'
+        ? sanitizeLogoPath(input[key])
+        : sanitizeText(input[key], 240)
     }
   }
 
@@ -983,6 +989,30 @@ function normalizeThemeMode(value, fallback = 'light') {
   return value === 'stage' ? 'stage' : value === 'light' ? 'light' : fallback
 }
 
+function normalizeTimerMode(value, fallback = 'duration') {
+  return value === 'targetTime' ? 'targetTime' : value === 'duration' ? 'duration' : fallback
+}
+
+function normalizeTargetTime(value, fallback = '') {
+  const text = String(value || '').trim()
+  if (!/^\d{2}:\d{2}$/.test(text)) return fallback
+  const [hour, minute] = text.split(':').map(Number)
+  return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 ? text : fallback
+}
+
+function calculateClosesAt(nextSettings = settings, now = Date.now()) {
+  if (nextSettings.timerMode === 'targetTime' && nextSettings.targetTime) {
+    const [hour, minute] = nextSettings.targetTime.split(':').map(Number)
+    const kstOffsetMs = 9 * 60 * 60 * 1000
+    const kstNow = new Date(now + kstOffsetMs)
+    let target = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate(), hour - 9, minute, 0, 0)
+    if (target <= now) target += 24 * 60 * 60 * 1000
+    return target
+  }
+
+  return now + nextSettings.durationMinutes * 60 * 1000
+}
+
 function parseCookies(cookieHeader = '') {
   return Object.fromEntries(
     cookieHeader
@@ -1011,17 +1041,30 @@ function participantCookieHeader(deviceId) {
   return `${participantCookieName}=${encodeURIComponent(deviceId)}; Max-Age=${participantCookieMaxAge}; Path=/; SameSite=Lax`
 }
 
-function resetRuntimeState({ seed = false } = {}) {
+function resetRuntimeState({ seed = false, keepParticipants = false } = {}) {
+  const preservedParticipants = keepParticipants
+    ? [...participants.values()].map((person) => ({
+        ...person,
+        allocations: {},
+        cheered: false,
+        cheerSubmitted: false,
+        updatedAt: Date.now(),
+      }))
+    : []
+
   participants.clear()
+  for (const person of preservedParticipants) {
+    participants.set(person.id, person)
+  }
   cheers.splice(0)
   voteEvents.splice(0)
   cheerId = 1
   voteEventId = 1
   clearQuiz()
-  sessionId += 1
+  if (!keepParticipants) sessionId += 1
   testMode = Boolean(seed)
   closed = false
-  closesAt = Date.now() + settings.durationMinutes * 60 * 1000
+  closesAt = calculateClosesAt(settings)
   lastRaffle = null
 
   if (seed) {
@@ -1269,12 +1312,13 @@ async function handleApi(request, response, url) {
     const candidates = getRaffleCandidates(rule)
     const winners = shuffle(candidates)
       .slice(0, Math.min(winnerCount, candidates.length))
-      .map((person) => ({
+      .map((person, index) => ({
         id: person.id,
         name: person.name,
         group: person.group,
         department: person.department || '',
         cheered: person.cheered,
+        rank: index + 1,
       }))
 
     lastRaffle = {
@@ -1345,7 +1389,7 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/close') {
     closed = Boolean(body.closed)
     if (!closed && Date.now() > closesAt) {
-      closesAt = Date.now() + settings.durationMinutes * 60 * 1000
+      closesAt = calculateClosesAt(settings)
     }
     broadcast()
     sendJson(response, 200, getState())
@@ -1371,9 +1415,11 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === '/api/settings') {
-      const nextStarBudget = Math.max(1, Math.min(20, Math.floor(Number(body.starBudget) || settings.starBudget)))
-      const nextDurationMinutes = Math.max(1, Math.min(240, Math.floor(Number(body.durationMinutes) || settings.durationMinutes)))
-      const nextMinScore = clamp(Number(body.minScore ?? settings.minScore), 0, 9.9)
+    const nextStarBudget = Math.max(1, Math.min(20, Math.floor(Number(body.starBudget) || settings.starBudget)))
+    const nextDurationMinutes = Math.max(1, Math.min(240, Math.floor(Number(body.durationMinutes) || settings.durationMinutes)))
+    const nextMinScore = clamp(Number(body.minScore ?? settings.minScore), 0, 9.9)
+    const nextTimerMode = normalizeTimerMode(body.timerMode, settings.timerMode)
+    const nextTargetTime = normalizeTargetTime(body.targetTime, settings.targetTime)
 
     settings = {
       ...settings,
@@ -1381,13 +1427,15 @@ async function handleApi(request, response, url) {
         typeof body.showScoresToAudience === 'boolean' ? Boolean(body.showScoresToAudience) : settings.showScoresToAudience,
       starBudget: nextStarBudget,
       durationMinutes: nextDurationMinutes,
+      timerMode: nextTimerMode,
+      targetTime: nextTargetTime,
       minScore: nextMinScore,
       cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, settings.cheerNameMode),
       themeMode: normalizeThemeMode(body.themeMode, settings.themeMode),
     }
     normalizeAllParticipantAllocations()
     closed = false
-    closesAt = Date.now() + settings.durationMinutes * 60 * 1000
+    closesAt = calculateClosesAt(settings)
     broadcast()
     sendJson(response, 200, getState())
     return
@@ -1405,7 +1453,7 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === '/api/reset') {
-    resetRuntimeState({ seed: Boolean(body.seed) })
+    resetRuntimeState({ seed: Boolean(body.seed), keepParticipants: Boolean(body.keepParticipants) && !body.seed })
     broadcast()
     sendJson(response, 200, getState())
     return

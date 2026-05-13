@@ -97,6 +97,7 @@ type LastRaffle = {
     group: string
     department?: string
     cheered: boolean
+    rank?: number
   }>
   createdAt: number
 }
@@ -145,6 +146,8 @@ type Settings = {
   showScoresToAudience: boolean
   starBudget: number
   durationMinutes: number
+  timerMode: 'duration' | 'targetTime'
+  targetTime: string
   minScore: number
   cheerNameMode: 'masked' | 'real'
   themeMode: 'light' | 'stage'
@@ -190,6 +193,7 @@ const emptyQuizState: QuizState = {
 
 const defaultCopy = {
   appTitle: 'Vibe Vote Arena',
+  appLogoFile: '',
   audienceEyeline: 'Audience Vote',
   adminEyeline: 'Admin Arena Wall',
   audienceHeroTitle: '별 {starBudget}개를 원하는 팀에 나눠 담으세요.',
@@ -231,7 +235,7 @@ const defaultCopy = {
   wallQuizTitle: '퀴즈',
   quizStandbyHeadline: '퀴즈를 준비 중입니다',
   quizStandbySubhead: '참가자 화면이 퀴즈 대기 모드로 전환되었습니다',
-  quizStandbyHint: '참가자는 3/2/1 카운트다운 뒤 정답을 입력할 수 있습니다.',
+  quizStandbyHint: '문제가 출제되면 3초 카운트다운 뒤 문제가 공개됩니다. 최대한 빨리 정답을 입력하세요. :)',
   quizCurrentQuestionLabel: 'Current Question',
   quizPendingQuestion: '퀴즈 대기 중입니다.',
   quizAnswerEmpty: '아직 도착한 답변이 없습니다.',
@@ -243,6 +247,7 @@ const defaultCopy = {
   contentPanelSummary: '팀 정보, 화면 문구, 퀴즈 문제를 한 곳에서 수정합니다.',
   rafflePanelEyeline: 'Lucky Draw',
   rafflePanelTitle: '행운권 추첨',
+  rafflePrizeImageFile: '',
 }
 
 const defaultTeams: TeamConfig[] = [
@@ -323,6 +328,8 @@ export class ArenaRoom {
     showScoresToAudience: true,
     starBudget: defaultStarBudget,
     durationMinutes: defaultDurationMinutes,
+    timerMode: 'duration',
+    targetTime: '',
     minScore: defaultMinScore,
     cheerNameMode: 'masked',
     themeMode: 'light',
@@ -393,6 +400,8 @@ export class ArenaRoom {
       showScoresToAudience: Boolean(snapshot.settings?.showScoresToAudience ?? true),
       starBudget: clamp(migratedStarBudget, 1, 20),
       durationMinutes: clamp(Math.floor(Number(snapshot.settings?.durationMinutes || defaultDurationMinutes)), 1, 240),
+      timerMode: normalizeTimerMode(snapshot.settings?.timerMode),
+      targetTime: normalizeTargetTime(snapshot.settings?.targetTime),
       minScore: clamp(Number(snapshot.settings?.minScore ?? defaultMinScore), 0, 9.9),
       cheerNameMode: normalizeCheerNameMode(snapshot.settings?.cheerNameMode),
       themeMode: normalizeThemeMode(snapshot.settings?.themeMode),
@@ -512,12 +521,13 @@ export class ArenaRoom {
       const candidates = this.getRaffleCandidates(rule)
       const winners = shuffle(candidates)
         .slice(0, Math.min(winnerCount, candidates.length))
-        .map((person) => ({
+        .map((person, index) => ({
           id: person.id,
           name: person.name,
           group: person.group,
           department: person.department || '',
           cheered: person.cheered,
+          rank: index + 1,
         }))
 
       this.lastRaffle = {
@@ -573,7 +583,7 @@ export class ArenaRoom {
     if (pathname === '/api/close') {
       this.closed = Boolean(body.closed)
       if (!this.closed && Date.now() > this.closesAt) {
-        this.closesAt = Date.now() + this.settings.durationMinutes * 60 * 1000
+        this.closesAt = calculateClosesAt(this.settings)
       }
       await this.commit()
       return json(this.getState())
@@ -599,12 +609,14 @@ export class ArenaRoom {
             : this.settings.showScoresToAudience,
         starBudget: clamp(Math.floor(Number(body.starBudget) || this.settings.starBudget), 1, 20),
         durationMinutes: clamp(Math.floor(Number(body.durationMinutes) || this.settings.durationMinutes), 1, 240),
+        timerMode: normalizeTimerMode(body.timerMode, this.settings.timerMode),
+        targetTime: normalizeTargetTime(body.targetTime, this.settings.targetTime),
         minScore: clamp(Number(body.minScore ?? this.settings.minScore), 0, 9.9),
         cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, this.settings.cheerNameMode),
         themeMode: normalizeThemeMode(body.themeMode, this.settings.themeMode),
       }
       this.normalizeAllParticipantAllocations()
-      this.closesAt = Date.now() + this.settings.durationMinutes * 60 * 1000
+      this.closesAt = calculateClosesAt(this.settings)
       this.closed = false
       this.lastRaffle = null
       await this.commit()
@@ -620,7 +632,7 @@ export class ArenaRoom {
     }
 
     if (pathname === '/api/reset') {
-      await this.resetRuntimeState({ seed: Boolean(body.seed) })
+      await this.resetRuntimeState({ seed: Boolean(body.seed), keepParticipants: Boolean(body.keepParticipants) && !body.seed })
       await this.commit()
       return json(this.getState())
     }
@@ -1062,17 +1074,30 @@ export class ArenaRoom {
     return removed
   }
 
-  private async resetRuntimeState({ seed = false } = {}) {
+  private async resetRuntimeState({ seed = false, keepParticipants = false } = {}) {
+    const preservedParticipants = keepParticipants
+      ? [...this.participants.values()].map((person) => ({
+          ...person,
+          allocations: {},
+          cheered: false,
+          cheerSubmitted: false,
+          updatedAt: Date.now(),
+        }))
+      : []
+
     this.participants.clear()
+    for (const person of preservedParticipants) {
+      this.participants.set(person.id, person)
+    }
     this.cheers = []
     this.voteEvents = []
     this.cheerId = 1
     this.voteEventId = 1
     this.clearQuiz()
-    this.sessionId += 1
+    if (!keepParticipants) this.sessionId += 1
     this.testMode = Boolean(seed)
     this.closed = false
-    this.closesAt = Date.now() + this.settings.durationMinutes * 60 * 1000
+    this.closesAt = calculateClosesAt(this.settings)
     this.lastRaffle = null
 
     if (seed) {
@@ -1168,7 +1193,9 @@ function normalizeCopy(input: unknown): EventCopy {
 
   for (const key of Object.keys(defaultCopy) as Array<keyof typeof defaultCopy>) {
     if (typeof source[key] === 'string') {
-      next[key] = sanitizeText(source[key], 240)
+      next[key] = key === 'appLogoFile' || key === 'rafflePrizeImageFile'
+        ? sanitizeLogoPath(source[key])
+        : sanitizeText(source[key], 240)
     }
   }
 
@@ -1468,6 +1495,30 @@ function normalizeCheerNameMode(value: unknown, fallback: Settings['cheerNameMod
 
 function normalizeThemeMode(value: unknown, fallback: Settings['themeMode'] = 'light'): Settings['themeMode'] {
   return value === 'stage' ? 'stage' : value === 'light' ? 'light' : fallback
+}
+
+function normalizeTimerMode(value: unknown, fallback: Settings['timerMode'] = 'duration'): Settings['timerMode'] {
+  return value === 'targetTime' ? 'targetTime' : value === 'duration' ? 'duration' : fallback
+}
+
+function normalizeTargetTime(value: unknown, fallback = '') {
+  const text = String(value || '').trim()
+  if (!/^\d{2}:\d{2}$/.test(text)) return fallback
+  const [hour, minute] = text.split(':').map(Number)
+  return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 ? text : fallback
+}
+
+function calculateClosesAt(settings: Settings, now = Date.now()) {
+  if (settings.timerMode === 'targetTime' && settings.targetTime) {
+    const [hour, minute] = settings.targetTime.split(':').map(Number)
+    const kstOffsetMs = 9 * 60 * 60 * 1000
+    const kstNow = new Date(now + kstOffsetMs)
+    let target = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate(), hour - 9, minute, 0, 0)
+    if (target <= now) target += 24 * 60 * 60 * 1000
+    return target
+  }
+
+  return now + settings.durationMinutes * 60 * 1000
 }
 
 function normalizeQuizState(value: unknown): QuizState {

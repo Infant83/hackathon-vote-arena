@@ -97,6 +97,7 @@ type RaffleWinner = {
   group?: string
   department?: string
   cheered: boolean
+  rank?: number
 }
 
 type LastRaffle = {
@@ -148,6 +149,7 @@ type QuizConfig = {
 }
 
 type ThemeMode = 'light' | 'stage'
+type TimerMode = 'duration' | 'targetTime'
 
 type EventState = {
   teams: Team[]
@@ -166,6 +168,8 @@ type EventState = {
     showScoresToAudience: boolean
     starBudget: number
     durationMinutes: number
+    timerMode: TimerMode
+    targetTime: string
     minScore: number
     cheerNameMode: CheerNameMode
     themeMode: ThemeMode
@@ -175,6 +179,7 @@ type EventState = {
 
 type EventCopy = {
   appTitle: string
+  appLogoFile: string
   audienceEyeline: string
   adminEyeline: string
   audienceHeroTitle: string
@@ -224,6 +229,7 @@ type EventCopy = {
   contentPanelSummary: string
   rafflePanelEyeline: string
   rafflePanelTitle: string
+  rafflePrizeImageFile: string
 }
 
 type CheerNameMode = 'masked' | 'real'
@@ -290,6 +296,7 @@ const CHEER_MESSAGE_MAX_LENGTH = 240
 const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
 const copyLabels: Record<keyof EventCopy, string> = {
   appTitle: '앱 제목',
+  appLogoFile: '상단 로고 이미지',
   audienceEyeline: '관객 화면 상단 라벨',
   adminEyeline: '관리자 화면 상단 라벨',
   audienceHeroTitle: '관객 안내 제목',
@@ -339,10 +346,12 @@ const copyLabels: Record<keyof EventCopy, string> = {
   contentPanelSummary: '운영 콘텐츠 관리 요약',
   rafflePanelEyeline: '관리자 추첨 패널 라벨',
   rafflePanelTitle: '관리자 추첨 패널 제목',
+  rafflePrizeImageFile: '행운권 상품 이미지',
 }
 
 const copyHelp: Partial<Record<keyof EventCopy, string>> = {
   appTitle: '모든 화면의 좌측 상단 큰 제목입니다.',
+  appLogoFile: '상단 V 로고 자리에 쓸 이미지 주소입니다. 아래 브랜드/상품 이미지 관리에서 파일도 올릴 수 있습니다.',
   audienceHeroTitle: '/vote 첫 화면의 별 배분 안내 제목입니다. {starBudget}, {maxStarsPerTeam} 사용 가능.',
   audienceHeroSubtitle: '/vote 첫 화면의 사용법 안내 문구입니다.',
   raffleGuide: '/vote 투표 보드 상단의 추첨 응모 안내입니다.',
@@ -356,6 +365,7 @@ const copyHelp: Partial<Record<keyof EventCopy, string>> = {
   quizStandbySubhead: '/wall 퀴즈 대기 화면에서 참가자 전환 상태를 설명합니다.',
   quizStandbyHint: '/wall과 /vote 퀴즈 대기 화면의 짧은 참여 방법 안내입니다.',
   contentPanelSummary: '/admin 운영 콘텐츠 카드의 설명 문구입니다.',
+  rafflePrizeImageFile: '행운권 추첨 화면의 선물 아이콘을 눌렀을 때 보여줄 상품 이미지입니다.',
 }
 
 const copyGroups: Array<{
@@ -456,6 +466,7 @@ const quizWinnerDismissedKey = 'vibe-vote-quiz-winner-dismissed'
 const cookieMaxAge = 60 * 60 * 24 * 14
 const fallbackCopy: EventCopy = {
   appTitle: 'Vibe Vote Arena',
+  appLogoFile: '',
   audienceEyeline: 'Audience Vote',
   adminEyeline: 'Admin Arena Wall',
   audienceHeroTitle: '별 {starBudget}개를 원하는 팀에 나눠 담으세요.',
@@ -497,7 +508,7 @@ const fallbackCopy: EventCopy = {
   wallQuizTitle: '퀴즈',
   quizStandbyHeadline: '퀴즈를 준비 중입니다',
   quizStandbySubhead: '참가자 화면이 퀴즈 대기 모드로 전환되었습니다',
-  quizStandbyHint: '참가자는 3/2/1 카운트다운 뒤 정답을 입력할 수 있습니다.',
+  quizStandbyHint: '문제가 출제되면 3초 카운트다운 뒤 문제가 공개됩니다. 최대한 빨리 정답을 입력하세요. :)',
   quizCurrentQuestionLabel: 'Current Question',
   quizPendingQuestion: '퀴즈 대기 중입니다.',
   quizAnswerEmpty: '아직 도착한 답변이 없습니다.',
@@ -509,6 +520,7 @@ const fallbackCopy: EventCopy = {
   contentPanelSummary: '팀 정보, 화면 문구, 퀴즈 문제를 한 곳에서 수정합니다.',
   rafflePanelEyeline: 'Lucky Draw',
   rafflePanelTitle: '행운권 추첨',
+  rafflePrizeImageFile: '',
 }
 
 const fallbackTeams: Team[] = [
@@ -740,6 +752,8 @@ const fallbackState: EventState = {
     showScoresToAudience: true,
     starBudget: DEFAULT_STAR_BUDGET,
     durationMinutes: DEFAULT_DURATION_MINUTES,
+    timerMode: 'duration',
+    targetTime: '',
     minScore: DEFAULT_MIN_SCORE,
     cheerNameMode: 'masked',
     themeMode: 'light',
@@ -899,11 +913,9 @@ function Header({
   return (
     <header className={`topbar ${mode === 'admin' ? 'admin-topbar' : 'audience-topbar'} ${mode === 'wall' ? 'wall-topbar' : ''}`} aria-label="행사 상태">
       <div className="brand-lockup">
-        <div className="lg-dot" aria-hidden="true">
-          V
-        </div>
+        <BrandMark logoFile={state.copy.appLogoFile} />
         <div>
-            <p className="eyeline">{mode === 'admin' ? state.copy.adminEyeline : mode === 'wall' ? state.copy.wallEyeline : state.copy.audienceEyeline}</p>
+          <p className="eyeline">{mode === 'admin' ? state.copy.adminEyeline : mode === 'wall' ? state.copy.wallEyeline : state.copy.audienceEyeline}</p>
           <div className="brand-title-row">
             <h1>{state.copy.appTitle}</h1>
             {mode === 'admin' ? <span className="admin-console-badge">운영 콘솔</span> : null}
@@ -1004,6 +1016,14 @@ function Header({
         </div>
       </div>
     </header>
+  )
+}
+
+function BrandMark({ logoFile }: { logoFile?: string }) {
+  return (
+    <div className={`lg-dot ${logoFile ? 'has-image' : ''}`} aria-hidden="true">
+      {logoFile ? <img src={logoFile} alt="" /> : 'V'}
+    </div>
   )
 }
 
@@ -1281,13 +1301,15 @@ function VoteView({
 
   return (
     <>
-      <section className="hero-band audience">
-        <div>
-          <h2>{formatCopy(state.copy.audienceHeroTitle, { starBudget, maxStarsPerTeam: MAX_STARS_PER_TEAM })}</h2>
-          <p>{formatCopy(state.copy.audienceHeroSubtitle, { starBudget, maxStarsPerTeam: MAX_STARS_PER_TEAM })}</p>
-        </div>
-        <StarWallet remainingStars={remainingStars} spentStars={spentStars} starBudget={starBudget} />
-      </section>
+      {!quizActive ? (
+        <section className="hero-band audience">
+          <div>
+            <h2>{formatCopy(state.copy.audienceHeroTitle, { starBudget, maxStarsPerTeam: MAX_STARS_PER_TEAM })}</h2>
+            <p>{formatCopy(state.copy.audienceHeroSubtitle, { starBudget, maxStarsPerTeam: MAX_STARS_PER_TEAM })}</p>
+          </div>
+          <StarWallet remainingStars={remainingStars} spentStars={spentStars} starBudget={starBudget} />
+        </section>
+      ) : null}
 
       {showRaffleWinnerNotice && raffleWinner ? (
         <RaffleWinnerNotice winner={raffleWinner} onDismiss={dismissRaffleWinnerNotice} />
@@ -1295,6 +1317,25 @@ function VoteView({
 
       {showQuizWinnerNotice && myWinningQuizAnswer ? (
         <QuizWinnerNotice winner={myWinningQuizAnswer} onDismiss={dismissQuizWinnerNotice} />
+      ) : null}
+
+      {quizActive && isRegistered ? (
+        <section className="quiz-participant-banner" aria-label="퀴즈 참여자 정보">
+          <div>
+            <span>참여자</span>
+            <strong>{name}</strong>
+          </div>
+          <div>
+            <span>Let's ID</span>
+            <strong>{normalizeLetsIdDisplay(group)}</strong>
+          </div>
+          {departmentDisplay ? (
+            <div>
+              <span>부서/소속</span>
+              <strong>{departmentDisplay}</strong>
+            </div>
+          ) : null}
+        </section>
       ) : null}
 
       {!isRegistered ? (
@@ -1348,9 +1389,6 @@ function VoteView({
           copy={state.copy}
           serverTime={state.serverTime}
           receivedAt={state.receivedAt}
-          name={name}
-          group={normalizeLetsIdDisplay(group)}
-          department={departmentDisplay}
           answerText={quizAnswerText}
           onAnswerTextChange={(value) => setQuizAnswerDraft({ quizId: state.quiz.id, text: value })}
           onSubmit={sendQuizAnswer}
@@ -1517,6 +1555,7 @@ function RaffleWinnerNotice({ winner, onDismiss }: { winner: RaffleWinner; onDis
         <Gift size={30} />
         <p className="section-kicker">Lucky Draw</p>
         <h2>행운권에 당첨되었습니다!</h2>
+        {winner.rank ? <p className="winner-rank-label">{winner.rank}등 당첨</p> : null}
         <strong>{winner.name}</strong>
         {[winner.group, winner.department].filter(Boolean).length ? <span>{[winner.group, winner.department].filter(Boolean).join(' · ')}</span> : null}
         <button type="button" onClick={onDismiss}>
@@ -1549,9 +1588,6 @@ function QuizParticipationView({
   copy,
   serverTime,
   receivedAt,
-  name,
-  group,
-  department,
   answerText,
   onAnswerTextChange,
   onSubmit,
@@ -1566,9 +1602,6 @@ function QuizParticipationView({
   copy: EventCopy
   serverTime?: number
   receivedAt?: number
-  name: string
-  group: string
-  department: string
   answerText: string
   onAnswerTextChange: (value: string) => void
   onSubmit: () => void
@@ -1607,7 +1640,7 @@ function QuizParticipationView({
         <div className="quiz-start-screen standby">
           <Sparkles size={34} />
           <p>{copy.quizStandbyHeadline}</p>
-          <h2>문제가 출제되면 3/2/1 카운트다운 뒤 답변창이 열립니다</h2>
+          {copy.quizStandbySubhead ? <h2 className="quiz-standby-subhead">{copy.quizStandbySubhead}</h2> : null}
           <span>{copy.quizStandbyHint}</span>
         </div>
       ) : null}
@@ -1637,11 +1670,6 @@ function QuizParticipationView({
               : quiz.question || copy.quizPendingQuestion}
           </span>
         </h2>
-        <div className="quiz-player-row">
-          <strong>{name}</strong>
-          <span>{group}</span>
-          {department ? <span>{department}</span> : null}
-        </div>
       </div>
 
       <div className={`quiz-answer-card ${hasWon ? 'is-winner' : ''}`}>
@@ -1684,6 +1712,7 @@ function QuizParticipationView({
           {quiz.winners.map((winner) => (
             <span key={`${winner.quizId}-${winner.id}`}>
               {winner.rank}등 {winner.author}
+              {[winner.group, winner.department].filter(Boolean).length ? ` · ${[winner.group, winner.department].filter(Boolean).join(' · ')}` : ''}
             </span>
           ))}
         </div>
@@ -1711,6 +1740,8 @@ function AdminView({
   const [activePanel, setActivePanel] = useState<AdminPanel | null>(getInitialAdminPanel)
   const starBudget = getStarBudget(state)
   const durationMinutes = getDurationMinutes(state)
+  const timerMode = getTimerMode(state)
+  const targetTime = getTargetTime(state)
   const minScore = getMinScore(state)
   const cheerNameMode = getCheerNameMode(state)
   const themeMode = getThemeMode(state)
@@ -1744,6 +1775,8 @@ function AdminView({
     post('/api/settings', {
       starBudget: data.get('starBudget'),
       durationMinutes: data.get('durationMinutes'),
+      timerMode: data.get('timerMode'),
+      targetTime: data.get('targetTime'),
       minScore: data.get('minScore'),
       cheerNameMode: data.get('cheerNameMode'),
       themeMode: data.get('themeMode'),
@@ -1754,14 +1787,21 @@ function AdminView({
     post('/api/settings', {
       starBudget,
       durationMinutes,
+      timerMode,
+      targetTime,
       minScore,
       cheerNameMode,
       themeMode: nextThemeMode,
     })
   }
 
-  const resetLive = () => {
-    post('/api/reset', { seed: false })
+  const resetVotesOnly = () => {
+    post('/api/reset', { seed: false, keepParticipants: true })
+  }
+
+  const resetAll = () => {
+    if (!window.confirm('참가자 등록 기록까지 모두 초기화할까요? 행사 중에는 투표만 Reset을 권장합니다.')) return
+    post('/api/reset', { seed: false, keepParticipants: false })
   }
 
   const seedTestData = () => {
@@ -1838,7 +1878,7 @@ function AdminView({
         </div>
         <form
           className="control-grid"
-          key={`${starBudget}:${durationMinutes}:${minScore}:${cheerNameMode}:${themeMode}`}
+          key={`${starBudget}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${cheerNameMode}:${themeMode}`}
           onSubmit={(event) => {
             event.preventDefault()
             applySettings(event.currentTarget)
@@ -1869,7 +1909,14 @@ function AdminView({
             </div>
           </label>
           <label>
-            <span>투표 타이머</span>
+            <span>타이머 방식</span>
+            <select name="timerMode" defaultValue={timerMode}>
+              <option value="duration">분 단위</option>
+              <option value="targetTime">마감 시각</option>
+            </select>
+          </label>
+          <label>
+            <span>투표 시간</span>
             <div className="inline-input">
               <input
                 name="durationMinutes"
@@ -1880,6 +1927,10 @@ function AdminView({
               />
               <em>분</em>
             </div>
+          </label>
+          <label>
+            <span>마감 시각(KST)</span>
+            <input name="targetTime" type="time" defaultValue={targetTime} />
           </label>
           <label>
             <span>송출 이름 표시</span>
@@ -1919,8 +1970,11 @@ function AdminView({
             <Clock3 size={16} />
             설정 적용
           </button>
-          <button type="button" className="secondary-control" onClick={resetLive}>
-            Reset
+          <button type="button" className="secondary-control" onClick={resetVotesOnly}>
+            투표만 Reset
+          </button>
+          <button type="button" className="secondary-control danger-control" onClick={resetAll}>
+            전체 Reset
           </button>
           <button type="button" className="secondary-control" onClick={seedTestData}>
             테스트 데이터
@@ -2085,7 +2139,7 @@ function PublicWallView({
       <section className="public-wall-shell" aria-label="관객 송출 보드">
         {wallPanel === 'quiz' ? (
           <section className="public-quiz-board" aria-label="관객 퀴즈 송출">
-            <QuizWallBoard state={state} />
+            <QuizWallBoard state={state} onPrepareQuiz={() => post('/api/quiz/prepare', {})} />
           </section>
         ) : wallPanel === 'raffle' ? (
           <section className="public-raffle-board" aria-label="관객 행운권 추첨 쇼업">
@@ -2188,7 +2242,7 @@ function PublicWallView({
   )
 }
 
-function QuizWallBoard({ state }: { state: EventState }) {
+function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQuiz?: () => void }) {
   const now = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
   const phase = getQuizDisplayPhase(state.quiz, now)
   const countdownValue = getQuizCountdownValue(state.quiz, now)
@@ -2207,24 +2261,32 @@ function QuizWallBoard({ state }: { state: EventState }) {
           <p className="section-kicker">{state.copy.wallQuizEyeline}</p>
           <h2>{state.copy.wallQuizTitle}</h2>
         </div>
-        <span className={`quiz-mode-pill ${phase}`}>
-          {phase === 'open'
-            ? '진행 중'
-            : phase === 'intro' || phase === 'countdown'
-              ? '곧 시작'
-              : phase === 'closed'
-                ? '마감'
-                : phase === 'standby'
-                  ? '준비 중'
-                  : '대기'}
-        </span>
+        <div className="quiz-wall-status-actions">
+          {phase === 'idle' && onPrepareQuiz ? (
+            <button type="button" className="quiz-standby-action" onClick={onPrepareQuiz}>
+              <Sparkles size={15} />
+              퀴즈 준비 모드
+            </button>
+          ) : null}
+          <span className={`quiz-mode-pill ${phase}`}>
+            {phase === 'open'
+              ? '진행 중'
+              : phase === 'intro' || phase === 'countdown'
+                ? '곧 시작'
+                : phase === 'closed'
+                  ? '마감'
+                  : phase === 'standby'
+                    ? '준비 중'
+                    : '대기'}
+          </span>
+        </div>
       </div>
 
       {phase === 'idle' || phase === 'standby' ? (
         <div className="quiz-wall-start-screen idle">
           <Sparkles size={44} />
           <p>{state.copy.quizStandbyHeadline}</p>
-          <h3>
+          <h3 className="quiz-standby-subhead">
             {phase === 'standby'
               ? state.copy.quizStandbySubhead
               : '관리자가 문제를 출제하면 모든 참가자 화면이 동시에 퀴즈 모드로 전환됩니다'}
@@ -2563,7 +2625,7 @@ function PublicCheerBoard({
           aria-label={`${selectedTeam.name} 선택 해제`}
         >
           <TeamPhotoPreview team={selectedTeam} />
-          <div>
+          <div className="selected-team-copy">
             <strong>{selectedTeam.name}</strong>
             <p>{selectedTeam.title}</p>
             <span>{selectedTeam.members.length ? selectedTeam.members.join(' · ') : '팀원 미등록'}</span>
@@ -3158,6 +3220,10 @@ function TeamConfigDetail({
     setDraftCopy((current) => ({ ...current, [key]: value }))
   }
 
+  const updateCopyImage = (key: 'appLogoFile' | 'rafflePrizeImageFile', value: string) => {
+    updateCopy(key, normalizeLogoSourceValue(value))
+  }
+
   const updateTeam = (index: number, field: string, value: string) => {
     setDraftTeams((current) =>
       current.map((team, teamIndex) => (teamIndex === index ? { ...team, [field]: value } : team)),
@@ -3175,6 +3241,18 @@ function TeamConfigDetail({
       const dataUrl = await readLogoFileAsDataUrl(file)
       updateTeam(index, 'logoFile', dataUrl)
       setStatusText(`${draftTeams[index]?.name || `Team ${index + 1}`} 로고/사진 파일을 불러왔습니다.`)
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : '이미지 파일을 불러오지 못했습니다.')
+    }
+  }
+
+  const uploadCopyImage = async (key: 'appLogoFile' | 'rafflePrizeImageFile', file: File | undefined) => {
+    if (!file) return
+
+    try {
+      const dataUrl = await readLogoFileAsDataUrl(file)
+      updateCopy(key, dataUrl)
+      setStatusText(`${copyLabels[key]} 파일을 불러왔습니다.`)
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : '이미지 파일을 불러오지 못했습니다.')
     }
@@ -3246,6 +3324,37 @@ function TeamConfigDetail({
         로고는 png, jpg, webp, svg, ico를 받을 수 있습니다.
       </p>
       {statusText ? <p className="config-status">{statusText}</p> : null}
+
+      <section className="visual-config-grid" aria-label="브랜드와 상품 이미지 관리">
+        <div className="section-heading compact">
+          <div>
+            <p className="section-kicker">Visual Assets</p>
+            <h2>브랜드/상품 이미지</h2>
+          </div>
+        </div>
+        <div className="visual-config-list">
+          <ImageSourceField
+            label="상단 로고"
+            description="/vote, /wall, /admin 좌측 상단 V 로고 자리에 표시됩니다."
+            value={draftCopy.appLogoFile}
+            previewLabel="로고 미리보기"
+            onRawChange={(value) => updateCopy('appLogoFile', value)}
+            onChange={(value) => updateCopyImage('appLogoFile', value)}
+            onUpload={(file) => uploadCopyImage('appLogoFile', file)}
+            onClear={() => updateCopy('appLogoFile', '')}
+          />
+          <ImageSourceField
+            label="행운권 상품 이미지"
+            description="행운권 추첨 화면의 선물 아이콘을 눌렀을 때 크게 보여줄 이미지입니다."
+            value={draftCopy.rafflePrizeImageFile}
+            previewLabel="상품 이미지 미리보기"
+            onRawChange={(value) => updateCopy('rafflePrizeImageFile', value)}
+            onChange={(value) => updateCopyImage('rafflePrizeImageFile', value)}
+            onUpload={(file) => uploadCopyImage('rafflePrizeImageFile', file)}
+            onClear={() => updateCopy('rafflePrizeImageFile', '')}
+          />
+        </div>
+      </section>
 
       <section className="copy-config-grid" aria-label="화면 문구 관리">
         <div className="section-heading compact">
@@ -3476,6 +3585,76 @@ function LogoSourceField({
           Google Drive 링크는 공개 공유된 파일 링크를 붙여넣으면 표시용 이미지 주소로 자동 정리됩니다. 발표장에서는 팀을 클릭했을 때 이
           이미지가 크게 보입니다.
         </p>
+      </div>
+    </div>
+  )
+}
+
+function ImageSourceField({
+  label,
+  description,
+  value,
+  previewLabel,
+  onChange,
+  onRawChange,
+  onUpload,
+  onClear,
+}: {
+  label: string
+  description: string
+  value: string
+  previewLabel: string
+  onChange: (value: string) => void
+  onRawChange: (value: string) => void
+  onUpload: (file: File | undefined) => void
+  onClear: () => void
+}) {
+  return (
+    <div className="logo-source-field image-source-field">
+      <div className="logo-source-head">
+        <span>{label}</span>
+        <small>{description}</small>
+      </div>
+      <div className="logo-source-row">
+        <input
+          value={value}
+          placeholder="https://... 또는 Google Drive 공유 링크"
+          onChange={(event) => onRawChange(event.target.value)}
+          onBlur={(event) => onChange(event.target.value)}
+          aria-label={`${label} 이미지 주소`}
+        />
+        <button type="button" onClick={() => onChange(value)}>
+          <Link2 size={14} />
+          링크 정리
+        </button>
+        <label className="logo-file-button">
+          <ImagePlus size={14} />
+          파일
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon"
+            onChange={(event) => {
+              onUpload(event.currentTarget.files?.[0])
+              event.currentTarget.value = ''
+            }}
+          />
+        </label>
+        {value ? (
+          <button type="button" onClick={onClear}>
+            <X size={14} />
+            비우기
+          </button>
+        ) : null}
+      </div>
+      <div className="image-source-preview" aria-label={previewLabel}>
+        {value ? (
+          <img src={value} alt="" />
+        ) : (
+          <span>
+            <ImagePlus size={18} />
+            {previewLabel}
+          </span>
+        )}
       </div>
     </div>
   )
@@ -4030,6 +4209,7 @@ function RaffleDetailPanel({
   onStop: () => void
   publicMode?: boolean
 }) {
+  const [showPrizeImage, setShowPrizeImage] = useState(false)
   const previewCandidates = getRaffleCandidatesForRule(state, raffleRule)
   const reelNames = previewCandidates.slice(0, 12)
   const rollingNames = reelNames.length
@@ -4040,11 +4220,34 @@ function RaffleDetailPanel({
   const visualBallCount = rollingNames.length > 1 ? clamp(previewCandidates.length, 14, publicMode ? 30 : 22) : 14
   const candidateBalls = Array.from({ length: visualBallCount }, (_, index) => rollingNames[index % rollingNames.length])
   const targetCandidates = Array.from({ length: 6 }, (_, index) => rollingNames[index % rollingNames.length])
+  const prizeImage = state.copy.rafflePrizeImageFile
 
   return (
     <div className={`raffle-detail ${publicMode ? 'public-mode' : ''}`}>
       <section className={`raffle-showcase style-${raffleStyle} ${isDrawing ? 'drawing' : ''} ${hasWinners ? 'has-winners' : ''}`} aria-live="polite">
         <CelebrationConfetti active={hasWinners} seedKey={state.lastRaffle?.createdAt ?? 0} />
+        {prizeImage ? (
+          <>
+            <button
+              type="button"
+              className="prize-image-trigger"
+              onClick={() => setShowPrizeImage(true)}
+              aria-label="행운권 상품 이미지 보기"
+            >
+              <Gift size={22} />
+            </button>
+            {showPrizeImage ? (
+              <div className="prize-image-overlay" role="dialog" aria-modal="true" aria-label="행운권 상품 이미지">
+                <div>
+                  <button type="button" onClick={() => setShowPrizeImage(false)} aria-label="상품 이미지 닫기">
+                    <X size={18} />
+                  </button>
+                  <img src={prizeImage} alt="행운권 상품" />
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : null}
         {raffleStyle === 'lotto' ? (
           <div className="lotto-machine" aria-hidden="true">
             <span className="lotto-stand left" />
@@ -5259,6 +5462,14 @@ function getStarBudget(state: EventState) {
 
 function getDurationMinutes(state: EventState) {
   return clamp(Math.floor(state.settings.durationMinutes || DEFAULT_DURATION_MINUTES), 1, 240)
+}
+
+function getTimerMode(state: EventState): TimerMode {
+  return state.settings.timerMode === 'targetTime' ? 'targetTime' : 'duration'
+}
+
+function getTargetTime(state: EventState) {
+  return /^\d{2}:\d{2}$/.test(state.settings.targetTime || '') ? state.settings.targetTime : ''
 }
 
 function getMinScore(state: EventState) {
