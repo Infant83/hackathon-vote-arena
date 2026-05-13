@@ -1,16 +1,18 @@
 import rawConfig from '../teams.json'
 
-const defaultStarBudget = 20
+const defaultStarBudget = 10
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const maxStarsPerTeam = 10
 const cheerMessageMaxLength = 240
 const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
+const quizIntroMs = 2400
+const quizCountdownMs = 3600
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const snapshotKey = 'event-state-v1'
-const settingsVersion = 4
+const settingsVersion = 5
 
 type Env = {
   ARENA_ROOM: DurableObjectNamespace
@@ -97,7 +99,7 @@ type LastRaffle = {
   createdAt: number
 }
 
-type QuizMode = 'idle' | 'open' | 'closed'
+type QuizMode = 'idle' | 'countdown' | 'open' | 'closed'
 
 type QuizAnswer = {
   id: number
@@ -115,12 +117,25 @@ type QuizState = {
   id: number
   round: number
   mode: QuizMode
+  selectedQuizId: string
   question: string
   winnerCount: number
   answers: QuizAnswer[]
   winners: QuizAnswer[]
+  introEndsAt: number
+  opensAt: number
   createdAt: number
   updatedAt: number
+}
+
+type QuizConfig = {
+  id: string
+  title: string
+  question: string
+  answer: string
+  acceptedAnswers: string[]
+  winnerCount: number
+  enabled: boolean
 }
 
 type Settings = {
@@ -141,6 +156,7 @@ type Snapshot = {
   quiz?: QuizState
   quizAnswerKeys?: string[]
   quizAnswerId?: number
+  quizBank?: QuizConfig[]
   cheerId: number
   voteEventId: number
   sessionId: number
@@ -157,10 +173,13 @@ const emptyQuizState: QuizState = {
   id: 0,
   round: 0,
   mode: 'idle',
+  selectedQuizId: '',
   question: '',
   winnerCount: 2,
   answers: [],
   winners: [],
+  introEndsAt: 0,
+  opensAt: 0,
   createdAt: 0,
   updatedAt: 0,
 }
@@ -222,6 +241,27 @@ const defaultTeams: TeamConfig[] = [
   },
 ]
 
+const defaultQuizBank: QuizConfig[] = [
+  {
+    id: 'quiz-1',
+    title: '오프닝 퀴즈',
+    question: '오늘 행사의 관객 참여 시스템 이름은 무엇일까요?',
+    answer: 'Vibe Vote Arena',
+    acceptedAnswers: ['vibevotearena', '바이브보트아레나'],
+    winnerCount: 2,
+    enabled: true,
+  },
+  {
+    id: 'quiz-2',
+    title: '투표 규칙',
+    question: '한 참가자가 한 팀에 줄 수 있는 별의 최대 개수는 몇 개일까요?',
+    answer: '10',
+    acceptedAnswers: ['10개', '열개'],
+    winnerCount: 2,
+    enabled: true,
+  },
+]
+
 const validLogos = new Set<LogoKind>(['orbit', 'beam', 'grid', 'wave', 'core'])
 const initialConfig = loadConfig(rawConfig)
 const encoder = new TextEncoder()
@@ -268,6 +308,7 @@ export class ArenaRoom {
   }
   private teams: TeamConfig[] = initialConfig.teams
   private copy: EventCopy = initialConfig.copy
+  private quizBank: QuizConfig[] = initialConfig.quizBank
   private validTeamIds = new Set(initialConfig.teams.map((team) => team.id))
   private state: DurableObjectState
   private loaded: Promise<void>
@@ -311,6 +352,7 @@ export class ArenaRoom {
     this.lastRaffle = snapshot.lastRaffle || null
     this.quiz = normalizeQuizState(snapshot.quiz)
     this.quizAnswerKeys = Array.isArray(snapshot.quizAnswerKeys) ? snapshot.quizAnswerKeys.filter(Boolean) : []
+    this.quizBank = normalizeQuizBank(snapshot.quizBank, initialConfig.quizBank)
     this.cheerId = Math.max(1, Number(snapshot.cheerId || 1))
     this.voteEventId = Math.max(1, Number(snapshot.voteEventId || 1))
     this.quizAnswerId = Math.max(1, Number(snapshot.quizAnswerId || 1))
@@ -346,6 +388,7 @@ export class ArenaRoom {
       quiz: this.quiz,
       quizAnswerKeys: this.quizAnswerKeys,
       quizAnswerId: this.quizAnswerId,
+      quizBank: this.quizBank,
       cheerId: this.cheerId,
       voteEventId: this.voteEventId,
       sessionId: this.sessionId,
@@ -611,6 +654,7 @@ export class ArenaRoom {
       closesAt: this.closesAt,
       lastRaffle: this.lastRaffle,
       quiz: this.sanitizeQuizState(),
+      quizBank: this.quizBank,
       sessionId: this.sessionId,
       testMode: this.testMode,
       settings: this.settings,
@@ -634,6 +678,9 @@ export class ArenaRoom {
       return normalizeTeam(team, this.teams[index] || initialConfig.teams[index] || initialConfig.teams[0], index)
     })
     this.copy = normalizeCopy({ ...this.copy, ...normalizeObject(body.copy) })
+    if (Array.isArray(body.quizzes) || Array.isArray(body.quizBank)) {
+      this.quizBank = normalizeQuizBank(body.quizzes || body.quizBank, this.quizBank)
+    }
     this.validTeamIds = new Set(this.teams.map((team) => team.id))
     this.cleanupInvalidTeamReferences()
     this.lastRaffle = null
@@ -795,6 +842,8 @@ export class ArenaRoom {
   }
 
   private sanitizeQuizState(): QuizState {
+    this.advanceQuizPhase()
+
     return {
       ...this.quiz,
       answers: this.quiz.answers.slice(0, 80),
@@ -802,11 +851,26 @@ export class ArenaRoom {
     }
   }
 
+  private advanceQuizPhase(now = Date.now()) {
+    if (this.quiz.mode === 'countdown' && this.quiz.opensAt > 0 && now >= this.quiz.opensAt) {
+      this.quiz = {
+        ...this.quiz,
+        mode: 'open',
+        updatedAt: now,
+      }
+    }
+  }
+
   private openQuiz(body: RequestBody) {
-    const question = sanitizeText(body.question, quizQuestionMaxLength)
-    const answer = sanitizeText(body.answer, quizAnswerMaxLength)
-    const winnerCount = clamp(Math.floor(Number(body.winnerCount) || 2), 1, 10)
-    const answerKeys = normalizeQuizAnswerKeys(answer)
+    const selectedQuizId = sanitizeSlug(body.quizId)
+    const selectedQuiz = selectedQuizId ? this.quizBank.find((item) => item.id === selectedQuizId && item.enabled !== false) : null
+    const question = sanitizeText(body.question ?? selectedQuiz?.question, quizQuestionMaxLength)
+    const answer = sanitizeText(body.answer ?? selectedQuiz?.answer, quizAnswerMaxLength)
+    const acceptedAnswers = Array.isArray(body.acceptedAnswers)
+      ? body.acceptedAnswers.map((value) => sanitizeText(value, quizAnswerMaxLength)).filter(Boolean)
+      : selectedQuiz?.acceptedAnswers || []
+    const winnerCount = clamp(Math.floor(Number(body.winnerCount ?? selectedQuiz?.winnerCount) || 2), 1, 10)
+    const answerKeys = normalizeQuizAnswerKeys([answer, ...acceptedAnswers].join('\n'))
     const now = Date.now()
 
     if (!question || !answerKeys.length) return false
@@ -814,11 +878,14 @@ export class ArenaRoom {
     this.quiz = {
       id: this.quiz.id + 1,
       round: this.quiz.round + 1,
-      mode: 'open',
+      mode: 'countdown',
+      selectedQuizId: selectedQuiz?.id || selectedQuizId || '',
       question,
       winnerCount,
       answers: [],
       winners: [],
+      introEndsAt: now + quizIntroMs,
+      opensAt: now + quizIntroMs + quizCountdownMs,
       createdAt: now,
       updatedAt: now,
     }
@@ -845,6 +912,7 @@ export class ArenaRoom {
 
   private submitQuizAnswer(person: Participant | null, textValue: unknown) {
     const text = sanitizeText(textValue, quizAnswerMaxLength)
+    this.advanceQuizPhase()
     if (!person || this.quiz.mode !== 'open' || !this.quiz.id || !text) return null
 
     const normalized = normalizeQuizAnswer(text)
@@ -1035,6 +1103,7 @@ function loadConfig(config: unknown) {
   return {
     teams,
     copy: normalizeCopy(Array.isArray(parsed) ? {} : parsed.copy),
+    quizBank: normalizeQuizBank(Array.isArray(parsed) ? undefined : parsed.quizzes),
   }
 }
 
@@ -1070,6 +1139,33 @@ function normalizeTeam(teamValue: unknown, fallback: TeamConfig, index: number):
     color: sanitizeColor(team.color) || fallback.color || '#A50034',
     logo,
     sortOrder: Math.max(0, Math.floor(Number(team.sortOrder ?? index))),
+  }
+}
+
+function normalizeQuizBank(input: unknown, fallback: QuizConfig[] = defaultQuizBank) {
+  const source = Array.isArray(input) && input.length ? input.slice(0, 15) : fallback
+  const normalized = source
+    .map((quiz, index) => normalizeQuizConfig(quiz, fallback[index] || defaultQuizBank[index] || defaultQuizBank[0], index))
+    .filter((quiz) => quiz.question && quiz.answer)
+
+  return normalized.length ? normalized.slice(0, 15) : defaultQuizBank.map((quiz, index) => normalizeQuizConfig(quiz, quiz, index))
+}
+
+function normalizeQuizConfig(input: unknown, fallback: QuizConfig = defaultQuizBank[0], index = 0): QuizConfig {
+  const source = normalizeObject(input)
+  const id = sanitizeSlug(source.id) || sanitizeSlug(fallback.id) || `quiz-${index + 1}`
+  const answer = sanitizeText(source.answer ?? fallback.answer, quizAnswerMaxLength)
+  const acceptedSource = Array.isArray(source.acceptedAnswers) ? source.acceptedAnswers : fallback.acceptedAnswers
+  const acceptedAnswers = [...new Set((acceptedSource || []).map((value) => sanitizeText(value, quizAnswerMaxLength)).filter(Boolean))]
+
+  return {
+    id,
+    title: sanitizeText(source.title ?? fallback.title, 48) || `퀴즈 ${index + 1}`,
+    question: sanitizeText(source.question ?? fallback.question, quizQuestionMaxLength),
+    answer,
+    acceptedAnswers: acceptedAnswers.slice(0, 8),
+    winnerCount: clamp(Math.floor(Number(source.winnerCount ?? fallback.winnerCount ?? 2)), 1, 10),
+    enabled: source.enabled === false ? false : fallback.enabled !== false,
   }
 }
 
@@ -1273,7 +1369,8 @@ function normalizeCheerNameMode(value: unknown, fallback: Settings['cheerNameMod
 
 function normalizeQuizState(value: unknown): QuizState {
   const source = normalizeObject(value)
-  const mode: QuizMode = source.mode === 'open' || source.mode === 'closed' ? source.mode : 'idle'
+  const mode: QuizMode =
+    source.mode === 'countdown' || source.mode === 'open' || source.mode === 'closed' ? source.mode : 'idle'
   const winnerCount = clamp(Math.floor(Number(source.winnerCount) || 2), 1, 10)
   const answers = Array.isArray(source.answers) ? source.answers.map(normalizeQuizAnswerRecord).filter(Boolean) as QuizAnswer[] : []
   const winners = Array.isArray(source.winners) ? source.winners.map(normalizeQuizAnswerRecord).filter(Boolean) as QuizAnswer[] : []
@@ -1282,10 +1379,13 @@ function normalizeQuizState(value: unknown): QuizState {
     id: Math.max(0, Math.floor(Number(source.id) || 0)),
     round: Math.max(0, Math.floor(Number(source.round) || 0)),
     mode,
+    selectedQuizId: sanitizeSlug(source.selectedQuizId),
     question: sanitizeText(source.question, quizQuestionMaxLength),
     winnerCount,
     answers: answers.slice(0, 80),
     winners: winners.slice(0, winnerCount),
+    introEndsAt: Math.max(0, Number(source.introEndsAt) || 0),
+    opensAt: Math.max(0, Number(source.opensAt) || 0),
     createdAt: Math.max(0, Number(source.createdAt) || 0),
     updatedAt: Math.max(0, Number(source.updatedAt) || 0),
   }

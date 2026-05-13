@@ -35,6 +35,32 @@
     "wallRaffleEyeline": "Lucky Draw Showup",
     "wallRaffleTitle": "행운권 추첨"
   },
+  "quizzes": [
+    {
+      "id": "quiz-1",
+      "title": "오프닝 퀴즈",
+      "question": "오늘 행사의 관객 참여 시스템 이름은 무엇일까요?",
+      "answer": "Vibe Vote Arena",
+      "acceptedAnswers": [
+        "vibevotearena",
+        "바이브보트아레나"
+      ],
+      "winnerCount": 2,
+      "enabled": true
+    },
+    {
+      "id": "quiz-2",
+      "title": "투표 규칙",
+      "question": "한 참가자가 한 팀에 줄 수 있는 별의 최대 개수는 몇 개일까요?",
+      "answer": "10",
+      "acceptedAnswers": [
+        "10개",
+        "열개"
+      ],
+      "winnerCount": 2,
+      "enabled": true
+    }
+  ],
   "teams": [
     {
       "id": "team-aurora",
