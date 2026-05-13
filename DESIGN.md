@@ -37,6 +37,8 @@ Rules:
 - Use the dark event palette either for shared-screen surfaces or when the administrator intentionally switches the global theme to dark mode.
 - The dark palette should read as black/navy with luminous blue-magenta ribbons, not a generic purple dashboard.
 - Avoid decorative orbs/blobs; use broad light-ribbon gradients and glass-like panels when referencing the external 간지.
+- In dark mode, avoid plain white panels inside `/admin`, `/wall`, `/vote`, raffle, cheer, and quiz surfaces. Use translucent navy glass panels, cyan-blue borders, white/off-white text, muted blue secondary text, and coral/magenta only for live emphasis or primary action.
+- Ranking badges in dark mode should be legible cyan/white chips, not small red dots. Gauge tracks should be dark translucent, with team-color-to-coral/cyan fills so they remain visible against the navy background.
 
 ## Typography
 

@@ -221,6 +221,14 @@
 
 .theme-stage {
   color: var(--body);
+  --stage-panel: rgba(7, 13, 31, 0.76);
+  --stage-panel-strong: rgba(13, 23, 52, 0.88);
+  --stage-panel-soft: rgba(255, 255, 255, 0.055);
+  --stage-line: rgba(143, 214, 255, 0.2);
+  --stage-line-strong: rgba(143, 214, 255, 0.36);
+  --stage-ink: #f7fbff;
+  --stage-body: #dce8ff;
+  --stage-muted: #a9badc;
 }
 
 .theme-stage .topbar:not(.admin-topbar),
@@ -1241,7 +1249,7 @@ a:focus-visible {
 
 .control-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(140px, 1fr)) minmax(220px, 1.15fr) repeat(3, minmax(108px, auto));
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
   align-items: end;
   gap: 10px;
 }
@@ -1274,6 +1282,7 @@ a:focus-visible {
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-column: span 2;
   gap: 7px;
   margin: 0;
   padding: 0;
@@ -1333,6 +1342,7 @@ a:focus-visible {
 }
 
 .control-grid button {
+  min-width: 0;
   min-height: 42px;
   display: inline-flex;
   align-items: center;
@@ -1344,6 +1354,7 @@ a:focus-visible {
   color: #fff;
   background: var(--lg-red);
   font-weight: 850;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -2698,14 +2709,6 @@ body.is-wall-resizing * {
   grid-template-rows: auto minmax(0, 7fr) minmax(116px, 3fr);
 }
 
-.public-cheer-board.has-focus-card {
-  grid-template-rows: auto auto minmax(0, 1fr);
-}
-
-.public-cheer-board.has-team-preview.has-focus-card {
-  grid-template-rows: auto auto minmax(0, 6fr) minmax(116px, 2fr);
-}
-
 .public-cheer-stream {
   height: auto;
   min-height: 0;
@@ -2730,6 +2733,7 @@ body.is-wall-resizing * {
   align-content: start;
   gap: 5px;
   width: 100%;
+  max-height: 150px;
   min-height: 72px;
   padding: 9px 13px 11px 19px;
   border: 1px solid color-mix(in srgb, var(--team-color) 26%, var(--line));
@@ -2740,6 +2744,13 @@ body.is-wall-resizing * {
   text-align: left;
   cursor: pointer;
   animation: cheerSlideIn 520ms cubic-bezier(0.18, 0.82, 0.28, 1) both;
+  transition:
+    max-height 320ms cubic-bezier(0.18, 0.82, 0.28, 1),
+    padding 220ms ease,
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
 }
 
 .public-cheer-message::before {
@@ -2782,6 +2793,14 @@ body.is-wall-resizing * {
   color: var(--team-color);
 }
 
+.public-cheer-message .cheer-message-time {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+}
+
 .public-cheer-message .cheer-route-arrow {
   flex: 0 0 auto;
   width: 26px;
@@ -2798,6 +2817,7 @@ body.is-wall-resizing * {
   --cheer-message-lines: 4;
   margin: 0;
   overflow: hidden;
+  max-height: calc(var(--cheer-message-lines) * 1.18em);
   color: var(--ink);
   display: -webkit-box;
   font-size: clamp(16px, 1.06vw, 21px);
@@ -2807,6 +2827,9 @@ body.is-wall-resizing * {
   -webkit-line-clamp: var(--cheer-message-lines);
   overflow-wrap: anywhere;
   word-break: keep-all;
+  transition:
+    max-height 320ms cubic-bezier(0.18, 0.82, 0.28, 1),
+    font-size 220ms ease;
 }
 
 .public-cheer-board.large .public-cheer-message p {
@@ -2821,10 +2844,36 @@ body.is-wall-resizing * {
 }
 
 .public-cheer-message.is-focused-source {
+  z-index: 4;
+  max-height: min(52vh, 520px);
+  padding: 13px 16px 36px 21px;
   border-color: color-mix(in srgb, var(--team-color) 56%, var(--line));
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--team-color) 16%, #fff), #fff 78%),
     #fff;
+  box-shadow: 0 18px 42px rgba(28, 28, 31, 0.14);
+}
+
+.public-cheer-message.is-focused-source::after {
+  content: '다시 클릭하면 접기';
+  position: absolute;
+  right: 13px;
+  bottom: 10px;
+  color: color-mix(in srgb, var(--team-color) 74%, var(--lg-red));
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.public-cheer-message.is-focused-source p {
+  display: block;
+  max-height: min(39vh, 360px);
+  font-size: clamp(18px, 1.18vw, 24px);
+  -webkit-line-clamp: unset;
+  overflow-y: auto;
+}
+
+.public-cheer-board.large .public-cheer-message.is-focused-source {
+  grid-column: span 2;
 }
 
 .public-cheer-focus-card {
@@ -5748,6 +5797,316 @@ body.is-wall-resizing * {
   background: rgba(165, 0, 52, 0.035);
   font-size: 12px;
   font-weight: 820;
+}
+
+.theme-stage .topbar.admin-topbar,
+.theme-stage .topbar.audience-topbar,
+.theme-stage .topbar.wall-topbar {
+  border-bottom-color: var(--stage-line);
+  background:
+    radial-gradient(circle at 11% 0%, rgba(228, 71, 168, 0.22), transparent 34%),
+    radial-gradient(circle at 82% 0%, rgba(63, 99, 255, 0.22), transparent 36%),
+    linear-gradient(105deg, rgba(3, 6, 17, 0.98), rgba(7, 20, 47, 0.94) 64%, rgba(18, 8, 23, 0.96));
+}
+
+.theme-stage .admin-stats > div,
+.theme-stage .public-wall-metrics > div,
+.theme-stage .star-wallet,
+.theme-stage .audience-status-pill {
+  color: var(--stage-body);
+  border-color: var(--stage-line);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.045)),
+    rgba(8, 15, 36, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.theme-stage .admin-stats strong,
+.theme-stage .public-wall-metrics strong,
+.theme-stage .star-wallet strong,
+.theme-stage .wallet-count {
+  color: var(--stage-ink);
+}
+
+.theme-stage .hero-band,
+.theme-stage .admin-control-panel,
+.theme-stage .arena-panel,
+.theme-stage .vote-slip,
+.theme-stage .team-catalog,
+.theme-stage .message-wall,
+.theme-stage .moderation-panel,
+.theme-stage .vote-feed-panel,
+.theme-stage .participant-panel,
+.theme-stage .team-config-panel,
+.theme-stage .result-export-panel,
+.theme-stage .raffle-panel,
+.theme-stage .quiz-admin-panel,
+.theme-stage .quiz-question-card,
+.theme-stage .quiz-answer-card,
+.theme-stage .registration-shell,
+.theme-stage .public-arena-board,
+.theme-stage .public-cheer-board,
+.theme-stage .public-raffle-board,
+.theme-stage .quiz-control-panel,
+.theme-stage .quiz-current-panel,
+.theme-stage .quiz-admin-current,
+.theme-stage .raffle-detail-desk,
+.theme-stage .candidate-strip > div {
+  color: var(--stage-body);
+  border-color: var(--stage-line);
+  background:
+    radial-gradient(circle at 9% 8%, rgba(228, 71, 168, 0.11), transparent 32%),
+    radial-gradient(circle at 86% 12%, rgba(63, 99, 255, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.032)),
+    var(--stage-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.075), 0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+.theme-stage .admin-control-panel {
+  overflow: hidden;
+}
+
+.theme-stage .control-grid input,
+.theme-stage .control-grid select,
+.theme-stage .control-grid textarea,
+.theme-stage .registration-form input,
+.theme-stage .quiz-control-panel input,
+.theme-stage .quiz-control-panel select,
+.theme-stage .quiz-control-panel textarea,
+.theme-stage .quiz-answer-form input,
+.theme-stage .raffle-controls input,
+.theme-stage .raffle-controls select,
+.theme-stage .message-filter-bar input,
+.theme-stage .logo-source-row input,
+.theme-stage .team-editor-grid input,
+.theme-stage .team-editor-grid textarea,
+.theme-stage .quiz-editor-grid input,
+.theme-stage .quiz-editor-grid textarea,
+.theme-stage .quiz-editor-grid select,
+.theme-stage .copy-config-grid textarea,
+.theme-stage .theme-toggle-field span {
+  color: var(--stage-ink);
+  border-color: var(--stage-line-strong);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.045)),
+    rgba(7, 13, 31, 0.68);
+}
+
+.theme-stage .control-grid input,
+.theme-stage .control-grid select {
+  min-width: 0;
+}
+
+.theme-stage .inline-input em,
+.theme-stage .control-grid label > span,
+.theme-stage .registration-form label,
+.theme-stage .raffle-controls label,
+.theme-stage .quiz-control-panel label,
+.theme-stage .quiz-accepted-answers,
+.theme-stage .quiz-admin-current,
+.theme-stage .quiz-answer-card span,
+.theme-stage .quiz-feedback,
+.theme-stage .vote-event-row span,
+.theme-stage .vote-event-row small,
+.theme-stage .empty-state,
+.theme-stage .candidate-strip > strong,
+.theme-stage .candidate-strip span {
+  color: var(--stage-muted);
+}
+
+.theme-stage .control-grid button,
+.theme-stage .registration-form button,
+.theme-stage .quiz-actions .primary-action,
+.theme-stage .quiz-answer-form button,
+.theme-stage .hero-band button,
+.theme-stage .public-wall-actions button.active {
+  color: #fff;
+  border-color: rgba(255, 122, 122, 0.72);
+  background:
+    linear-gradient(135deg, var(--event-magenta), var(--active-red) 62%, var(--event-coral));
+  box-shadow: 0 12px 28px rgba(253, 49, 46, 0.2);
+}
+
+.theme-stage .control-grid .secondary-control,
+.theme-stage .panel-open-button,
+.theme-stage .quiz-actions button,
+.theme-stage .public-wall-actions button,
+.theme-stage .wall-panel-toolbar button,
+.theme-stage .config-toolbar button,
+.theme-stage .logo-source-row button,
+.theme-stage .logo-file-button {
+  color: var(--event-cyan);
+  border-color: var(--stage-line-strong);
+  background:
+    linear-gradient(135deg, rgba(143, 214, 255, 0.11), rgba(255, 255, 255, 0.035)),
+    rgba(7, 13, 31, 0.66);
+  box-shadow: none;
+}
+
+.theme-stage .team-row {
+  color: var(--stage-ink);
+  border-color: color-mix(in srgb, var(--team-color) 24%, var(--stage-line));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--team-color) 20%, rgba(255, 255, 255, 0.04)), rgba(255, 255, 255, 0.035) 64%),
+    rgba(7, 13, 31, 0.72);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.055);
+}
+
+.theme-stage .team-row:hover,
+.theme-stage .team-row.is-selected {
+  border-color: color-mix(in srgb, var(--team-color) 54%, var(--event-cyan));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--team-color) 26%, rgba(255, 255, 255, 0.055)), rgba(143, 214, 255, 0.045) 72%),
+    rgba(9, 17, 42, 0.84);
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.24),
+    inset 4px 0 0 color-mix(in srgb, var(--team-color) 82%, var(--event-cyan));
+}
+
+.theme-stage .team-meta h3,
+.theme-stage .team-meta p,
+.theme-stage .score-stack strong,
+.theme-stage .quiz-question-card h2,
+.theme-stage .quiz-current-panel h3,
+.theme-stage .quiz-admin-current h3,
+.theme-stage .quiz-answer-card strong,
+.theme-stage .quiz-answer-message strong,
+.theme-stage .quiz-answer-message p,
+.theme-stage .section-heading h2 {
+  color: var(--stage-ink);
+}
+
+.theme-stage .team-members-inline,
+.theme-stage .score-stack span,
+.theme-stage .section-kicker,
+.theme-stage .hero-band p,
+.theme-stage .selected-team-preview span {
+  color: var(--stage-muted);
+}
+
+.theme-stage .rank-badge {
+  color: var(--event-cyan);
+  border: 1px solid rgba(143, 214, 255, 0.22);
+  background: rgba(143, 214, 255, 0.105);
+}
+
+.theme-stage .rank-badge span {
+  color: color-mix(in srgb, var(--event-cyan) 72%, #fff);
+}
+
+.theme-stage .public-ranking-list .team-row {
+  grid-template-columns: 44px clamp(56px, 6.4vh, 78px) minmax(0, 1fr);
+}
+
+.theme-stage .public-ranking-list .rank-badge {
+  width: 40px;
+  height: 40px;
+  color: var(--stage-ink);
+  border-color: rgba(143, 214, 255, 0.28);
+  background:
+    radial-gradient(circle at 45% 24%, rgba(255, 255, 255, 0.24), transparent 42%),
+    rgba(143, 214, 255, 0.12);
+  font-size: 18px;
+  font-weight: 940;
+}
+
+.theme-stage .progress-track {
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(143, 214, 255, 0.08);
+}
+
+.theme-stage .progress-track span {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--team-color) 78%, var(--event-cyan)), var(--event-coral));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--team-color) 44%, transparent);
+}
+
+.theme-stage .public-ranking-list .progress-line em {
+  color: color-mix(in srgb, var(--event-coral) 82%, #fff);
+  text-shadow: 0 0 18px rgba(255, 122, 122, 0.18);
+}
+
+.theme-stage .logo-mark {
+  border-color: rgba(143, 214, 255, 0.18);
+  background:
+    radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--team-color) 18%, transparent), transparent 54%),
+    rgba(255, 255, 255, 0.08);
+}
+
+.theme-stage .logo-mark:has(img) {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.theme-stage .public-cheer-message,
+.theme-stage .message-list-item,
+.theme-stage .quiz-answer-message,
+.theme-stage .participant-row,
+.theme-stage .winner {
+  color: var(--stage-body);
+  border-color: color-mix(in srgb, var(--team-color, var(--event-cyan)) 24%, var(--stage-line));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--team-color, var(--event-cyan)) 22%, rgba(255, 255, 255, 0.04)), rgba(255, 255, 255, 0.04) 72%),
+    rgba(7, 13, 31, 0.72);
+}
+
+.theme-stage .public-cheer-message strong,
+.theme-stage .public-cheer-message p {
+  color: var(--stage-ink);
+}
+
+.theme-stage .public-cheer-message .cheer-route-team {
+  color: color-mix(in srgb, var(--team-color) 54%, var(--event-cyan));
+}
+
+.theme-stage .public-cheer-message .cheer-message-time {
+  color: var(--stage-muted);
+}
+
+.theme-stage .public-cheer-message .cheer-route-arrow {
+  color: color-mix(in srgb, var(--team-color) 52%, var(--event-cyan));
+  border-color: color-mix(in srgb, var(--team-color) 32%, rgba(143, 214, 255, 0.16));
+  background: rgba(143, 214, 255, 0.105);
+}
+
+.theme-stage .public-cheer-message.is-focused-source {
+  border-color: color-mix(in srgb, var(--team-color) 48%, var(--event-cyan));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--team-color) 30%, rgba(255, 255, 255, 0.06)), rgba(143, 214, 255, 0.06) 78%),
+    rgba(10, 18, 44, 0.94);
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.theme-stage .selected-team-preview,
+.theme-stage .team-photo-preview,
+.theme-stage .logo-source-field {
+  border-color: var(--stage-line);
+  background:
+    radial-gradient(circle at 18% 22%, color-mix(in srgb, var(--team-color, var(--event-cyan)) 16%, transparent), transparent 50%),
+    rgba(7, 13, 31, 0.72);
+}
+
+.theme-stage .quiz-stats span,
+.theme-stage .quiz-winner-list span,
+.theme-stage .quiz-admin-status strong,
+.theme-stage .quiz-live-badge {
+  color: var(--stage-body);
+  border-color: var(--stage-line);
+  background: rgba(143, 214, 255, 0.09);
+}
+
+.theme-stage .quiz-winner-list span,
+.theme-stage .quiz-live-badge,
+.theme-stage .quiz-question-prefix,
+.theme-stage .quiz-answer-message em {
+  color: color-mix(in srgb, var(--event-coral) 76%, #fff);
+}
+
+.theme-stage .quiz-answer-card.is-winner,
+.theme-stage .quiz-answer-message.correct {
+  border-color: rgba(255, 122, 122, 0.42);
+  background:
+    linear-gradient(90deg, rgba(255, 122, 122, 0.15), rgba(143, 214, 255, 0.05)),
+    rgba(9, 17, 42, 0.88);
 }
 
 @keyframes starRise {

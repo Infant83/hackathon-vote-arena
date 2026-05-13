@@ -2501,14 +2501,13 @@ function PublicCheerBoard({
   const focusedCheer = focusedCheerId
     ? selectedCheers.find((message) => message.id === focusedCheerId) || visibleCheers.find((message) => message.id === focusedCheerId) || null
     : null
-  const focusedTeam = focusedCheer ? teamMap.get(focusedCheer.teamId) ?? state.teams[0] : null
   const toggleCheerMessage = (messageId: number) => {
     setFocusedCheerId((current) => (current === messageId ? null : messageId))
   }
 
   return (
     <section
-      className={`public-cheer-board ${large ? 'large' : ''} ${selectedTeam ? 'has-team-preview' : ''} ${focusedCheer ? 'has-focus-card' : ''}`}
+      className={`public-cheer-board ${large ? 'large' : ''} ${selectedTeam ? 'has-team-preview' : ''} ${focusedCheer ? 'has-expanded-message' : ''}`}
       aria-label="응원 메시지 보드"
     >
       <div className="section-heading compact">
@@ -2520,24 +2519,6 @@ function PublicCheerBoard({
           전체
         </button>
       </div>
-
-      {focusedCheer && focusedTeam ? (
-        <button
-          type="button"
-          className="public-cheer-focus-card"
-          style={{ '--team-color': focusedTeam.color } as CSSProperties}
-          onClick={() => setFocusedCheerId(null)}
-          aria-label="확대된 응원 메시지 접기"
-        >
-          <span className="focus-card-label">다시 클릭하면 목록으로 돌아갑니다</span>
-          <strong>
-            {formatCheerAuthor(focusedCheer.author, cheerNameMode)}
-            <ArrowRight size={18} strokeWidth={2.5} />
-            {focusedTeam.name}
-          </strong>
-          <p>{focusedCheer.text}</p>
-        </button>
-      ) : null}
 
       <div className="public-cheer-stream" aria-live="polite">
         {selectedCheers.length ? (
@@ -2561,6 +2542,9 @@ function PublicCheerBoard({
                     <ArrowRight size={14} strokeWidth={2.5} />
                   </span>
                   <span className="cheer-route-team">{team.name}</span>
+                  <time className="cheer-message-time" dateTime={new Date(message.createdAt).toISOString()}>
+                    {formatMessageTime(message.createdAt)}
+                  </time>
                 </strong>
                 <p>{message.text}</p>
               </button>
