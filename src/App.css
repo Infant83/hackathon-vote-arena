@@ -6117,13 +6117,19 @@ body.is-wall-resizing * {
 .theme-stage .selected-team-note,
 .theme-stage .direct-team-summary small,
 .theme-stage .team-star-picker span,
-.theme-stage .catalog-team small {
+.theme-stage .catalog-team small,
+.theme-stage .quiz-live-badge,
+.theme-stage .quiz-admin-status strong,
+.theme-stage .message-wall-open .section-heading span {
   color: var(--stage-guide-strong);
-  text-shadow: 0 0 18px rgba(255, 122, 160, 0.22);
+  text-shadow: 0 0 14px rgba(255, 122, 160, 0.5), 0 0 2px rgba(255, 255, 255, 0.18);
 }
 
 .theme-stage .inline-alert,
-.theme-stage .raffle-status {
+.theme-stage .raffle-status,
+.theme-stage .quiz-live-badge,
+.theme-stage .quiz-admin-status strong,
+.theme-stage .message-wall-open .section-heading span {
   border-color: rgba(255, 122, 160, 0.34);
   background:
     linear-gradient(90deg, var(--stage-guide-panel), rgba(143, 214, 255, 0.045)),
@@ -6136,6 +6142,36 @@ body.is-wall-resizing * {
   background:
     linear-gradient(90deg, rgba(143, 214, 255, 0.1), rgba(255, 122, 160, 0.045)),
     rgba(10, 18, 44, 0.76);
+}
+
+.theme-stage .star-wallet {
+  padding: 14px 18px;
+  border-radius: calc(var(--radius) + 2px);
+  border-color: rgba(143, 214, 255, 0.18);
+  background:
+    radial-gradient(circle at 86% 18%, rgba(255, 122, 160, 0.12), transparent 36%),
+    radial-gradient(circle at 14% 88%, rgba(143, 214, 255, 0.11), transparent 38%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025)),
+    rgba(8, 15, 36, 0.58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 16px 40px rgba(0, 0, 0, 0.12);
+}
+
+.theme-stage .star-wallet span {
+  color: var(--stage-body);
+}
+
+.theme-stage .wallet-stars svg {
+  color: rgba(220, 232, 255, 0.42);
+}
+
+.theme-stage .wallet-stars .spent {
+  fill: rgba(220, 232, 255, 0.1);
+}
+
+.theme-stage .wallet-stars .filled {
+  fill: var(--event-coral);
+  color: var(--event-coral);
+  filter: drop-shadow(0 0 6px rgba(255, 122, 122, 0.34));
 }
 
 .theme-stage .direct-team {
@@ -6223,6 +6259,36 @@ body.is-wall-resizing * {
   opacity: 1;
 }
 
+.theme-stage .progress-line em,
+.theme-stage .direct-team-summary small,
+.theme-stage .team-star-picker span,
+.theme-stage .selected-team-note {
+  color: var(--stage-guide-strong);
+}
+
+.theme-stage .stat-popover {
+  color: var(--stage-body);
+  border-color: rgba(143, 214, 255, 0.32);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.035)),
+    rgba(7, 13, 31, 0.96);
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(12px) saturate(130%);
+}
+
+.theme-stage .stat-popover strong {
+  color: var(--stage-ink);
+}
+
+.theme-stage .stat-popover span,
+.theme-stage .stat-popover em {
+  color: var(--stage-body);
+}
+
+.theme-stage .popover-members {
+  border-top-color: rgba(143, 214, 255, 0.18);
+}
+
 .theme-stage .inline-cheer {
   border-top-color: var(--stage-line);
 }
@@ -6264,6 +6330,35 @@ body.is-wall-resizing * {
   color: var(--stage-muted);
   border-color: rgba(143, 214, 255, 0.2);
   background: rgba(7, 13, 31, 0.55);
+}
+
+.theme-stage .bubble,
+.theme-stage .vote-event-row {
+  color: var(--stage-body);
+  border-color: color-mix(in srgb, var(--team-color, var(--event-cyan)) 28%, var(--stage-line));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--team-color, var(--event-cyan)) 18%, rgba(255, 255, 255, 0.055)), rgba(255, 255, 255, 0.035) 72%),
+    rgba(8, 15, 36, 0.76);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.theme-stage .bubble strong,
+.theme-stage .vote-event-row strong {
+  color: var(--stage-ink);
+}
+
+.theme-stage .bubble span,
+.theme-stage .bubble small,
+.theme-stage .vote-event-row span,
+.theme-stage .vote-event-row small {
+  color: var(--stage-body);
+}
+
+.theme-stage .message-wall-open:hover .bubble {
+  border-color: color-mix(in srgb, var(--team-color, var(--stage-guide)) 46%, var(--stage-line-strong));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--team-color, var(--event-cyan)) 26%, rgba(255, 255, 255, 0.065)), rgba(255, 122, 160, 0.045) 76%),
+    rgba(10, 18, 44, 0.88);
 }
 
 .theme-stage .cheer-composer textarea {
@@ -6368,8 +6463,105 @@ body.is-wall-resizing * {
 
 .theme-stage .candidate-strip span {
   color: var(--stage-guide-strong);
-  border-color: rgba(255, 183, 202, 0.22);
-  background: rgba(255, 122, 160, 0.09);
+  border-color: rgba(255, 183, 202, 0.34);
+  background:
+    linear-gradient(135deg, rgba(255, 122, 160, 0.18), rgba(143, 214, 255, 0.055)),
+    rgba(8, 15, 36, 0.72);
+  text-shadow: 0 0 10px rgba(255, 122, 160, 0.28);
+}
+
+.theme-stage .lotto-ball {
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow:
+    inset -7px -9px 16px rgba(45, 45, 49, 0.1),
+    0 16px 34px rgba(0, 0, 0, 0.2),
+    0 0 18px color-mix(in srgb, var(--ball-tone) 22%, transparent);
+}
+
+.theme-stage .lotto-ball strong {
+  max-width: 86%;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #10172a;
+  background: rgba(255, 255, 255, 0.58);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.theme-stage .lotto-result-tray,
+.theme-stage .raffle-winner-showcase article {
+  border-color: rgba(255, 183, 202, 0.28);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 122, 160, 0.08)),
+    rgba(7, 13, 31, 0.8);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.theme-stage .lotto-result-ball {
+  color: var(--stage-guide-strong);
+  border-color: rgba(255, 183, 202, 0.42);
+  background:
+    radial-gradient(circle at 32% 22%, rgba(255, 255, 255, 0.36), transparent 24%),
+    linear-gradient(135deg, rgba(255, 122, 160, 0.28), rgba(143, 214, 255, 0.1)),
+    rgba(8, 15, 36, 0.74);
+}
+
+.theme-stage .lotto-result-ball strong,
+.theme-stage .raffle-winner-showcase strong {
+  color: var(--stage-ink);
+  text-shadow: 0 0 16px rgba(255, 122, 160, 0.24);
+}
+
+.theme-stage .raffle-winner-showcase small {
+  color: var(--stage-body);
+}
+
+.theme-stage .raffle-winner-showcase article span {
+  background:
+    radial-gradient(circle at 35% 24%, rgba(255, 255, 255, 0.28), transparent 28%),
+    linear-gradient(135deg, var(--event-magenta), var(--event-coral));
+  box-shadow: 0 0 18px rgba(255, 122, 160, 0.24);
+}
+
+.theme-stage .logo-mark:has(img),
+.theme-stage .selected-team-preview .team-photo-preview.has-photo,
+.theme-stage .logo-source-preview .team-photo-preview.has-photo {
+  border-color: rgba(143, 214, 255, 0.14);
+  background:
+    linear-gradient(135deg, rgba(143, 214, 255, 0.07), rgba(255, 122, 160, 0.035)),
+    rgba(7, 13, 31, 0.54);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.theme-stage .logo-mark:has(img) img {
+  padding: 1px;
+}
+
+.theme-stage .selected-team-preview {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  background:
+    radial-gradient(circle at 17% 28%, color-mix(in srgb, var(--team-color, var(--event-cyan)) 20%, transparent), transparent 52%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.026)),
+    rgba(7, 13, 31, 0.82);
+}
+
+.theme-stage .public-cheer-board.has-team-preview {
+  grid-template-rows: auto minmax(0, 1fr) minmax(270px, 38%);
+}
+
+.theme-stage .selected-team-preview .team-photo-preview {
+  min-height: clamp(146px, 17vh, 208px);
+  border-width: 1px;
+}
+
+.theme-stage .selected-team-preview strong,
+.theme-stage .selected-team-preview p,
+.theme-stage .selected-team-preview span {
+  white-space: normal;
+}
+
+.theme-stage .selected-team-preview .team-photo-preview.has-photo img {
+  object-fit: cover;
 }
 
 .theme-stage .cheer-constellation {
@@ -6881,6 +7073,15 @@ body.is-wall-resizing * {
       #fff;
   }
 
+  .theme-stage .hero-band.audience {
+    background:
+      radial-gradient(circle at 18% 12%, rgba(228, 71, 168, 0.18), transparent 34%),
+      radial-gradient(circle at 84% 82%, rgba(63, 99, 255, 0.2), transparent 36%),
+      linear-gradient(180deg, rgba(7, 13, 31, 0.96) 0%, rgba(10, 18, 44, 0.9) 58%, rgba(18, 8, 23, 0.9) 100%),
+      url('/arena-hero.webp') right bottom / min(620px, 110%) auto no-repeat,
+      rgba(7, 13, 31, 0.92);
+  }
+
   .hero-band.audience > div:first-child {
     flex: 0 1 auto;
   }
@@ -7010,6 +7211,7 @@ body.is-wall-resizing * {
 
   .hero-band h2 {
     font-size: 28px;
+    line-height: 1.08;
   }
 
   .hero-band p {
