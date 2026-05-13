@@ -13,6 +13,8 @@ const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const maxStarsPerTeam = 10
 const cheerMessageMaxLength = 240
+const quizQuestionMaxLength = 180
+const quizAnswerMaxLength = 120
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const teamsConfigPath = path.join(__dirname, 'teams.json')
@@ -48,6 +50,7 @@ const defaultCopy = {
   wallCheerLabel: '응원메세지',
   wallRaffleLabel: '행운권추첨',
   wallShowupLabel: '말풍선 Showup',
+  wallQuizLabel: '퀴즈',
   wallArenaEyeline: 'Live Arena Wall',
   wallArenaTitle: '실시간 별 현황',
   wallCheerEyeline: 'Cheer Board',
@@ -188,14 +191,28 @@ const participants = new Map()
 const cheers = []
 const voteEvents = []
 const clients = new Set()
+const emptyQuizState = {
+  id: 0,
+  round: 0,
+  mode: 'idle',
+  question: '',
+  winnerCount: 2,
+  answers: [],
+  winners: [],
+  createdAt: 0,
+  updatedAt: 0,
+}
 
 let closed = false
 let closesAt = Date.now() + defaultDurationMinutes * 60 * 1000
 let lastRaffle = null
 let cheerId = 1
 let voteEventId = 1
+let quizAnswerId = 1
 let sessionId = 1
 let testMode = false
+let quiz = { ...emptyQuizState }
+let quizAnswerKeys = []
 let settings = {
   showScoresToAudience: true,
   starBudget: defaultStarBudget,
@@ -432,6 +449,7 @@ function getState() {
     closed,
     closesAt,
     lastRaffle,
+    quiz: sanitizeQuizState(),
     sessionId,
     testMode,
     settings,
@@ -529,6 +547,107 @@ function shuffle(items) {
 
 function sumStars(allocations) {
   return Object.values(allocations || {}).reduce((sum, value) => sum + value, 0)
+}
+
+function sanitizeQuizState() {
+  return {
+    ...quiz,
+    answers: quiz.answers.slice(0, 80),
+    winners: quiz.winners.slice(0, quiz.winnerCount),
+  }
+}
+
+function openQuiz(body) {
+  const question = sanitizeText(body.question, quizQuestionMaxLength)
+  const answer = sanitizeText(body.answer, quizAnswerMaxLength)
+  const winnerCount = Math.max(1, Math.min(10, Math.floor(Number(body.winnerCount) || 2)))
+  const answerKeys = normalizeQuizAnswerKeys(answer)
+  const now = Date.now()
+
+  if (!question || !answerKeys.length) return false
+
+  quiz = {
+    id: quiz.id + 1,
+    round: quiz.round + 1,
+    mode: 'open',
+    question,
+    winnerCount,
+    answers: [],
+    winners: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+  quizAnswerKeys = answerKeys
+  quizAnswerId = 1
+  return true
+}
+
+function closeQuiz() {
+  if (quiz.mode === 'idle') return
+  quiz = {
+    ...quiz,
+    mode: 'closed',
+    updatedAt: Date.now(),
+  }
+}
+
+function clearQuiz() {
+  quiz = { ...emptyQuizState }
+  quizAnswerKeys = []
+  quizAnswerId = 1
+}
+
+function submitQuizAnswer(person, textValue) {
+  const text = sanitizeText(textValue, quizAnswerMaxLength)
+  if (!person || quiz.mode !== 'open' || !quiz.id || !text) return null
+
+  const normalized = normalizeQuizAnswer(text)
+  const alreadyWon = quiz.winners.some((winner) => winner.participantId === person.id)
+  const correct = quizAnswerKeys.includes(normalized)
+  const rank = correct && !alreadyWon && quiz.winners.length < quiz.winnerCount ? quiz.winners.length + 1 : undefined
+  const answer = {
+    id: quizAnswerId++,
+    quizId: quiz.id,
+    participantId: person.id,
+    author: person.name,
+    group: person.group,
+    text,
+    correct,
+    rank,
+    createdAt: Date.now(),
+  }
+
+  quiz.answers.unshift(answer)
+  quiz.answers.splice(80)
+
+  if (rank) {
+    quiz.winners.push(answer)
+    if (quiz.winners.length >= quiz.winnerCount) {
+      quiz = { ...quiz, mode: 'closed' }
+    }
+  }
+
+  quiz = {
+    ...quiz,
+    updatedAt: Date.now(),
+  }
+
+  return answer
+}
+
+function normalizeQuizAnswerKeys(value) {
+  return String(value || '')
+    .split(/[,|\n]/)
+    .map((item) => normalizeQuizAnswer(item))
+    .filter(Boolean)
+}
+
+function normalizeQuizAnswer(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .trim()
+    .toLocaleLowerCase('ko-KR')
+    .replace(/\s+/gu, '')
 }
 
 function recordVoteEvents(person, previousAllocations, nextAllocations) {
@@ -717,6 +836,7 @@ function resetRuntimeState({ seed = false } = {}) {
   voteEvents.splice(0)
   cheerId = 1
   voteEventId = 1
+  clearQuiz()
   sessionId += 1
   testMode = Boolean(seed)
   closed = false
@@ -983,6 +1103,51 @@ async function handleApi(request, response, url) {
       createdAt: Date.now(),
     }
 
+    broadcast()
+    sendJson(response, 200, getState())
+    return
+  }
+
+  if (url.pathname === '/api/quiz/open') {
+    if (!openQuiz(body)) {
+      sendJson(response, 400, { error: 'quiz question and answer required' })
+      return
+    }
+
+    broadcast()
+    sendJson(response, 200, getState())
+    return
+  }
+
+  if (url.pathname === '/api/quiz/answer') {
+    if (!isCurrentSession(body)) {
+      sendJson(response, 409, { error: 'session expired' })
+      return
+    }
+
+    const deviceId = getRequestDeviceId(request, body)
+    const person = upsertParticipant(deviceId, body.name, body.group)
+    const answer = submitQuizAnswer(person, body.text)
+
+    if (!answer) {
+      sendJson(response, 400, { error: 'quiz answer rejected' })
+      return
+    }
+
+    broadcast()
+    sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    return
+  }
+
+  if (url.pathname === '/api/quiz/close') {
+    closeQuiz()
+    broadcast()
+    sendJson(response, 200, getState())
+    return
+  }
+
+  if (url.pathname === '/api/quiz/clear') {
+    clearQuiz()
     broadcast()
     sendJson(response, 200, getState())
     return

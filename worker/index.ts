@@ -5,6 +5,8 @@ const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const maxStarsPerTeam = 10
 const cheerMessageMaxLength = 240
+const quizQuestionMaxLength = 180
+const quizAnswerMaxLength = 120
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const snapshotKey = 'event-state-v1'
@@ -95,6 +97,32 @@ type LastRaffle = {
   createdAt: number
 }
 
+type QuizMode = 'idle' | 'open' | 'closed'
+
+type QuizAnswer = {
+  id: number
+  quizId: number
+  participantId: string
+  author: string
+  group: string
+  text: string
+  correct: boolean
+  rank?: number
+  createdAt: number
+}
+
+type QuizState = {
+  id: number
+  round: number
+  mode: QuizMode
+  question: string
+  winnerCount: number
+  answers: QuizAnswer[]
+  winners: QuizAnswer[]
+  createdAt: number
+  updatedAt: number
+}
+
 type Settings = {
   showScoresToAudience: boolean
   starBudget: number
@@ -110,6 +138,9 @@ type Snapshot = {
   closed: boolean
   closesAt: number
   lastRaffle: LastRaffle | null
+  quiz?: QuizState
+  quizAnswerKeys?: string[]
+  quizAnswerId?: number
   cheerId: number
   voteEventId: number
   sessionId: number
@@ -121,6 +152,18 @@ type Snapshot = {
 }
 
 type RequestBody = Record<string, unknown>
+
+const emptyQuizState: QuizState = {
+  id: 0,
+  round: 0,
+  mode: 'idle',
+  question: '',
+  winnerCount: 2,
+  answers: [],
+  winners: [],
+  createdAt: 0,
+  updatedAt: 0,
+}
 
 const defaultCopy = {
   appTitle: 'Vibe Vote Arena',
@@ -153,6 +196,7 @@ const defaultCopy = {
   wallCheerLabel: '응원메세지',
   wallRaffleLabel: '행운권추첨',
   wallShowupLabel: '말풍선 Showup',
+  wallQuizLabel: '퀴즈',
   wallArenaEyeline: 'Live Arena Wall',
   wallArenaTitle: '실시간 별 현황',
   wallCheerEyeline: 'Cheer Board',
@@ -208,8 +252,11 @@ export class ArenaRoom {
   private closed = false
   private closesAt = Date.now() + defaultDurationMinutes * 60 * 1000
   private lastRaffle: LastRaffle | null = null
+  private quiz: QuizState = { ...emptyQuizState }
+  private quizAnswerKeys: string[] = []
   private cheerId = 1
   private voteEventId = 1
+  private quizAnswerId = 1
   private sessionId = 1
   private testMode = false
   private settings: Settings = {
@@ -262,8 +309,11 @@ export class ArenaRoom {
     this.closed = Boolean(snapshot.closed)
     this.closesAt = Number(snapshot.closesAt || Date.now() + defaultDurationMinutes * 60 * 1000)
     this.lastRaffle = snapshot.lastRaffle || null
+    this.quiz = normalizeQuizState(snapshot.quiz)
+    this.quizAnswerKeys = Array.isArray(snapshot.quizAnswerKeys) ? snapshot.quizAnswerKeys.filter(Boolean) : []
     this.cheerId = Math.max(1, Number(snapshot.cheerId || 1))
     this.voteEventId = Math.max(1, Number(snapshot.voteEventId || 1))
+    this.quizAnswerId = Math.max(1, Number(snapshot.quizAnswerId || 1))
     this.sessionId = Math.max(1, Number(snapshot.sessionId || 1))
     this.testMode = Boolean(snapshot.testMode)
     this.teams = Array.isArray(snapshot.teams) && snapshot.teams.length
@@ -293,6 +343,9 @@ export class ArenaRoom {
       closed: this.closed,
       closesAt: this.closesAt,
       lastRaffle: this.lastRaffle,
+      quiz: this.quiz,
+      quizAnswerKeys: this.quizAnswerKeys,
+      quizAnswerId: this.quizAnswerId,
       cheerId: this.cheerId,
       voteEventId: this.voteEventId,
       sessionId: this.sessionId,
@@ -413,6 +466,38 @@ export class ArenaRoom {
       return json(this.getState())
     }
 
+    if (pathname === '/api/quiz/open') {
+      if (!this.openQuiz(body)) return json({ error: 'quiz question and answer required' }, 400)
+
+      await this.commit()
+      return json(this.getState())
+    }
+
+    if (pathname === '/api/quiz/answer') {
+      if (!this.isCurrentSession(body)) return json({ error: 'session expired' }, 409)
+
+      const deviceId = this.getRequestDeviceId(request, body)
+      const person = this.upsertParticipant(deviceId, body.name, body.group)
+      const answer = this.submitQuizAnswer(person, body.text)
+
+      if (!answer) return json({ error: 'quiz answer rejected' }, 400)
+
+      await this.commit()
+      return json(this.getState(), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+    }
+
+    if (pathname === '/api/quiz/close') {
+      this.closeQuiz()
+      await this.commit()
+      return json(this.getState())
+    }
+
+    if (pathname === '/api/quiz/clear') {
+      this.clearQuiz()
+      await this.commit()
+      return json(this.getState())
+    }
+
     if (pathname === '/api/close') {
       this.closed = Boolean(body.closed)
       if (!this.closed && Date.now() > this.closesAt) {
@@ -525,6 +610,7 @@ export class ArenaRoom {
       closed: this.closed,
       closesAt: this.closesAt,
       lastRaffle: this.lastRaffle,
+      quiz: this.sanitizeQuizState(),
       sessionId: this.sessionId,
       testMode: this.testMode,
       settings: this.settings,
@@ -708,6 +794,93 @@ export class ArenaRoom {
     })
   }
 
+  private sanitizeQuizState(): QuizState {
+    return {
+      ...this.quiz,
+      answers: this.quiz.answers.slice(0, 80),
+      winners: this.quiz.winners.slice(0, this.quiz.winnerCount),
+    }
+  }
+
+  private openQuiz(body: RequestBody) {
+    const question = sanitizeText(body.question, quizQuestionMaxLength)
+    const answer = sanitizeText(body.answer, quizAnswerMaxLength)
+    const winnerCount = clamp(Math.floor(Number(body.winnerCount) || 2), 1, 10)
+    const answerKeys = normalizeQuizAnswerKeys(answer)
+    const now = Date.now()
+
+    if (!question || !answerKeys.length) return false
+
+    this.quiz = {
+      id: this.quiz.id + 1,
+      round: this.quiz.round + 1,
+      mode: 'open',
+      question,
+      winnerCount,
+      answers: [],
+      winners: [],
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.quizAnswerKeys = answerKeys
+    this.quizAnswerId = 1
+    return true
+  }
+
+  private closeQuiz() {
+    if (this.quiz.mode === 'idle') return
+
+    this.quiz = {
+      ...this.quiz,
+      mode: 'closed',
+      updatedAt: Date.now(),
+    }
+  }
+
+  private clearQuiz() {
+    this.quiz = { ...emptyQuizState }
+    this.quizAnswerKeys = []
+    this.quizAnswerId = 1
+  }
+
+  private submitQuizAnswer(person: Participant | null, textValue: unknown) {
+    const text = sanitizeText(textValue, quizAnswerMaxLength)
+    if (!person || this.quiz.mode !== 'open' || !this.quiz.id || !text) return null
+
+    const normalized = normalizeQuizAnswer(text)
+    const alreadyWon = this.quiz.winners.some((winner) => winner.participantId === person.id)
+    const correct = this.quizAnswerKeys.includes(normalized)
+    const rank = correct && !alreadyWon && this.quiz.winners.length < this.quiz.winnerCount ? this.quiz.winners.length + 1 : undefined
+    const answer: QuizAnswer = {
+      id: this.quizAnswerId++,
+      quizId: this.quiz.id,
+      participantId: person.id,
+      author: person.name,
+      group: person.group,
+      text,
+      correct,
+      rank,
+      createdAt: Date.now(),
+    }
+
+    this.quiz.answers.unshift(answer)
+    this.quiz.answers.splice(80)
+
+    if (rank) {
+      this.quiz.winners.push(answer)
+      if (this.quiz.winners.length >= this.quiz.winnerCount) {
+        this.quiz = { ...this.quiz, mode: 'closed' }
+      }
+    }
+
+    this.quiz = {
+      ...this.quiz,
+      updatedAt: Date.now(),
+    }
+
+    return answer
+  }
+
   private recordVoteEvents(
     person: Participant,
     previousAllocations: Record<string, number>,
@@ -772,6 +945,7 @@ export class ArenaRoom {
     this.voteEvents = []
     this.cheerId = 1
     this.voteEventId = 1
+    this.clearQuiz()
     this.sessionId += 1
     this.testMode = Boolean(seed)
     this.closed = false
@@ -1095,4 +1269,63 @@ function clamp(value: number, min: number, max: number) {
 
 function normalizeCheerNameMode(value: unknown, fallback: Settings['cheerNameMode'] = 'masked'): Settings['cheerNameMode'] {
   return value === 'real' ? 'real' : value === 'masked' ? 'masked' : fallback
+}
+
+function normalizeQuizState(value: unknown): QuizState {
+  const source = normalizeObject(value)
+  const mode: QuizMode = source.mode === 'open' || source.mode === 'closed' ? source.mode : 'idle'
+  const winnerCount = clamp(Math.floor(Number(source.winnerCount) || 2), 1, 10)
+  const answers = Array.isArray(source.answers) ? source.answers.map(normalizeQuizAnswerRecord).filter(Boolean) as QuizAnswer[] : []
+  const winners = Array.isArray(source.winners) ? source.winners.map(normalizeQuizAnswerRecord).filter(Boolean) as QuizAnswer[] : []
+
+  return {
+    id: Math.max(0, Math.floor(Number(source.id) || 0)),
+    round: Math.max(0, Math.floor(Number(source.round) || 0)),
+    mode,
+    question: sanitizeText(source.question, quizQuestionMaxLength),
+    winnerCount,
+    answers: answers.slice(0, 80),
+    winners: winners.slice(0, winnerCount),
+    createdAt: Math.max(0, Number(source.createdAt) || 0),
+    updatedAt: Math.max(0, Number(source.updatedAt) || 0),
+  }
+}
+
+function normalizeQuizAnswerRecord(value: unknown): QuizAnswer | null {
+  const source = normalizeObject(value)
+  const id = Math.floor(Number(source.id) || 0)
+  const quizId = Math.floor(Number(source.quizId) || 0)
+  const participantId = sanitizeIdentifier(source.participantId, 96)
+  const author = sanitizeText(source.author, 18)
+  const text = sanitizeText(source.text, quizAnswerMaxLength)
+
+  if (!id || !quizId || !participantId || !author || !text) return null
+
+  const rankValue = Math.floor(Number(source.rank) || 0)
+  return {
+    id,
+    quizId,
+    participantId,
+    author,
+    group: sanitizeLetsId(source.group, 48),
+    text,
+    correct: Boolean(source.correct),
+    rank: rankValue > 0 ? rankValue : undefined,
+    createdAt: Math.max(0, Number(source.createdAt) || 0),
+  }
+}
+
+function normalizeQuizAnswerKeys(value: unknown) {
+  return String(value || '')
+    .split(/[,|\n]/)
+    .map((item) => normalizeQuizAnswer(item))
+    .filter(Boolean)
+}
+
+function normalizeQuizAnswer(value: unknown) {
+  return String(value || '')
+    .normalize('NFKC')
+    .trim()
+    .toLocaleLowerCase('ko-KR')
+    .replace(/\s+/gu, '')
 }

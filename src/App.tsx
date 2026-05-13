@@ -12,6 +12,7 @@ import {
   Gift,
   Maximize2,
   Megaphone,
+  MoveHorizontal,
   Radio,
   Save,
   Search,
@@ -98,6 +99,32 @@ type LastRaffle = {
   createdAt: number
 }
 
+type QuizMode = 'idle' | 'open' | 'closed'
+
+type QuizAnswer = {
+  id: number
+  quizId: number
+  participantId: string
+  author: string
+  group: string
+  text: string
+  correct: boolean
+  rank?: number
+  createdAt: number
+}
+
+type QuizState = {
+  id: number
+  round: number
+  mode: QuizMode
+  question: string
+  winnerCount: number
+  answers: QuizAnswer[]
+  winners: QuizAnswer[]
+  createdAt: number
+  updatedAt: number
+}
+
 type EventState = {
   teams: Team[]
   participants: Participant[]
@@ -106,6 +133,7 @@ type EventState = {
   closed: boolean
   closesAt: number
   lastRaffle: LastRaffle | null
+  quiz: QuizState
   sessionId: number
   settings: {
     showScoresToAudience: boolean
@@ -144,6 +172,7 @@ type EventCopy = {
   wallCheerLabel: string
   wallRaffleLabel: string
   wallShowupLabel: string
+  wallQuizLabel: string
   wallArenaEyeline: string
   wallArenaTitle: string
   wallCheerEyeline: string
@@ -159,7 +188,7 @@ type RaffleStyle = 'roulette' | 'lotto' | 'target'
 type ConnectionState = 'connecting' | 'live' | 'offline'
 type AppMode = 'admin' | 'vote' | 'wall'
 type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams'
-type WallPanel = 'overview' | 'cheer' | 'raffle'
+type WallPanel = 'overview' | 'cheer' | 'raffle' | 'quiz'
 
 const raffleRuleOptions: Array<{ value: RaffleRule; label: string }> = [
   { value: 'all', label: '공개 응원 메시지 참여자' },
@@ -242,6 +271,7 @@ const copyLabels: Record<keyof EventCopy, string> = {
   wallCheerLabel: '송출 응원 메시지 버튼',
   wallRaffleLabel: '송출 행운권 추첨 버튼',
   wallShowupLabel: '송출 말풍선 Showup 버튼',
+  wallQuizLabel: '송출 퀴즈 버튼',
   wallArenaEyeline: '송출 현황 패널 라벨',
   wallArenaTitle: '송출 현황 패널 제목',
   wallCheerEyeline: '송출 응원 패널 라벨',
@@ -287,6 +317,7 @@ const fallbackCopy: EventCopy = {
   wallCheerLabel: '응원메세지',
   wallRaffleLabel: '행운권추첨',
   wallShowupLabel: '말풍선 Showup',
+  wallQuizLabel: '퀴즈',
   wallArenaEyeline: 'Live Arena Wall',
   wallArenaTitle: '실시간 별 현황',
   wallCheerEyeline: 'Cheer Board',
@@ -482,6 +513,17 @@ const fallbackState: EventState = {
   closed: false,
   closesAt: Date.now() + 10 * 60 * 1000,
   lastRaffle: null,
+  quiz: {
+    id: 0,
+    round: 0,
+    mode: 'idle',
+    question: '',
+    winnerCount: 2,
+    answers: [],
+    winners: [],
+    createdAt: 0,
+    updatedAt: 0,
+  },
   sessionId: 0,
   settings: {
     showScoresToAudience: true,
@@ -662,6 +704,9 @@ function Header({
                 <Sparkles size={17} />
                 {state.copy.wallShowupLabel}
               </button>
+              <button type="button" className={wallPanel === 'quiz' ? 'active' : ''} onClick={() => onWallPanelChange('quiz')}>
+                {state.copy.wallQuizLabel}
+              </button>
             </div>
           </>
         ) : (
@@ -713,6 +758,8 @@ function VoteView({
   const [hasRegistered, setHasRegistered] = useState(() => getStoredValue(registeredKey) === '1')
   const [registeredSession, setRegisteredSession] = useState(() => getStoredValue(registeredSessionKey))
   const [cheerTexts, setCheerTexts] = useState<Record<string, string>>({})
+  const [quizAnswerDraft, setQuizAnswerDraft] = useState({ quizId: 0, text: '' })
+  const [quizFeedbackDraft, setQuizFeedbackDraft] = useState({ quizId: 0, text: '' })
   const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null)
   const cheerThreadRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -727,6 +774,12 @@ function VoteView({
   const perTeamStarLimit = Math.min(starBudget, MAX_STARS_PER_TEAM)
   const currentParticipantId = participant?.id ?? participantId
   const participantMessages = state.cheers.filter((message) => message.participantId === currentParticipantId)
+  const quizActive = state.quiz.mode !== 'idle'
+  const quizAnswerText = quizAnswerDraft.quizId === state.quiz.id ? quizAnswerDraft.text : ''
+  const quizFeedback = quizFeedbackDraft.quizId === state.quiz.id ? quizFeedbackDraft.text : ''
+  const myQuizAnswers = state.quiz.answers.filter((answer) => answer.participantId === currentParticipantId)
+  const latestMyQuizAnswer = myQuizAnswers[0]
+  const myWinningQuizAnswer = state.quiz.winners.find((answer) => answer.participantId === currentParticipantId)
   const hasVisibleCheer = participantMessages.some((message) => !message.hidden)
   const hasHiddenCheer = participantMessages.some((message) => message.hidden)
   const hasSubmittedCheer = Boolean(participant?.cheerSubmitted || participantMessages.length)
@@ -831,6 +884,37 @@ function VoteView({
     sendCheer(teamId)
   }
 
+  const sendQuizAnswer = async () => {
+    const text = quizAnswerText.trim()
+    if (!text || !isRegistered || state.quiz.mode !== 'open') return
+
+    const response = await post('/api/quiz/answer', {
+      sessionId: state.sessionId,
+      participantId,
+      name: name.trim(),
+      group: normalizeLetsIdDisplay(group),
+      text,
+    })
+
+    if (!response) return
+
+    const submittedAnswer = response.quiz.answers.find(
+      (answer) => answer.participantId === currentParticipantId && answer.text === text,
+    )
+    setQuizAnswerDraft({ quizId: state.quiz.id, text: '' })
+    setQuizFeedbackDraft({
+      quizId: state.quiz.id,
+      text: submittedAnswer?.correct ? '정답 후보로 접수되었습니다.' : '답변이 접수되었습니다.',
+    })
+  }
+
+  const handleQuizKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+
+    event.preventDefault()
+    sendQuizAnswer()
+  }
+
   return (
     <>
       <section className="hero-band audience">
@@ -877,6 +961,19 @@ function VoteView({
             {sessionReady ? state.copy.registrationReady : state.copy.registrationConnecting}
           </p>
         </section>
+      ) : quizActive ? (
+        <QuizParticipationView
+          quiz={state.quiz}
+          name={name}
+          group={normalizeLetsIdDisplay(group)}
+          answerText={quizAnswerText}
+          onAnswerTextChange={(value) => setQuizAnswerDraft({ quizId: state.quiz.id, text: value })}
+          onSubmit={sendQuizAnswer}
+          onKeyDown={handleQuizKeyDown}
+          latestAnswer={latestMyQuizAnswer}
+          winningAnswer={myWinningQuizAnswer}
+          feedback={quizFeedback}
+        />
       ) : (
         <section className="direct-vote-grid">
           <section className="team-catalog direct" aria-label="팀별 별 투표">
@@ -1023,6 +1120,92 @@ function VoteView({
         </section>
       )}
     </>
+  )
+}
+
+function QuizParticipationView({
+  quiz,
+  name,
+  group,
+  answerText,
+  onAnswerTextChange,
+  onSubmit,
+  onKeyDown,
+  latestAnswer,
+  winningAnswer,
+  feedback,
+}: {
+  quiz: QuizState
+  name: string
+  group: string
+  answerText: string
+  onAnswerTextChange: (value: string) => void
+  onSubmit: () => void
+  onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement>) => void
+  latestAnswer?: QuizAnswer
+  winningAnswer?: QuizAnswer
+  feedback: string
+}) {
+  const isOpen = quiz.mode === 'open'
+  const hasWon = Boolean(winningAnswer)
+  const statusText = hasWon
+    ? `${winningAnswer?.rank ?? 1}번째 정답자로 선정되었습니다.`
+    : isOpen
+      ? '정답을 입력해 전송하세요.'
+      : '이 문제는 마감되었습니다.'
+
+  return (
+    <section className="quiz-participation-shell" aria-label="퀴즈 모드">
+      <div className="quiz-live-badge">
+        <Sparkles size={18} />
+        <span>Quiz Mode</span>
+      </div>
+      <div className="quiz-question-card">
+        <p className="section-kicker">Live Quiz #{quiz.round || 1}</p>
+        <h2>{quiz.question || '관리자가 곧 퀴즈를 출제합니다.'}</h2>
+        <div className="quiz-player-row">
+          <strong>{name}</strong>
+          <span>{group}</span>
+        </div>
+      </div>
+
+      <div className={`quiz-answer-card ${hasWon ? 'is-winner' : ''}`}>
+        <div>
+          <strong>{statusText}</strong>
+          {latestAnswer ? (
+            <span>
+              마지막 답변: {latestAnswer.text} · {latestAnswer.correct ? '정답' : '확인 중'}
+            </span>
+          ) : (
+            <span>문제가 바뀌면 이 화면도 자동으로 갱신됩니다.</span>
+          )}
+        </div>
+        <div className="quiz-answer-form">
+          <input
+            value={answerText}
+            maxLength={120}
+            onChange={(event) => onAnswerTextChange(event.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={isOpen ? '정답 입력' : '퀴즈가 마감되었습니다'}
+            disabled={!isOpen || hasWon}
+          />
+          <button type="button" onClick={onSubmit} disabled={!isOpen || hasWon || !answerText.trim()}>
+            전송
+          </button>
+        </div>
+        {feedback ? <p className="quiz-feedback">{feedback}</p> : null}
+      </div>
+
+      {quiz.winners.length ? (
+        <div className="quiz-winner-list audience">
+          {quiz.winners.map((winner) => (
+            <span key={`${winner.quizId}-${winner.id}`}>
+              {winner.rank}등 {winner.author}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </section>
   )
 }
 
@@ -1301,11 +1484,15 @@ function PublicWallView({
   const [raffleStyle, setRaffleStyle] = useState<RaffleStyle>('lotto')
   const [winnerCount, setWinnerCount] = useState(4)
   const [isDrawing, setIsDrawing] = useState(false)
+  const [wallSplit, setWallSplit] = useState(70)
+  const wallGridRef = useRef<HTMLDivElement | null>(null)
   const setWallPanel = onWallPanelChange
   const setShowCheerConstellation = onShowCheerConstellationChange
   const starBudget = getStarBudget(state)
   const cheerNameMode = getCheerNameMode(state)
   const selectedTeam = selectedTeamId === 'all' ? null : state.teams.find((team) => team.id === selectedTeamId) ?? null
+  const wallSplitMin = 54
+  const wallSplitMax = 82
 
   const startDrawing = () => {
     setWallPanel('raffle')
@@ -1322,6 +1509,38 @@ function PublicWallView({
   const selectTeamMessages = (teamId: string) => {
     setSelectedTeamId((current) => (current === teamId ? 'all' : teamId))
     if (wallPanel === 'raffle') setWallPanel('overview')
+  }
+
+  const resizeWallSplit = (clientX: number) => {
+    const grid = wallGridRef.current
+    if (!grid) return
+
+    const rect = grid.getBoundingClientRect()
+    const nextSplit = ((clientX - rect.left) / rect.width) * 100
+    setWallSplit(clamp(nextSplit, wallSplitMin, wallSplitMax))
+  }
+
+  const handleWallResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    resizeWallSplit(event.clientX)
+    document.body.classList.add('is-wall-resizing')
+
+    const handleMove = (moveEvent: PointerEvent) => resizeWallSplit(moveEvent.clientX)
+    const handleUp = () => {
+      document.body.classList.remove('is-wall-resizing')
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', handleUp)
+    }
+
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', handleUp)
+  }
+
+  const handleWallResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+
+    event.preventDefault()
+    setWallSplit((current) => clamp(current + (event.key === 'ArrowLeft' ? -3 : 3), wallSplitMin, wallSplitMax))
   }
 
   return (
@@ -1358,8 +1577,18 @@ function PublicWallView({
             />
           </section>
         ) : (
-          <div className={`public-wall-grid ${wallPanel === 'cheer' ? 'cheer-focus' : ''}`}>
-            {wallPanel === 'overview' ? (
+          <div
+            ref={wallGridRef}
+            className={`public-wall-grid ${wallPanel === 'cheer' ? 'cheer-focus' : ''}`}
+            style={
+              wallPanel === 'overview' || wallPanel === 'quiz'
+                ? ({
+                    gridTemplateColumns: `minmax(620px, ${wallSplit}fr) 10px minmax(360px, ${100 - wallSplit}fr)`,
+                  } as CSSProperties)
+                : undefined
+            }
+          >
+            {wallPanel === 'overview' || wallPanel === 'quiz' ? (
               <section className="public-arena-board" aria-label="실시간 별 현황">
                 <div className="section-heading compact">
                   <div>
@@ -1391,17 +1620,186 @@ function PublicWallView({
               </section>
             ) : null}
 
-            <PublicCheerBoard
-              state={state}
-              selectedTeamId={selectedTeamId}
-              onSelectAll={() => setSelectedTeamId('all')}
-              cheerNameMode={cheerNameMode}
-              large={wallPanel === 'cheer'}
-            />
+            {wallPanel === 'overview' || wallPanel === 'quiz' ? (
+              <div
+                className="wall-resize-handle"
+                role="separator"
+                aria-label="실시간 별 현황과 응원 메시지 패널 폭 조절"
+                aria-orientation="vertical"
+                aria-valuemin={wallSplitMin}
+                aria-valuemax={wallSplitMax}
+                aria-valuenow={Math.round(wallSplit)}
+                tabIndex={0}
+                onPointerDown={handleWallResizePointerDown}
+                onKeyDown={handleWallResizeKeyDown}
+              >
+                <MoveHorizontal size={18} strokeWidth={2.5} />
+              </div>
+            ) : null}
+
+            {wallPanel === 'quiz' ? (
+              <QuizWallBoard state={state} post={post} />
+            ) : (
+              <PublicCheerBoard
+                state={state}
+                selectedTeamId={selectedTeamId}
+                onSelectAll={() => setSelectedTeamId('all')}
+                cheerNameMode={cheerNameMode}
+                large={wallPanel === 'cheer'}
+              />
+            )}
           </div>
         )}
       </section>
     </>
+  )
+}
+
+function QuizWallBoard({
+  state,
+  post,
+}: {
+  state: EventState
+  post: (path: string, body: unknown) => Promise<EventState | null>
+}) {
+  const [question, setQuestion] = useState('')
+  const [answer, setAnswer] = useState('')
+  const [winnerCount, setWinnerCount] = useState(2)
+  const spotlightWinner = state.quiz.winners.at(-1) ?? null
+
+  const openQuiz = async () => {
+    const response = await post('/api/quiz/open', {
+      question,
+      answer,
+      winnerCount,
+    })
+
+    if (response) {
+      setQuestion('')
+      setAnswer('')
+    }
+  }
+
+  const closeQuiz = () => {
+    post('/api/quiz/close', {})
+  }
+
+  const clearQuiz = () => {
+    post('/api/quiz/clear', {})
+  }
+
+  const answerCount = state.quiz.answers.length
+  const correctCount = state.quiz.answers.filter((item) => item.correct).length
+
+  return (
+    <section className="quiz-wall-board" aria-label="퀴즈 진행">
+      {spotlightWinner ? <QuizWinnerSpotlight key={`${spotlightWinner.quizId}-${spotlightWinner.id}`} winner={spotlightWinner} /> : null}
+
+      <div className="section-heading compact">
+        <div>
+          <p className="section-kicker">Live Quiz</p>
+          <h2>퀴즈</h2>
+        </div>
+        <span className={`quiz-mode-pill ${state.quiz.mode}`}>
+          {state.quiz.mode === 'open' ? '진행 중' : state.quiz.mode === 'closed' ? '마감' : '대기'}
+        </span>
+      </div>
+
+      <div className="quiz-control-panel">
+        <label>
+          <span>문제</span>
+          <textarea
+            value={question}
+            maxLength={180}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="예: 오늘 발표한 팀 중 사내 지식 검색 Copilot을 만든 팀 이름은?"
+          />
+        </label>
+        <div className="quiz-control-grid">
+          <label>
+            <span>정답</span>
+            <input
+              type="password"
+              value={answer}
+              maxLength={120}
+              onChange={(event) => setAnswer(event.target.value)}
+              placeholder="정답 또는 쉼표로 복수 정답"
+            />
+          </label>
+          <label>
+            <span>선착순</span>
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={winnerCount}
+              onChange={(event) => setWinnerCount(clamp(Number(event.target.value) || 1, 1, 10))}
+            />
+          </label>
+        </div>
+        <div className="quiz-actions">
+          <button type="button" className="primary-action" onClick={openQuiz} disabled={!question.trim() || !answer.trim()}>
+            출제 / 다음 문제
+          </button>
+          <button type="button" onClick={closeQuiz} disabled={state.quiz.mode !== 'open'}>
+            마감
+          </button>
+          <button type="button" onClick={clearQuiz} disabled={state.quiz.mode === 'idle'}>
+            정리
+          </button>
+        </div>
+      </div>
+
+      <div className="quiz-current-panel">
+        <p className="section-kicker">Current Question</p>
+        <h3>{state.quiz.question || '아직 출제된 퀴즈가 없습니다.'}</h3>
+        <div className="quiz-stats">
+          <span>답변 {answerCount}</span>
+          <span>정답 {correctCount}</span>
+          <span>정답자 {state.quiz.winners.length}/{state.quiz.winnerCount}</span>
+        </div>
+      </div>
+
+      {state.quiz.winners.length ? (
+        <div className="quiz-winner-list">
+          {state.quiz.winners.map((winner) => (
+            <span key={`${winner.quizId}-${winner.id}`}>
+              {winner.rank}등 {winner.author}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="quiz-answer-stream" aria-live="polite">
+        {state.quiz.answers.length ? (
+          state.quiz.answers.map((item) => (
+            <article className={`quiz-answer-message ${item.correct ? 'correct' : ''}`} key={`${item.quizId}-${item.id}`}>
+              <strong>
+                <span>{formatCheerAuthor(item.author, getCheerNameMode(state))}</span>
+                {item.rank ? <em>{item.rank}등 정답</em> : item.correct ? <em>정답</em> : null}
+              </strong>
+              <p>{item.text}</p>
+            </article>
+          ))
+        ) : (
+          <p className="empty-state compact">아직 도착한 답변이 없습니다.</p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function QuizWinnerSpotlight({ winner }: { winner: QuizAnswer }) {
+  return (
+    <div className="quiz-winner-spotlight" role="status" aria-live="assertive">
+      <div>
+        <Sparkles size={30} />
+        <span>정답!</span>
+        <strong>{winner.author}</strong>
+        {winner.group ? <p>{winner.group}</p> : null}
+        {winner.rank ? <em>{winner.rank}번째 정답자</em> : null}
+      </div>
+    </div>
   )
 }
 
@@ -1418,12 +1816,21 @@ function PublicCheerBoard({
   cheerNameMode: CheerNameMode
   large?: boolean
 }) {
+  const [expandedCheerIds, setExpandedCheerIds] = useState<Set<number>>(() => new Set())
   const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams])
   const visibleCheers = state.cheers.filter((message) => !message.hidden)
   const selectedCheers = visibleCheers
     .filter((message) => selectedTeamId === 'all' || message.teamId === selectedTeamId)
     .slice(0, large ? 80 : 36)
   const selectedTeam = selectedTeamId === 'all' ? null : teamMap.get(selectedTeamId)
+  const toggleCheerMessage = (messageId: number) => {
+    setExpandedCheerIds((current) => {
+      const next = new Set(current)
+      if (next.has(messageId)) next.delete(messageId)
+      else next.add(messageId)
+      return next
+    })
+  }
 
   return (
     <section
@@ -1445,8 +1852,17 @@ function PublicCheerBoard({
           selectedCheers.map((message) => {
             const team = teamMap.get(message.teamId) ?? state.teams[0]
             const authorLabel = formatCheerAuthor(message.author, cheerNameMode)
+            const isExpanded = expandedCheerIds.has(message.id)
             return (
-              <article className="public-cheer-message" key={message.id} style={{ '--team-color': team.color } as CSSProperties}>
+              <button
+                type="button"
+                className={`public-cheer-message ${isExpanded ? 'is-expanded' : ''}`}
+                key={message.id}
+                style={{ '--team-color': team.color } as CSSProperties}
+                aria-expanded={isExpanded}
+                title={isExpanded ? '클릭해서 응원 메시지 접기' : '클릭해서 전체 응원 메시지 보기'}
+                onClick={() => toggleCheerMessage(message.id)}
+              >
                 <strong>
                   <span className="cheer-route-author">{authorLabel}</span>
                   <span className="cheer-route-arrow" aria-hidden="true">
@@ -1455,7 +1871,7 @@ function PublicCheerBoard({
                   <span className="cheer-route-team">{team.name}</span>
                 </strong>
                 <p>{message.text}</p>
-              </article>
+              </button>
             )
           })
         ) : (
@@ -3195,6 +3611,7 @@ function useEventState(mode: AppMode, participantId?: string) {
       ...nextState,
       copy: { ...fallbackCopy, ...(nextState.copy ?? {}) },
       settings: { ...fallbackState.settings, ...(nextState.settings ?? {}) },
+      quiz: { ...fallbackState.quiz, ...(nextState.quiz ?? {}) },
       teams: nextState.teams.map((team) => {
         const previousRank = previousRanks?.get(team.id)
         return {
@@ -3218,7 +3635,7 @@ function useEventState(mode: AppMode, participantId?: string) {
     let active = true
     let events: EventSource | null = null
     let pollTimer: number | undefined
-    const realtime = mode !== 'vote' || voteRealtime
+    const realtime = Boolean(mode) || voteRealtime
 
     const fetchState = async () => {
       try {
