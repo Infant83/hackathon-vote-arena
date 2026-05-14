@@ -4,6 +4,7 @@ const defaultStarBudget = 10
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const maxStarsPerTeam = 10
+const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 240
 const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
@@ -38,9 +39,16 @@ type TeamConfig = {
   logoFrame: string
   logoFit: string
   logoSize: number
+  logoWidth: number
+  logoHeight: number
   logoZoom: number
   logoFocusX: number
   logoFocusY: number
+  photoFit: string
+  photoHeight: number
+  photoZoom: number
+  photoFocusX: number
+  photoFocusY: number
   baseStars: number
   baseVoters: number
   color: string
@@ -211,6 +219,8 @@ const defaultCopy = {
   appLogoFrame: 'soft',
   appLogoFit: 'cover',
   appLogoSize: '52',
+  appLogoWidth: '52',
+  appLogoHeight: '52',
   appLogoZoom: '1',
   appLogoFocusX: '50',
   appLogoFocusY: '50',
@@ -288,9 +298,16 @@ const defaultTeams: TeamConfig[] = [
     logoFrame: 'line',
     logoFit: 'cover',
     logoSize: 48,
+    logoWidth: 48,
+    logoHeight: 48,
     logoZoom: 1,
     logoFocusX: 50,
     logoFocusY: 50,
+    photoFit: 'cover',
+    photoHeight: 260,
+    photoZoom: 1,
+    photoFocusX: 50,
+    photoFocusY: 50,
     baseStars: 128,
     baseVoters: 46,
     color: '#A50034',
@@ -434,7 +451,7 @@ export class ArenaRoom {
     this.settings = {
       showScoresToAudience: Boolean(snapshot.settings?.showScoresToAudience ?? true),
       starBudget: clamp(migratedStarBudget, 1, 20),
-      durationMinutes: clamp(Math.floor(Number(snapshot.settings?.durationMinutes || defaultDurationMinutes)), 1, 240),
+      durationMinutes: normalizeDurationMinutes(snapshot.settings?.durationMinutes, defaultDurationMinutes),
       timerMode: normalizeTimerMode(snapshot.settings?.timerMode),
       targetTime: normalizeTargetTime(snapshot.settings?.targetTime),
       minScore: clamp(Number(snapshot.settings?.minScore ?? defaultMinScore), 0, 9.9),
@@ -650,6 +667,7 @@ export class ArenaRoom {
     }
 
     if (pathname === '/api/settings') {
+      const timerSettings = resolveTimerSettings(body, this.settings)
       this.settings = {
         ...this.settings,
         showScoresToAudience:
@@ -657,9 +675,9 @@ export class ArenaRoom {
             ? Boolean(body.showScoresToAudience)
             : this.settings.showScoresToAudience,
         starBudget: clamp(Math.floor(Number(body.starBudget) || this.settings.starBudget), 1, 20),
-        durationMinutes: clamp(Math.floor(Number(body.durationMinutes) || this.settings.durationMinutes), 1, 240),
-        timerMode: normalizeTimerMode(body.timerMode, this.settings.timerMode),
-        targetTime: normalizeTargetTime(body.targetTime, this.settings.targetTime),
+        durationMinutes: timerSettings.durationMinutes,
+        timerMode: timerSettings.timerMode,
+        targetTime: timerSettings.targetTime,
         minScore: clamp(Number(body.minScore ?? this.settings.minScore), 0, 9.9),
         cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, this.settings.cheerNameMode),
         themeMode: normalizeThemeMode(body.themeMode, this.settings.themeMode),
@@ -675,6 +693,14 @@ export class ArenaRoom {
     if (pathname === '/api/team-config') {
       const updated = this.applyTeamConfig(body)
       if (!updated) return json({ error: 'teams array required' }, 400)
+
+      await this.commit()
+      return json(this.getState())
+    }
+
+    if (pathname === '/api/team-self-config') {
+      const updated = this.applyTeamSelfConfig(body)
+      if (!updated) return json({ error: 'team not found' }, 400)
 
       await this.commit()
       return json(this.getState())
@@ -777,6 +803,30 @@ export class ArenaRoom {
     }
     this.validTeamIds = new Set(this.teams.map((team) => team.id))
     this.cleanupInvalidTeamReferences()
+    this.lastRaffle = null
+    return true
+  }
+
+  private applyTeamSelfConfig(body: RequestBody) {
+    const teamId = String(body.teamId || '').trim()
+    const index = this.teams.findIndex((team) => team.id === teamId)
+    if (index < 0) return false
+
+    const current = this.teams[index]
+    if (String(body.teamKey || '') !== getTeamEditKey(current)) return false
+    const input = normalizeObject(body.team)
+    const prepared = {
+      ...current,
+      ...input,
+      id: current.id,
+      code: current.code,
+      baseStars: current.baseStars,
+      baseVoters: current.baseVoters,
+      sortOrder: current.sortOrder ?? index,
+    }
+
+    this.teams = this.teams.map((team, teamIndex) => (teamIndex === index ? normalizeTeam(prepared, current, index) : team))
+    this.validTeamIds = new Set(this.teams.map((team) => team.id))
     this.lastRaffle = null
     return true
   }
@@ -1299,6 +1349,7 @@ function normalizeCopy(input: unknown): EventCopy {
 
 function normalizeTeam(teamValue: unknown, fallback: TeamConfig, index: number): TeamConfig {
   const team = teamValue && typeof teamValue === 'object' ? (teamValue as Record<string, unknown>) : {}
+  const hasLogoFile = Object.prototype.hasOwnProperty.call(team, 'logoFile')
   const members = Array.isArray(team.members)
     ? team.members.map((member) => sanitizeText(member, 18)).filter(Boolean).slice(0, 3)
     : fallback.members
@@ -1310,14 +1361,21 @@ function normalizeTeam(teamValue: unknown, fallback: TeamConfig, index: number):
     name: sanitizeText(team.name, 32) || fallback.name || `Team ${index + 1}`,
     title: sanitizeText(team.title, 64) || fallback.title || '프로젝트명 미정',
     members,
-    logoFile: sanitizeLogoPath(String(team.logoFile || fallback.logoFile || '')),
+    logoFile: sanitizeLogoPath(String(hasLogoFile ? team.logoFile : fallback.logoFile || '')),
     logoShape: sanitizeImageShape(team.logoShape, fallback.logoShape || 'rounded'),
     logoFrame: sanitizeImageFrame(team.logoFrame, fallback.logoFrame || 'line'),
     logoFit: sanitizeImageFit(team.logoFit, fallback.logoFit || 'cover'),
     logoSize: clampNumber(team.logoSize ?? fallback.logoSize ?? 48, 36, 88, 48),
+    logoWidth: clampNumber(team.logoWidth ?? fallback.logoWidth ?? 48, 36, 180, 48),
+    logoHeight: clampNumber(team.logoHeight ?? fallback.logoHeight ?? 48, 32, 132, 48),
     logoZoom: clampNumber(team.logoZoom ?? fallback.logoZoom ?? 1, 1, 2.4, 1),
     logoFocusX: clampNumber(team.logoFocusX ?? fallback.logoFocusX ?? 50, 0, 100, 50),
     logoFocusY: clampNumber(team.logoFocusY ?? fallback.logoFocusY ?? 50, 0, 100, 50),
+    photoFit: sanitizeImageFit(team.photoFit, fallback.photoFit || 'cover'),
+    photoHeight: clampNumber(team.photoHeight ?? fallback.photoHeight ?? 260, 150, 460, 260),
+    photoZoom: clampNumber(team.photoZoom ?? fallback.photoZoom ?? 1, 1, 2.4, 1),
+    photoFocusX: clampNumber(team.photoFocusX ?? fallback.photoFocusX ?? 50, 0, 100, 50),
+    photoFocusY: clampNumber(team.photoFocusY ?? fallback.photoFocusY ?? 50, 0, 100, 50),
     baseStars: Math.max(0, Math.floor(Number(team.baseStars ?? fallback.baseStars ?? 0))),
     baseVoters: Math.max(0, Math.floor(Number(team.baseVoters ?? fallback.baseVoters ?? 0))),
     color: sanitizeColor(team.color) || fallback.color || '#A50034',
@@ -1570,6 +1628,10 @@ function hashIdentity(value: string) {
   return (hash >>> 0).toString(36)
 }
 
+function getTeamEditKey(team: TeamConfig) {
+  return hashIdentity(`${team.id}|${team.code}|vibe-team-edit`)
+}
+
 function parseCookies(cookieHeader = '') {
   return Object.fromEntries(
     cookieHeader
@@ -1632,14 +1694,51 @@ function normalizeTargetTime(value: unknown, fallback = '') {
   return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 ? text : fallback
 }
 
+function normalizeDurationMinutes(value: unknown, fallback = defaultDurationMinutes) {
+  const minutes = Math.floor(Number(value))
+  return Number.isFinite(minutes) && minutes >= 1 ? minutes : fallback
+}
+
+function resolveTimerSettings(body: RequestBody, current: Settings) {
+  const timerMode = normalizeTimerMode(body.timerMode, current.timerMode)
+  const rawDurationMinutes = normalizeDurationMinutes(body.durationMinutes, current.durationMinutes)
+  const rawTargetTime = normalizeTargetTime(body.targetTime, current.targetTime)
+  const targetTime =
+    timerMode === 'duration'
+      ? formatKstTime(Date.now() + rawDurationMinutes * 60 * 1000)
+      : rawTargetTime || formatKstTime(Date.now() + rawDurationMinutes * 60 * 1000)
+  const durationMinutes = timerMode === 'targetTime' ? minutesUntilKstTime(targetTime) : rawDurationMinutes
+
+  return { durationMinutes, timerMode, targetTime }
+}
+
+function formatKstTime(timestamp: number) {
+  const date = new Date(timestamp + kstOffsetMinutes * 60 * 1000)
+  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`
+}
+
+function minutesUntilKstTime(value: string, now = Date.now()) {
+  const target = getNextKstTimestampForTime(value, now)
+  return target ? Math.max(1, Math.ceil((target - now) / 60_000)) : defaultDurationMinutes
+}
+
+function getNextKstTimestampForTime(value: string, now = Date.now()) {
+  const targetTime = normalizeTargetTime(value, '')
+  if (!targetTime) return 0
+
+  const [hour, minute] = targetTime.split(':').map(Number)
+  const kstNow = new Date(now + kstOffsetMinutes * 60 * 1000)
+  let target =
+    Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate(), hour, minute, 0, 0) -
+    kstOffsetMinutes * 60 * 1000
+
+  if (target <= now) target += 24 * 60 * 60 * 1000
+  return target
+}
+
 function calculateClosesAt(settings: Settings, now = Date.now()) {
   if (settings.timerMode === 'targetTime' && settings.targetTime) {
-    const [hour, minute] = settings.targetTime.split(':').map(Number)
-    const kstOffsetMs = 9 * 60 * 60 * 1000
-    const kstNow = new Date(now + kstOffsetMs)
-    let target = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate(), hour - 9, minute, 0, 0)
-    if (target <= now) target += 24 * 60 * 60 * 1000
-    return target
+    return getNextKstTimestampForTime(settings.targetTime, now) || now + settings.durationMinutes * 60 * 1000
   }
 
   return now + settings.durationMinutes * 60 * 1000

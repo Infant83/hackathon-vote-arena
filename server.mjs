@@ -12,6 +12,7 @@ const defaultStarBudget = 10
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const maxStarsPerTeam = 10
+const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 240
 const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
@@ -31,6 +32,8 @@ const defaultCopy = {
   appLogoFrame: 'soft',
   appLogoFit: 'cover',
   appLogoSize: '52',
+  appLogoWidth: '52',
+  appLogoHeight: '52',
   appLogoZoom: '1',
   appLogoFocusX: '50',
   appLogoFocusY: '50',
@@ -327,6 +330,7 @@ function normalizeCopy(input) {
 
 function normalizeTeam(team, fallback = defaultTeams[0], index = 0) {
   const validLogos = new Set(['orbit', 'beam', 'grid', 'wave', 'core'])
+  const hasLogoFile = Object.prototype.hasOwnProperty.call(team || {}, 'logoFile')
   const members = Array.isArray(team?.members)
     ? team.members.map((member) => sanitizeText(member, 18)).filter(Boolean).slice(0, 3)
     : fallback.members || []
@@ -338,14 +342,21 @@ function normalizeTeam(team, fallback = defaultTeams[0], index = 0) {
     name: sanitizeText(team?.name, 32) || fallback.name || `Team ${index + 1}`,
     title: sanitizeText(team?.title, 64) || fallback.title || '프로젝트명 미정',
     members,
-    logoFile: sanitizeLogoPath(team?.logoFile || fallback.logoFile || ''),
+    logoFile: sanitizeLogoPath(hasLogoFile ? team?.logoFile : fallback.logoFile || ''),
     logoShape: sanitizeImageShape(team?.logoShape, fallback.logoShape || 'rounded'),
     logoFrame: sanitizeImageFrame(team?.logoFrame, fallback.logoFrame || 'line'),
     logoFit: sanitizeImageFit(team?.logoFit, fallback.logoFit || 'cover'),
     logoSize: clampNumber(team?.logoSize ?? fallback.logoSize ?? 48, 36, 88, 48),
+    logoWidth: clampNumber(team?.logoWidth ?? fallback.logoWidth ?? 48, 36, 180, 48),
+    logoHeight: clampNumber(team?.logoHeight ?? fallback.logoHeight ?? 48, 32, 132, 48),
     logoZoom: clampNumber(team?.logoZoom ?? fallback.logoZoom ?? 1, 1, 2.4, 1),
     logoFocusX: clampNumber(team?.logoFocusX ?? fallback.logoFocusX ?? 50, 0, 100, 50),
     logoFocusY: clampNumber(team?.logoFocusY ?? fallback.logoFocusY ?? 50, 0, 100, 50),
+    photoFit: sanitizeImageFit(team?.photoFit, fallback.photoFit || 'cover'),
+    photoHeight: clampNumber(team?.photoHeight ?? fallback.photoHeight ?? 260, 150, 460, 260),
+    photoZoom: clampNumber(team?.photoZoom ?? fallback.photoZoom ?? 1, 1, 2.4, 1),
+    photoFocusX: clampNumber(team?.photoFocusX ?? fallback.photoFocusX ?? 50, 0, 100, 50),
+    photoFocusY: clampNumber(team?.photoFocusY ?? fallback.photoFocusY ?? 50, 0, 100, 50),
     baseStars: Math.max(0, Math.floor(Number(team?.baseStars ?? fallback.baseStars ?? 0))),
     baseVoters: Math.max(0, Math.floor(Number(team?.baseVoters ?? fallback.baseVoters ?? 0))),
     color: sanitizeColor(team?.color) || fallback.color || '#A50034',
@@ -488,6 +499,38 @@ async function applyTeamConfig(body) {
   await persistTeamConfig()
 }
 
+async function applyTeamSelfConfig(body) {
+  const teamId = String(body?.teamId || '').trim()
+  const index = teams.findIndex((team) => team.id === teamId)
+  if (index < 0) {
+    throw new Error('team not found')
+  }
+
+  const current = teams[index]
+  if (String(body?.teamKey || '') !== getTeamEditKey(current)) {
+    throw new Error('team key mismatch')
+  }
+  const input = body?.team && typeof body.team === 'object' && !Array.isArray(body.team) ? body.team : {}
+  const prepared = {
+    ...current,
+    ...input,
+    id: current.id,
+    code: current.code,
+    baseStars: current.baseStars,
+    baseVoters: current.baseVoters,
+    sortOrder: current.sortOrder ?? index,
+  }
+
+  teams = teams.map((team, teamIndex) => (teamIndex === index ? normalizeTeam(prepared, current, index) : team))
+  validTeamIds = new Set(teams.map((team) => team.id))
+  lastRaffle = null
+  await persistTeamConfig()
+}
+
+function getTeamEditKey(team) {
+  return hashIdentity(`${team.id}|${team.code}|vibe-team-edit`)
+}
+
 function normalizeTeamConfig(input) {
   const source = Array.isArray(input) ? input.slice(0, 20) : []
   if (!source.length) return []
@@ -575,9 +618,16 @@ async function persistTeamConfig() {
         logoFrame: team.logoFrame,
         logoFit: team.logoFit,
         logoSize: team.logoSize,
+        logoWidth: team.logoWidth,
+        logoHeight: team.logoHeight,
         logoZoom: team.logoZoom,
         logoFocusX: team.logoFocusX,
         logoFocusY: team.logoFocusY,
+        photoFit: team.photoFit,
+        photoHeight: team.photoHeight,
+        photoZoom: team.photoZoom,
+        photoFocusX: team.photoFocusX,
+        photoFocusY: team.photoFocusY,
         color: team.color,
         logo: team.logo,
         baseStars: team.baseStars,
@@ -1104,14 +1154,38 @@ function normalizeTargetTime(value, fallback = '') {
   return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 ? text : fallback
 }
 
+function normalizeDurationMinutes(value, fallback = defaultDurationMinutes) {
+  const minutes = Math.floor(Number(value))
+  return Number.isFinite(minutes) && minutes >= 1 ? minutes : fallback
+}
+
+function formatKstTime(timestamp) {
+  const date = new Date(timestamp + kstOffsetMinutes * 60 * 1000)
+  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`
+}
+
+function minutesUntilKstTime(value, now = Date.now()) {
+  const target = getNextKstTimestampForTime(value, now)
+  return target ? Math.max(1, Math.ceil((target - now) / 60_000)) : defaultDurationMinutes
+}
+
+function getNextKstTimestampForTime(value, now = Date.now()) {
+  const targetTime = normalizeTargetTime(value, '')
+  if (!targetTime) return 0
+
+  const [hour, minute] = targetTime.split(':').map(Number)
+  const kstNow = new Date(now + kstOffsetMinutes * 60 * 1000)
+  let target =
+    Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate(), hour, minute, 0, 0) -
+    kstOffsetMinutes * 60 * 1000
+
+  if (target <= now) target += 24 * 60 * 60 * 1000
+  return target
+}
+
 function calculateClosesAt(nextSettings = settings, now = Date.now()) {
   if (nextSettings.timerMode === 'targetTime' && nextSettings.targetTime) {
-    const [hour, minute] = nextSettings.targetTime.split(':').map(Number)
-    const kstOffsetMs = 9 * 60 * 60 * 1000
-    const kstNow = new Date(now + kstOffsetMs)
-    let target = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate(), hour - 9, minute, 0, 0)
-    if (target <= now) target += 24 * 60 * 60 * 1000
-    return target
+    return getNextKstTimestampForTime(nextSettings.targetTime, now) || now + nextSettings.durationMinutes * 60 * 1000
   }
 
   return now + nextSettings.durationMinutes * 60 * 1000
@@ -1542,10 +1616,16 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/settings') {
     const nextStarBudget = Math.max(1, Math.min(20, Math.floor(Number(body.starBudget) || settings.starBudget)))
-    const nextDurationMinutes = Math.max(1, Math.min(240, Math.floor(Number(body.durationMinutes) || settings.durationMinutes)))
     const nextMinScore = clamp(Number(body.minScore ?? settings.minScore), 0, 9.9)
     const nextTimerMode = normalizeTimerMode(body.timerMode, settings.timerMode)
-    const nextTargetTime = normalizeTargetTime(body.targetTime, settings.targetTime)
+    const rawDurationMinutes = normalizeDurationMinutes(body.durationMinutes, settings.durationMinutes)
+    const rawTargetTime = normalizeTargetTime(body.targetTime, settings.targetTime)
+    const nextTargetTime =
+      nextTimerMode === 'duration'
+        ? formatKstTime(Date.now() + rawDurationMinutes * 60 * 1000)
+        : rawTargetTime || formatKstTime(Date.now() + rawDurationMinutes * 60 * 1000)
+    const nextDurationMinutes =
+      nextTimerMode === 'targetTime' ? minutesUntilKstTime(nextTargetTime) : rawDurationMinutes
 
     settings = {
       ...settings,
@@ -1570,6 +1650,17 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/team-config') {
     try {
       await applyTeamConfig(body)
+      broadcast()
+      sendJson(response, 200, getState())
+    } catch (error) {
+      sendJson(response, 400, { error: error.message || 'invalid team config' })
+    }
+    return
+  }
+
+  if (url.pathname === '/api/team-self-config') {
+    try {
+      await applyTeamSelfConfig(body)
       broadcast()
       sendJson(response, 200, getState())
     } catch (error) {

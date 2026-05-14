@@ -50,9 +50,16 @@ type Team = {
   logoFrame?: ImageFrame
   logoFit?: ImageFit
   logoSize?: number
+  logoWidth?: number
+  logoHeight?: number
   logoZoom?: number
   logoFocusX?: number
   logoFocusY?: number
+  photoFit?: ImageFit
+  photoHeight?: number
+  photoZoom?: number
+  photoFocusX?: number
+  photoFocusY?: number
   baseStars: number
   baseVoters: number
   color: string
@@ -197,6 +204,8 @@ type EventCopy = {
   appLogoFrame: string
   appLogoFit: string
   appLogoSize: string
+  appLogoWidth: string
+  appLogoHeight: string
   appLogoZoom: string
   appLogoFocusX: string
   appLogoFocusY: string
@@ -273,7 +282,7 @@ type CheerNameMode = 'masked' | 'real'
 type RaffleRule = 'all' | 'leader' | 'top2' | 'top3' | 'multi' | 'big' | 'cheer'
 type RaffleStyle = 'roulette' | 'lotto' | 'target'
 type ConnectionState = 'connecting' | 'live' | 'offline'
-type AppMode = 'admin' | 'vote' | 'wall'
+type AppMode = 'admin' | 'vote' | 'wall' | 'team'
 type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams' | 'quiz' | 'export'
 type WallPanel = 'overview' | 'cheer' | 'raffle' | 'quiz'
 
@@ -374,15 +383,34 @@ type ParticipantSummary = Participant & {
 }
 type TeamVisual = Pick<
   Team,
-  'name' | 'logo' | 'color' | 'logoFile' | 'logoShape' | 'logoFrame' | 'logoFit' | 'logoSize' | 'logoZoom' | 'logoFocusX' | 'logoFocusY'
+  | 'name'
+  | 'logo'
+  | 'color'
+  | 'logoFile'
+  | 'logoShape'
+  | 'logoFrame'
+  | 'logoFit'
+  | 'logoSize'
+  | 'logoWidth'
+  | 'logoHeight'
+  | 'logoZoom'
+  | 'logoFocusX'
+  | 'logoFocusY'
+  | 'photoFit'
+  | 'photoHeight'
+  | 'photoZoom'
+  | 'photoFocusX'
+  | 'photoFocusY'
 >
-type ImageTuningField = 'shape' | 'frame' | 'fit' | 'size' | 'zoom' | 'focusX' | 'focusY'
+type ImageTuningField = 'shape' | 'frame' | 'fit' | 'width' | 'height' | 'zoom' | 'focusX' | 'focusY'
+type ImageTuningValues = Record<ImageTuningField, string> & { size?: string }
 
 const DEFAULT_STAR_BUDGET = 10
 const DEFAULT_DURATION_MINUTES = 10
 const DEFAULT_MIN_SCORE = 5
 const MAX_STARS_PER_TEAM = 10
 const CHEER_MESSAGE_MAX_LENGTH = 240
+const KST_OFFSET_MINUTES = 9 * 60
 const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
 const imageShapeOptions: Array<{ value: ImageShape; label: string }> = [
   { value: 'circle', label: '원형' },
@@ -408,6 +436,8 @@ const copyLabels: Record<keyof EventCopy, string> = {
   appLogoFrame: '상단 로고 테두리 효과',
   appLogoFit: '상단 로고 맞춤 방식',
   appLogoSize: '상단 로고 크기',
+  appLogoWidth: '상단 로고 프레임 가로',
+  appLogoHeight: '상단 로고 프레임 세로',
   appLogoZoom: '상단 로고 확대',
   appLogoFocusX: '상단 로고 가로 초점',
   appLogoFocusY: '상단 로고 세로 초점',
@@ -597,6 +627,8 @@ const fallbackCopy: EventCopy = {
   appLogoFrame: 'soft',
   appLogoFit: 'cover',
   appLogoSize: '52',
+  appLogoWidth: '52',
+  appLogoHeight: '52',
   appLogoZoom: '1',
   appLogoFocusX: '50',
   appLogoFocusY: '50',
@@ -974,6 +1006,8 @@ function App() {
           showCheerConstellation={showCheerConstellation}
           onShowCheerConstellationChange={setShowCheerConstellation}
         />
+      ) : mode === 'team' ? (
+        <TeamSelfEditView key={getEditableConfigSignature(state)} state={state} post={post} />
       ) : (
         <VoteView
           state={state}
@@ -999,6 +1033,7 @@ function App() {
 function getAppMode(): AppMode {
   if (window.location.pathname.startsWith('/admin')) return 'admin'
   if (window.location.pathname.startsWith('/wall')) return 'wall'
+  if (window.location.pathname.startsWith('/team')) return 'team'
   return 'vote'
 }
 
@@ -1018,6 +1053,32 @@ function getInitialAdminPanel(): AdminPanel | null {
     panel === 'export'
     ? panel
     : null
+}
+
+function getTeamEditRouteId() {
+  const pathMatch = window.location.pathname.match(/^\/team\/([^/?#]+)/)
+  if (pathMatch?.[1]) return decodeURIComponent(pathMatch[1])
+  return new URLSearchParams(window.location.search).get('team') || ''
+}
+
+function getTeamEditRouteKey() {
+  return new URLSearchParams(window.location.search).get('key') || ''
+}
+
+function getTeamEditPath(teamId: string, teamCode = '') {
+  return `/team/${encodeURIComponent(teamId)}?key=${encodeURIComponent(getTeamEditKey(teamId, teamCode))}`
+}
+
+function getTeamEditKey(teamId: string, teamCode = '') {
+  let hash = 2166136261
+  const value = `${teamId}|${teamCode}|vibe-team-edit`
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+
+  return (hash >>> 0).toString(36)
 }
 
 function Header({
@@ -1161,8 +1222,8 @@ function Header({
           </>
         ) : (
           <div className="audience-status-pill" aria-label="현재 화면">
-            <Radio size={16} />
-            <span>관객 투표 화면</span>
+            {mode === 'team' ? <Settings2 size={16} /> : <Radio size={16} />}
+            <span>{mode === 'team' ? '팀 정보 편집' : '관객 투표 화면'}</span>
           </div>
         )}
         <div className={`timer ${state.closed ? 'closed' : ''}`}>
@@ -1928,6 +1989,9 @@ function AdminView({
   const minScore = getMinScore(state)
   const cheerNameMode = getCheerNameMode(state)
   const themeMode = getThemeMode(state)
+  const [draftTimerMode, setDraftTimerMode] = useState<TimerMode>(timerMode)
+  const [draftDurationMinutes, setDraftDurationMinutes] = useState(String(durationMinutes))
+  const [draftTargetTime, setDraftTargetTime] = useState(() => targetTime || formatKstTime(Date.now() + durationMinutes * 60 * 1000))
   const totalRegistered = state.participants.length
   const totalDynamicVoters = state.participants.filter((person) => sumStars(person.allocations) > 0).length
   const totalDynamicStars = state.participants.reduce((sum, person) => sum + sumStars(person.allocations), 0)
@@ -1954,12 +2018,23 @@ function AdminView({
 
   const applySettings = (form: HTMLFormElement) => {
     const data = new FormData(form)
+    const nextTimerMode = data.get('timerMode') === 'targetTime' ? 'targetTime' : 'duration'
+    const nextDurationMinutes = normalizeDurationInput(data.get('durationMinutes'), durationMinutes)
+    const nextTargetTime = normalizeTimeInput(String(data.get('targetTime') || ''))
+    const derivedTargetTime =
+      nextTimerMode === 'duration'
+        ? formatKstTime(Date.now() + nextDurationMinutes * 60 * 1000)
+        : nextTargetTime || formatKstTime(Date.now() + durationMinutes * 60 * 1000)
+    const derivedDuration =
+      nextTimerMode === 'targetTime'
+        ? minutesUntilKstTime(derivedTargetTime)
+        : nextDurationMinutes
 
     post('/api/settings', {
       starBudget: data.get('starBudget'),
-      durationMinutes: data.get('durationMinutes'),
-      timerMode: data.get('timerMode'),
-      targetTime: data.get('targetTime'),
+      durationMinutes: derivedDuration,
+      timerMode: nextTimerMode,
+      targetTime: derivedTargetTime,
       minScore: data.get('minScore'),
       cheerNameMode: data.get('cheerNameMode'),
       themeMode: data.get('themeMode'),
@@ -2001,7 +2076,7 @@ function AdminView({
           {activePanel === 'arena' ? <ArenaDetailPanel state={state} starBudget={starBudget} /> : null}
           {activePanel === 'participants' ? <ParticipantDetailPanel state={state} post={post} /> : null}
           {activePanel === 'messages' ? <MessageManagerDetail state={state} post={post} /> : null}
-          {activePanel === 'teams' ? <TeamConfigDetail state={state} post={post} /> : null}
+          {activePanel === 'teams' ? <TeamConfigDetail key={getEditableConfigSignature(state)} state={state} post={post} /> : null}
           {activePanel === 'quiz' ? <QuizAdminPanel state={state} post={post} detail /> : null}
           {activePanel === 'export' ? <ResultExportDetailPanel state={state} /> : null}
           {activePanel === 'raffle' ? (
@@ -2094,7 +2169,19 @@ function AdminView({
           </label>
           <label>
             <span>타이머 방식</span>
-            <select name="timerMode" defaultValue={timerMode}>
+            <select
+              name="timerMode"
+              value={draftTimerMode}
+              onChange={(event) => {
+                const nextMode = event.currentTarget.value === 'targetTime' ? 'targetTime' : 'duration'
+                setDraftTimerMode(nextMode)
+                if (nextMode === 'duration') {
+                  setDraftTargetTime(formatKstTime(Date.now() + normalizeDurationInput(draftDurationMinutes, durationMinutes) * 60 * 1000))
+                } else {
+                  setDraftDurationMinutes(String(minutesUntilKstTime(draftTargetTime)))
+                }
+              }}
+            >
               <option value="duration">분 단위</option>
               <option value="targetTime">마감 시각</option>
             </select>
@@ -2106,15 +2193,34 @@ function AdminView({
                 name="durationMinutes"
                 type="number"
                 min={1}
-                max={240}
-                defaultValue={durationMinutes}
+                value={draftDurationMinutes}
+                readOnly={draftTimerMode === 'targetTime'}
+                onChange={(event) => {
+                  const value = event.currentTarget.value
+                  setDraftDurationMinutes(value)
+                  if (draftTimerMode === 'duration') {
+                    setDraftTargetTime(formatKstTime(Date.now() + normalizeDurationInput(value, durationMinutes) * 60 * 1000))
+                  }
+                }}
               />
               <em>분</em>
             </div>
           </label>
           <label>
             <span>마감 시각(KST)</span>
-            <input name="targetTime" type="time" defaultValue={targetTime} />
+            <input
+              name="targetTime"
+              type="time"
+              value={draftTargetTime}
+              readOnly={draftTimerMode === 'duration'}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setDraftTargetTime(value)
+                if (draftTimerMode === 'targetTime') {
+                  setDraftDurationMinutes(String(minutesUntilKstTime(value)))
+                }
+              }}
+            />
           </label>
           <label>
             <span>송출 이름 표시</span>
@@ -2838,7 +2944,7 @@ function PublicCheerBoard({
         <button
           type="button"
           className="selected-team-preview"
-          style={{ '--team-color': selectedTeam.color } as CSSProperties}
+          style={{ '--team-color': selectedTeam.color, ...getTeamPhotoStyle(selectedTeam) } as CSSProperties}
           onClick={onSelectAll}
           aria-label={`${selectedTeam.name} 선택 해제`}
         >
@@ -3587,7 +3693,15 @@ function TeamConfigDetail({
       quizzes: draftQuizzes.map((quiz, index) => quizDraftToConfig(quiz, index)),
     })
 
-    setStatusText(response ? '팀 정보가 저장되고 화면에 반영되었습니다.' : '팀 정보 저장에 실패했습니다.')
+    if (response) {
+      setDraftCopy({ ...fallbackCopy, ...response.copy })
+      setDraftTeams(createTeamDrafts(response.teams))
+      setDraftQuizzes(createQuizDrafts(response.quizBank))
+      setStatusText('팀 정보가 저장되고 화면에 반영되었습니다.')
+      return
+    }
+
+    setStatusText('팀 정보 저장에 실패했습니다.')
   }
 
   const importConfig = async (file: File | undefined) => {
@@ -3661,23 +3775,41 @@ function TeamConfigDetail({
           />
           <ImageTuningControls
             title="상단 로고 표시 방식"
-            description="상단 아이콘의 크기, 모양, 테두리, 이미지 확대와 초점을 조정합니다."
+            description="저장 전에도 아래 미리보기에서 상단 아이콘의 프레임, 맞춤, 확대, 초점을 바로 확인할 수 있습니다."
+            preview={
+              <div className="brand-logo-live-preview">
+                <div className="stage-preview-topbar">
+                  <BrandMark copy={draftCopy} />
+                  <div>
+                    <span>{draftCopy.wallEyeline || draftCopy.audienceEyeline}</span>
+                    <strong>{draftCopy.appTitle}</strong>
+                  </div>
+                </div>
+                <small>
+                  현재 프레임 {getAppLogoFrameLabel(draftCopy)} · {normalizeImageFit(draftCopy.appLogoFit, 'cover') === 'contain' ? '전체보이기' : '채우기'}
+                </small>
+              </div>
+            }
             values={{
               shape: draftCopy.appLogoShape,
               frame: draftCopy.appLogoFrame,
               fit: draftCopy.appLogoFit,
               size: draftCopy.appLogoSize,
+              width: draftCopy.appLogoWidth,
+              height: draftCopy.appLogoHeight,
               zoom: draftCopy.appLogoZoom,
               focusX: draftCopy.appLogoFocusX,
               focusY: draftCopy.appLogoFocusY,
             }}
-            sizeRange={[36, 92]}
+            widthRange={[36, 220]}
+            heightRange={[32, 120]}
             onChange={(field, value) => {
               const keyByField: Record<ImageTuningField, keyof EventCopy> = {
                 shape: 'appLogoShape',
                 frame: 'appLogoFrame',
                 fit: 'appLogoFit',
-                size: 'appLogoSize',
+                width: 'appLogoWidth',
+                height: 'appLogoHeight',
                 zoom: 'appLogoZoom',
                 focusX: 'appLogoFocusX',
                 focusY: 'appLogoFocusY',
@@ -3745,6 +3877,15 @@ function TeamConfigDetail({
                 <strong>{team.name || `Team ${index + 1}`}</strong>
                 <span>{team.title || '프로젝트명 미정'}</span>
               </div>
+              <a
+                className="team-self-link"
+                href={getTeamEditPath(team.id || `team-${index + 1}`, team.code)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Link2 size={14} />
+                팀 편집 링크
+              </a>
             </div>
 
             <div className="team-editor-grid">
@@ -3878,6 +4019,155 @@ function TeamConfigDetail({
   )
 }
 
+function TeamSelfEditView({
+  state,
+  post,
+}: {
+  state: EventState
+  post: (path: string, body: unknown) => Promise<EventState | null>
+}) {
+  const routeTeamId = getTeamEditRouteId()
+  const routeTeamKey = getTeamEditRouteKey()
+  const teamIndex = state.teams.findIndex((team) => team.id === routeTeamId || team.code.toLowerCase() === routeTeamId.toLowerCase())
+  const matchedTeam = teamIndex >= 0 ? state.teams[teamIndex] : null
+  const team = matchedTeam && routeTeamKey === getTeamEditKey(matchedTeam.id, matchedTeam.code) ? matchedTeam : null
+  const [draftTeam, setDraftTeam] = useState<TeamConfigDraft | null>(() => (team ? createTeamDraft(team, getConfigOrder(team)) : null))
+  const [statusText, setStatusText] = useState('')
+
+  const updateDraft = (field: string, value: string) => {
+    setDraftTeam((current) => (current ? { ...current, [field]: value } : current))
+  }
+
+  const updateLogo = (value: string) => {
+    updateDraft('logoFile', normalizeLogoSourceValue(value))
+  }
+
+  const uploadLogo = async (file: File | undefined) => {
+    if (!file) return
+
+    try {
+      const dataUrl = await readLogoFileAsDataUrl(file)
+      updateDraft('logoFile', dataUrl)
+      setStatusText('이미지 파일을 불러왔습니다. 저장하면 즉시 반영됩니다.')
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : '이미지 파일을 불러오지 못했습니다.')
+    }
+  }
+
+  const saveTeam = async () => {
+    if (!team || !draftTeam) return
+
+    const response = await post('/api/team-self-config', {
+      teamId: team.id,
+      teamKey: getTeamEditKey(team.id, team.code),
+      team: teamDraftToSelfConfig(draftTeam),
+    })
+
+    const updatedTeam = response?.teams.find((item) => item.id === team.id)
+    if (response && updatedTeam) {
+      setDraftTeam(createTeamDraft(updatedTeam, getConfigOrder(updatedTeam)))
+      setStatusText('팀 정보가 저장되고 관객 화면과 송출 화면에 바로 반영되었습니다.')
+      return
+    }
+
+    setStatusText('팀 정보 저장에 실패했습니다. 잠시 뒤 다시 시도해주세요.')
+  }
+
+  if (!team || !draftTeam) {
+    return (
+      <section className="team-self-edit-view">
+        <div className="team-self-card missing">
+          <p className="section-kicker">Team Setup</p>
+          <h2>팀 편집 링크를 확인해주세요.</h2>
+          <p>주소의 팀 ID 또는 편집 키가 일치하지 않습니다. 운영자에게 받은 팀별 링크로 다시 접속해주세요.</p>
+          <a className="role-nav-link" href="/vote">
+            <Radio size={15} />
+            관객 화면으로 이동
+          </a>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="team-self-edit-view">
+      <div className="team-self-card">
+        <div className="team-self-heading">
+          <div>
+            <p className="section-kicker">Team Setup</p>
+            <h2>{draftTeam.name || team.name} 표시 정보 편집</h2>
+            <p>이 링크에서는 이 팀의 이름, 프로젝트 문구, 팀원, 사진과 표시 방식만 수정할 수 있습니다. 코드는 운영자만 바꿀 수 있습니다.</p>
+          </div>
+          <button type="button" className="primary-action" onClick={saveTeam}>
+            <Save size={16} />
+            저장 및 바로 반영
+          </button>
+        </div>
+
+        {statusText ? <p className="config-status">{statusText}</p> : null}
+
+        <div className="team-self-preview-grid">
+          <div className="team-logo-live-preview">
+            <div className="team-logo-row-preview">
+              <LogoMark team={teamEditorPreview(draftTeam)} />
+              <div>
+                <strong>{draftTeam.name || team.name}</strong>
+                <span>{draftTeam.title || '프로젝트명 미정'}</span>
+              </div>
+            </div>
+          <TeamPhotoPreview team={teamEditorPreview(draftTeam)} />
+          </div>
+          <div className="team-self-link-panel">
+            <span>현재 팀 링크</span>
+            <strong>{window.location.href}</strong>
+          </div>
+        </div>
+
+        <div className="team-editor-grid team-self-grid">
+          <label>
+            <span>팀 ID</span>
+            <input value={team.id} readOnly />
+          </label>
+          <label>
+            <span>코드</span>
+            <input value={team.code} readOnly />
+          </label>
+          <label>
+            <span>팀명</span>
+            <input value={draftTeam.name} onChange={(event) => updateDraft('name', event.target.value)} />
+          </label>
+          <label className="wide">
+            <span>프로젝트명 / 표시 문구</span>
+            <input value={draftTeam.title} onChange={(event) => updateDraft('title', event.target.value)} />
+          </label>
+          <label className="wide">
+            <span>팀원</span>
+            <textarea value={draftTeam.membersText} onChange={(event) => updateDraft('membersText', event.target.value)} />
+          </label>
+          <LogoSourceField
+            team={draftTeam}
+            index={teamIndex}
+            onChange={updateLogo}
+            onRawChange={(value) => updateDraft('logoFile', value)}
+            onUpload={uploadLogo}
+            onClear={() => updateDraft('logoFile', '')}
+            onTuningChange={updateDraft}
+          />
+          <ColorField value={draftTeam.color} onChange={(value) => updateDraft('color', value)} />
+          <label>
+            <span>사진이 없을 때 기본 로고</span>
+            <select value={draftTeam.logo} onChange={(event) => updateDraft('logo', event.target.value)}>
+              {logoKinds.map((logo) => (
+                <option key={logo} value={logo}>{logo}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function LogoSourceField({
   team,
   index,
@@ -3935,31 +4225,44 @@ function LogoSourceField({
         ) : null}
       </div>
       <div className="logo-source-preview">
-        <TeamPhotoPreview team={preview} />
+        <div className="team-logo-live-preview">
+          <div className="team-logo-row-preview">
+            <LogoMark team={preview} />
+            <div>
+              <strong>{preview.name || `Team ${index + 1}`}</strong>
+              <span>{team.title || '프로젝트명 미정'}</span>
+            </div>
+          </div>
+          <TeamPhotoPreview team={preview} />
+        </div>
         <p>
-          Google Drive 링크는 공개 공유된 파일 링크를 붙여넣으면 표시용 이미지 주소로 자동 정리됩니다. 발표장에서는 팀을 클릭했을 때 이
-          이미지가 크게 보입니다.
+          Google Drive 링크는 공개 공유된 파일 링크를 붙여넣으면 표시용 이미지 주소로 자동 정리됩니다. 아래 조절값은 저장 전에도
+          이 미리보기에서 바로 반영됩니다. 현재 프레임은 {getTeamLogoFrameLabel(preview)}입니다.
         </p>
       </div>
       <ImageTuningControls
         title="로고/팀 사진 표시 방식"
-        description="팀 카드와 발표장 팀 사진의 모양, 테두리, 확대, 초점 위치를 조정합니다."
+        description="실시간 별 현황과 투표 화면에 보이는 작은 로고 프레임의 가로·세로, 확대, 초점 위치를 조정합니다."
         values={{
           shape: team.logoShape,
           frame: team.logoFrame,
           fit: team.logoFit,
           size: team.logoSize,
+          width: team.logoWidth,
+          height: team.logoHeight,
           zoom: team.logoZoom,
           focusX: team.logoFocusX,
           focusY: team.logoFocusY,
         }}
-        sizeRange={[36, 88]}
+        widthRange={[36, 180]}
+        heightRange={[32, 132]}
         onChange={(field, value) => {
           const keyByField: Record<ImageTuningField, string> = {
             shape: 'logoShape',
             frame: 'logoFrame',
             fit: 'logoFit',
-            size: 'logoSize',
+            width: 'logoWidth',
+            height: 'logoHeight',
             zoom: 'logoZoom',
             focusX: 'logoFocusX',
             focusY: 'logoFocusY',
@@ -3967,6 +4270,92 @@ function LogoSourceField({
           onTuningChange(keyByField[field], value)
         }}
       />
+      <TeamPhotoTuningControls
+        values={{
+          photoFit: team.photoFit,
+          photoHeight: team.photoHeight,
+          photoZoom: team.photoZoom,
+          photoFocusX: team.photoFocusX,
+          photoFocusY: team.photoFocusY,
+        }}
+        onChange={(field, value) => onTuningChange(field, value)}
+      />
+    </div>
+  )
+}
+
+function TeamPhotoTuningControls({
+  values,
+  onChange,
+}: {
+  values: Pick<TeamConfigDraft, 'photoFit' | 'photoHeight' | 'photoZoom' | 'photoFocusX' | 'photoFocusY'>
+  onChange: (field: string, value: string) => void
+}) {
+  const height = getImageDimensionValue(values.photoHeight, 260, 150, 460)
+  const zoom = String(getZoomValue(values.photoZoom, 1))
+  const focusX = String(getPercentValue(values.photoFocusX, 50))
+  const focusY = String(getPercentValue(values.photoFocusY, 50))
+
+  return (
+    <div className="photo-tuning-controls">
+      <div className="image-tuning-head">
+        <strong>와이드 팀 사진 표시 방식</strong>
+        <span>응원 메시지 하단 팀 정보 카드처럼 넓게 보이는 사진의 높이, 맞춤, 확대, 초점을 따로 조정합니다.</span>
+      </div>
+      <div className="image-tuning-grid">
+        <label>
+          <span>맞춤</span>
+          <select value={normalizeImageFit(values.photoFit, 'cover')} onChange={(event) => onChange('photoFit', event.target.value)}>
+            <option value="cover">채우기</option>
+            <option value="contain">전체보이기</option>
+          </select>
+        </label>
+        <label className="range-field">
+          <span>사진 높이</span>
+          <input
+            type="range"
+            min={150}
+            max={460}
+            value={height}
+            onChange={(event) => onChange('photoHeight', event.target.value)}
+          />
+          <em>{height}px</em>
+        </label>
+        <label className="range-field">
+          <span>확대</span>
+          <input
+            type="range"
+            min={1}
+            max={2.4}
+            step={0.05}
+            value={zoom}
+            onChange={(event) => onChange('photoZoom', event.target.value)}
+          />
+          <em>{formatRangeValue(zoom)}x</em>
+        </label>
+        <label className="range-field">
+          <span>가로 초점</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={focusX}
+            onChange={(event) => onChange('photoFocusX', event.target.value)}
+          />
+          <em>{focusX}%</em>
+        </label>
+        <label className="range-field">
+          <span>세로 초점</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={focusY}
+            onChange={(event) => onChange('photoFocusY', event.target.value)}
+          />
+          <em>{focusY}%</em>
+        </label>
+      </div>
     </div>
   )
 }
@@ -4044,21 +4433,29 @@ function ImageSourceField({
 function ImageTuningControls({
   title,
   description,
+  preview,
   values,
-  sizeRange,
+  widthRange,
+  heightRange,
   onChange,
 }: {
   title: string
   description: string
-  values: Record<ImageTuningField, string>
-  sizeRange: [number, number]
+  preview?: ReactNode
+  values: ImageTuningValues
+  widthRange: [number, number]
+  heightRange: [number, number]
   onChange: (field: ImageTuningField, value: string) => void
 }) {
+  const shape = normalizeImageShape(values.shape, 'rounded')
+  const fallbackSize = getImageSizeValue(values.size, widthRange[0] === 36 ? 52 : 48, 32, 180)
+  const fallbackFrame = getDefaultImageFrameDimensions(shape, fallbackSize)
   const normalized = {
-    shape: normalizeImageShape(values.shape, 'rounded'),
+    shape,
     frame: normalizeImageFrame(values.frame, 'line'),
     fit: normalizeImageFit(values.fit, 'cover'),
-    size: String(getImageSizeValue(values.size, sizeRange[0] === 36 ? 52 : 48, sizeRange[0], sizeRange[1])),
+    width: String(getImageDimensionValue(values.width, fallbackFrame.width, widthRange[0], widthRange[1])),
+    height: String(getImageDimensionValue(values.height, fallbackFrame.height, heightRange[0], heightRange[1])),
     zoom: String(getZoomValue(values.zoom, 1)),
     focusX: String(getPercentValue(values.focusX, 50)),
     focusY: String(getPercentValue(values.focusY, 50)),
@@ -4070,6 +4467,7 @@ function ImageTuningControls({
         <span>{title}</span>
         <small>{description}</small>
       </div>
+      {preview ? <div className="image-tuning-preview">{preview}</div> : null}
       <div className="image-tuning-grid">
         <label>
           <span>모양</span>
@@ -4096,13 +4494,22 @@ function ImageTuningControls({
           </select>
         </label>
         <RangeField
-          label="크기"
-          value={normalized.size}
-          min={sizeRange[0]}
-          max={sizeRange[1]}
+          label="프레임 가로"
+          value={normalized.width}
+          min={widthRange[0]}
+          max={widthRange[1]}
           step={1}
           suffix="px"
-          onChange={(value) => onChange('size', value)}
+          onChange={(value) => onChange('width', value)}
+        />
+        <RangeField
+          label="프레임 세로"
+          value={normalized.height}
+          min={heightRange[0]}
+          max={heightRange[1]}
+          step={1}
+          suffix="px"
+          onChange={(value) => onChange('height', value)}
         />
         <RangeField
           label="확대"
@@ -5182,14 +5589,14 @@ function LogoMark({ team }: { team: TeamVisual }) {
 }
 
 function TeamPhotoPreview({ team }: { team: TeamVisual }) {
-  const fit = normalizeImageFit(team.logoFit, 'cover')
-  const focusX = getPercentValue(team.logoFocusX, 50)
-  const focusY = getPercentValue(team.logoFocusY, 50)
+  const fit = normalizeImageFit(team.photoFit, normalizeImageFit(team.logoFit, 'cover'))
+  const focusX = getPercentValue(team.photoFocusX, getPercentValue(team.logoFocusX, 50))
+  const focusY = getPercentValue(team.photoFocusY, getPercentValue(team.logoFocusY, 50))
 
   return (
     <div
       className={`team-photo-preview shape-${normalizeImageShape(team.logoShape, 'rounded')} frame-${normalizeImageFrame(team.logoFrame, 'line')} ${team.logoFile ? 'has-photo' : ''}`}
-      style={getTeamImageStyle(team)}
+      style={getTeamPhotoStyle(team)}
       aria-label={`${team.name} 로고 또는 팀 사진`}
     >
       {team.logoFile ? (
@@ -5199,7 +5606,7 @@ function TeamPhotoPreview({ team }: { team: TeamVisual }) {
           style={{
             objectFit: fit,
             objectPosition: `${focusX}% ${focusY}%`,
-            transform: `scale(${getZoomValue(team.logoZoom, 1)})`,
+            transform: `scale(${getZoomValue(team.photoZoom, getZoomValue(team.logoZoom, 1))})`,
             transformOrigin: `${focusX}% ${focusY}%`,
           }}
         />
@@ -5366,9 +5773,16 @@ type TeamConfigDraft = {
   logoFrame: string
   logoFit: string
   logoSize: string
+  logoWidth: string
+  logoHeight: string
   logoZoom: string
   logoFocusX: string
   logoFocusY: string
+  photoFit: string
+  photoHeight: string
+  photoZoom: string
+  photoFocusX: string
+  photoFocusY: string
   sortOrder: number
 }
 
@@ -5531,26 +5945,37 @@ function createBlankQuizDraft(index: number): QuizConfigDraft {
 function createTeamDrafts(teams: Team[]): TeamConfigDraft[] {
   return [...teams]
     .sort((a, b) => getConfigOrder(a) - getConfigOrder(b))
-    .map((team, index) => ({
-      id: team.id,
-      code: team.code,
-      name: team.name,
-      title: team.title,
-      membersText: team.members.join('\n'),
-      logoFile: team.logoFile || '',
-      color: team.color,
-      logo: team.logo,
-      baseStars: String(team.baseStars ?? 0),
-      baseVoters: String(team.baseVoters ?? 0),
-      logoShape: team.logoShape || 'rounded',
-      logoFrame: team.logoFrame || 'line',
-      logoFit: team.logoFit || 'cover',
-      logoSize: String(team.logoSize ?? 48),
-      logoZoom: String(team.logoZoom ?? 1),
-      logoFocusX: String(team.logoFocusX ?? 50),
-      logoFocusY: String(team.logoFocusY ?? 50),
-      sortOrder: team.sortOrder ?? index,
-    }))
+    .map((team, index) => createTeamDraft(team, team.sortOrder ?? index))
+}
+
+function createTeamDraft(team: Team, sortOrder = 0): TeamConfigDraft {
+  return {
+    id: team.id,
+    code: team.code,
+    name: team.name,
+    title: team.title,
+    membersText: team.members.join('\n'),
+    logoFile: team.logoFile || '',
+    color: team.color,
+    logo: team.logo,
+    baseStars: String(team.baseStars ?? 0),
+    baseVoters: String(team.baseVoters ?? 0),
+    logoShape: team.logoShape || 'rounded',
+    logoFrame: team.logoFrame || 'line',
+    logoFit: team.logoFit || 'cover',
+    logoSize: String(team.logoSize ?? 48),
+    logoWidth: String(team.logoWidth ?? ''),
+    logoHeight: String(team.logoHeight ?? ''),
+    logoZoom: String(team.logoZoom ?? 1),
+    logoFocusX: String(team.logoFocusX ?? 50),
+    logoFocusY: String(team.logoFocusY ?? 50),
+    photoFit: team.photoFit || 'cover',
+    photoHeight: String(team.photoHeight ?? 260),
+    photoZoom: String(team.photoZoom ?? 1),
+    photoFocusX: String(team.photoFocusX ?? 50),
+    photoFocusY: String(team.photoFocusY ?? 50),
+    sortOrder,
+  }
 }
 
 function getConfigOrder(team: Team) {
@@ -5573,14 +5998,47 @@ function teamDraftToConfig(team: TeamConfigDraft, index: number) {
     logoFrame: normalizeImageFrame(team.logoFrame, 'line'),
     logoFit: normalizeImageFit(team.logoFit, 'cover'),
     logoSize: getImageSizeValue(team.logoSize, 48, 36, 88),
+    logoWidth: getImageDimensionValue(team.logoWidth, getDefaultImageFrameDimensions(normalizeImageShape(team.logoShape, 'rounded'), getImageSizeValue(team.logoSize, 48, 36, 88)).width, 36, 180),
+    logoHeight: getImageDimensionValue(team.logoHeight, getDefaultImageFrameDimensions(normalizeImageShape(team.logoShape, 'rounded'), getImageSizeValue(team.logoSize, 48, 36, 88)).height, 32, 132),
     logoZoom: getZoomValue(team.logoZoom, 1),
     logoFocusX: getPercentValue(team.logoFocusX, 50),
     logoFocusY: getPercentValue(team.logoFocusY, 50),
+    photoFit: normalizeImageFit(team.photoFit, 'cover'),
+    photoHeight: getImageDimensionValue(team.photoHeight, 260, 150, 460),
+    photoZoom: getZoomValue(team.photoZoom, 1),
+    photoFocusX: getPercentValue(team.photoFocusX, 50),
+    photoFocusY: getPercentValue(team.photoFocusY, 50),
     color: team.color,
     logo: logoKinds.includes(team.logo as LogoKind) ? team.logo : 'orbit',
     baseStars: Math.max(0, Math.floor(Number(team.baseStars) || 0)),
     baseVoters: Math.max(0, Math.floor(Number(team.baseVoters) || 0)),
     sortOrder: index,
+  }
+}
+
+function teamDraftToSelfConfig(team: TeamConfigDraft) {
+  const config = teamDraftToConfig(team, team.sortOrder)
+  return {
+    name: config.name,
+    title: config.title,
+    members: config.members,
+    logoFile: config.logoFile,
+    logoShape: config.logoShape,
+    logoFrame: config.logoFrame,
+    logoFit: config.logoFit,
+    logoSize: config.logoSize,
+    logoWidth: config.logoWidth,
+    logoHeight: config.logoHeight,
+    logoZoom: config.logoZoom,
+    logoFocusX: config.logoFocusX,
+    logoFocusY: config.logoFocusY,
+    photoFit: config.photoFit,
+    photoHeight: config.photoHeight,
+    photoZoom: config.photoZoom,
+    photoFocusX: config.photoFocusX,
+    photoFocusY: config.photoFocusY,
+    color: config.color,
+    logo: config.logo,
   }
 }
 
@@ -5611,9 +6069,16 @@ function teamEditorPreview(team: TeamConfigDraft): TeamVisual {
     logoFrame: normalizeImageFrame(team.logoFrame, 'line'),
     logoFit: normalizeImageFit(team.logoFit, 'cover'),
     logoSize: getImageSizeValue(team.logoSize, 48, 36, 88),
+    logoWidth: getImageDimensionValue(team.logoWidth, getDefaultImageFrameDimensions(normalizeImageShape(team.logoShape, 'rounded'), getImageSizeValue(team.logoSize, 48, 36, 88)).width, 36, 180),
+    logoHeight: getImageDimensionValue(team.logoHeight, getDefaultImageFrameDimensions(normalizeImageShape(team.logoShape, 'rounded'), getImageSizeValue(team.logoSize, 48, 36, 88)).height, 32, 132),
     logoZoom: getZoomValue(team.logoZoom, 1),
     logoFocusX: getPercentValue(team.logoFocusX, 50),
     logoFocusY: getPercentValue(team.logoFocusY, 50),
+    photoFit: normalizeImageFit(team.photoFit, 'cover'),
+    photoHeight: getImageDimensionValue(team.photoHeight, 260, 150, 460),
+    photoZoom: getZoomValue(team.photoZoom, 1),
+    photoFocusX: getPercentValue(team.photoFocusX, 50),
+    photoFocusY: getPercentValue(team.photoFocusY, 50),
   }
 }
 
@@ -6058,7 +6523,41 @@ function getStarBudget(state: EventState) {
 }
 
 function getDurationMinutes(state: EventState) {
-  return clamp(Math.floor(state.settings.durationMinutes || DEFAULT_DURATION_MINUTES), 1, 240)
+  return normalizeDurationInput(state.settings.durationMinutes, DEFAULT_DURATION_MINUTES)
+}
+
+function normalizeDurationInput(value: unknown, fallback = DEFAULT_DURATION_MINUTES) {
+  const number = Math.floor(Number(value))
+  if (!Number.isFinite(number) || number < 1) return fallback
+  return number
+}
+
+function normalizeTimeInput(value: string) {
+  return /^\d{2}:\d{2}$/.test(value) ? value : ''
+}
+
+function formatKstTime(timestamp: number) {
+  const date = new Date(timestamp + KST_OFFSET_MINUTES * 60 * 1000)
+  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`
+}
+
+function minutesUntilKstTime(value: string, now = Date.now()) {
+  const target = getNextKstTimestampForTime(value, now)
+  if (!target) return DEFAULT_DURATION_MINUTES
+  return Math.max(1, Math.ceil((target - now) / 60_000))
+}
+
+function getNextKstTimestampForTime(value: string, now = Date.now()) {
+  if (!normalizeTimeInput(value)) return 0
+
+  const [hour, minute] = value.split(':').map(Number)
+  const kstNow = new Date(now + KST_OFFSET_MINUTES * 60 * 1000)
+  let target =
+    Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate(), hour, minute) -
+    KST_OFFSET_MINUTES * 60 * 1000
+
+  if (target <= now) target += 24 * 60 * 60 * 1000
+  return target
 }
 
 function getTimerMode(state: EventState): TimerMode {
@@ -6093,6 +6592,11 @@ function getImageSizeValue(value: unknown, fallback: number, min = 32, max = 96)
   return clamp(Math.round(Number(value) || fallback), min, max)
 }
 
+function getImageDimensionValue(value: unknown, fallback: number, min = 32, max = 220) {
+  const number = Number(value)
+  return clamp(Math.round(Number.isFinite(number) && number > 0 ? number : fallback), min, max)
+}
+
 function getZoomValue(value: unknown, fallback = 1) {
   return clamp(Number(value) || fallback, 1, 2.4)
 }
@@ -6107,24 +6611,33 @@ function formatRangeValue(value: string) {
   return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
 }
 
-function getImageShapeMetrics(shape: ImageShape, size: number) {
+function getDefaultImageFrameDimensions(shape: ImageShape, size: number) {
   if (shape === 'wide') {
     return {
       width: Math.round(size * 1.56),
       height: size,
-      radius: Math.round(size * 0.22),
     }
   }
 
-  if (shape === 'circle') return { width: size, height: size, radius: 999 }
-  if (shape === 'square') return { width: size, height: size, radius: Math.max(3, Math.round(size * 0.08)) }
-  return { width: size, height: size, radius: Math.max(8, Math.round(size * 0.18)) }
+  return { width: size, height: size }
+}
+
+function getImageFrameMetrics(shape: ImageShape, width: number, height: number) {
+  const shortestSide = Math.min(width, height)
+
+  if (shape === 'circle') return { width, height, radius: 999 }
+  if (shape === 'square') return { width, height, radius: Math.max(3, Math.round(shortestSide * 0.08)) }
+  if (shape === 'wide') return { width, height, radius: Math.max(8, Math.round(shortestSide * 0.22)) }
+  return { width, height, radius: Math.max(8, Math.round(shortestSide * 0.18)) }
 }
 
 function getAppLogoStyle(copy: EventCopy) {
   const shape = normalizeImageShape(copy.appLogoShape, 'circle')
   const size = getImageSizeValue(copy.appLogoSize, 52, 36, 92)
-  const metrics = getImageShapeMetrics(shape, size)
+  const fallbackFrame = getDefaultImageFrameDimensions(shape, size)
+  const width = getImageDimensionValue(copy.appLogoWidth, fallbackFrame.width, 36, 220)
+  const height = getImageDimensionValue(copy.appLogoHeight, fallbackFrame.height, 32, 120)
+  const metrics = getImageFrameMetrics(shape, width, height)
 
   return {
     '--app-logo-width': `${metrics.width}px`,
@@ -6136,7 +6649,10 @@ function getAppLogoStyle(copy: EventCopy) {
 function getTeamImageStyle(team: TeamVisual) {
   const shape = normalizeImageShape(team.logoShape, 'rounded')
   const size = getImageSizeValue(team.logoSize, 48, 36, 88)
-  const metrics = getImageShapeMetrics(shape, size)
+  const fallbackFrame = getDefaultImageFrameDimensions(shape, size)
+  const width = getImageDimensionValue(team.logoWidth, fallbackFrame.width, 36, 180)
+  const height = getImageDimensionValue(team.logoHeight, fallbackFrame.height, 32, 132)
+  const metrics = getImageFrameMetrics(shape, width, height)
 
   return {
     '--team-color': team.color,
@@ -6150,8 +6666,68 @@ function getTeamImageStyle(team: TeamVisual) {
   } as CSSProperties
 }
 
+function getTeamPhotoStyle(team: TeamVisual) {
+  const shape = normalizeImageShape(team.logoShape, 'rounded')
+  const height = getImageDimensionValue(team.photoHeight, 260, 150, 460)
+  const metrics = getImageFrameMetrics(shape, Math.round(height * 1.6), height)
+
+  return {
+    '--team-color': team.color,
+    '--team-photo-height': `${height}px`,
+    '--team-photo-radius': `${metrics.radius}px`,
+    '--team-image-fit': normalizeImageFit(team.photoFit, normalizeImageFit(team.logoFit, 'cover')),
+    '--team-image-focus-x': `${getPercentValue(team.photoFocusX, getPercentValue(team.logoFocusX, 50))}%`,
+    '--team-image-focus-y': `${getPercentValue(team.photoFocusY, getPercentValue(team.logoFocusY, 50))}%`,
+    '--team-image-zoom': getZoomValue(team.photoZoom, getZoomValue(team.logoZoom, 1)),
+  } as CSSProperties
+}
+
+function getAppLogoFrameLabel(copy: EventCopy) {
+  const style = getAppLogoStyle(copy) as Record<string, string>
+  return `${style['--app-logo-width'] || '52px'} × ${style['--app-logo-height'] || '52px'}`
+}
+
+function getTeamLogoFrameLabel(team: TeamVisual) {
+  const style = getTeamImageStyle(team) as Record<string, string>
+  return `${style['--team-logo-width'] || '48px'} × ${style['--team-logo-height'] || '48px'}`
+}
+
 function getThemeMode(state: EventState): ThemeMode {
   return state.settings.themeMode === 'stage' ? 'stage' : 'light'
+}
+
+function getEditableConfigSignature(state: EventState) {
+  return JSON.stringify({
+    copy: state.copy,
+    teams: state.teams.map((team) => ({
+      id: team.id,
+      code: team.code,
+      name: team.name,
+      title: team.title,
+      members: team.members,
+      logoFile: team.logoFile,
+      logoShape: team.logoShape,
+      logoFrame: team.logoFrame,
+      logoFit: team.logoFit,
+      logoSize: team.logoSize,
+      logoWidth: team.logoWidth,
+      logoHeight: team.logoHeight,
+      logoZoom: team.logoZoom,
+      logoFocusX: team.logoFocusX,
+      logoFocusY: team.logoFocusY,
+      photoFit: team.photoFit,
+      photoHeight: team.photoHeight,
+      photoZoom: team.photoZoom,
+      photoFocusX: team.photoFocusX,
+      photoFocusY: team.photoFocusY,
+      color: team.color,
+      logo: team.logo,
+      baseStars: team.baseStars,
+      baseVoters: team.baseVoters,
+      sortOrder: team.sortOrder,
+    })),
+    quizzes: state.quizBank,
+  })
 }
 
 function formatCheerAuthor(name: string, mode: CheerNameMode) {
