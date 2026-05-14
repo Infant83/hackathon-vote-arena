@@ -17,6 +17,9 @@ const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
 const quizIntroMs = 2400
 const quizCountdownMs = 3600
+const imageShapes = new Set(['circle', 'rounded', 'square', 'wide'])
+const imageFrames = new Set(['soft', 'line', 'glow', 'clean'])
+const imageFits = new Set(['cover', 'contain'])
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const teamsConfigPath = path.join(__dirname, 'teams.json')
@@ -24,6 +27,13 @@ const teamLogoDir = path.join(__dirname, 'public', 'team-logos')
 const defaultCopy = {
   appTitle: 'Vibe Vote Arena',
   appLogoFile: '',
+  appLogoShape: 'circle',
+  appLogoFrame: 'soft',
+  appLogoFit: 'cover',
+  appLogoSize: '52',
+  appLogoZoom: '1',
+  appLogoFocusX: '50',
+  appLogoFocusY: '50',
   audienceEyeline: 'Audience Vote',
   adminEyeline: 'Admin Arena Wall',
   audienceHeroTitle: '별 {starBudget}개를 원하는 팀에 나눠 담으세요.',
@@ -329,12 +339,36 @@ function normalizeTeam(team, fallback = defaultTeams[0], index = 0) {
     title: sanitizeText(team?.title, 64) || fallback.title || '프로젝트명 미정',
     members,
     logoFile: sanitizeLogoPath(team?.logoFile || fallback.logoFile || ''),
+    logoShape: sanitizeImageShape(team?.logoShape, fallback.logoShape || 'rounded'),
+    logoFrame: sanitizeImageFrame(team?.logoFrame, fallback.logoFrame || 'line'),
+    logoFit: sanitizeImageFit(team?.logoFit, fallback.logoFit || 'cover'),
+    logoSize: clampNumber(team?.logoSize ?? fallback.logoSize ?? 48, 36, 88, 48),
+    logoZoom: clampNumber(team?.logoZoom ?? fallback.logoZoom ?? 1, 1, 2.4, 1),
+    logoFocusX: clampNumber(team?.logoFocusX ?? fallback.logoFocusX ?? 50, 0, 100, 50),
+    logoFocusY: clampNumber(team?.logoFocusY ?? fallback.logoFocusY ?? 50, 0, 100, 50),
     baseStars: Math.max(0, Math.floor(Number(team?.baseStars ?? fallback.baseStars ?? 0))),
     baseVoters: Math.max(0, Math.floor(Number(team?.baseVoters ?? fallback.baseVoters ?? 0))),
     color: sanitizeColor(team?.color) || fallback.color || '#A50034',
     logo,
     sortOrder: Math.max(0, Math.floor(Number(team?.sortOrder ?? index))),
   }
+}
+
+function clampNumber(value, min, max, fallback = min) {
+  const number = Number(value)
+  return Math.min(max, Math.max(min, Number.isFinite(number) ? number : fallback))
+}
+
+function sanitizeImageShape(value, fallback = 'rounded') {
+  return imageShapes.has(value) ? value : fallback
+}
+
+function sanitizeImageFrame(value, fallback = 'line') {
+  return imageFrames.has(value) ? value : fallback
+}
+
+function sanitizeImageFit(value, fallback = 'cover') {
+  return imageFits.has(value) ? value : fallback
 }
 
 function normalizeQuizBank(input, fallback = defaultQuizBank) {
@@ -537,6 +571,13 @@ async function persistTeamConfig() {
         title: team.title,
         members: team.members,
         logoFile: team.logoFile,
+        logoShape: team.logoShape,
+        logoFrame: team.logoFrame,
+        logoFit: team.logoFit,
+        logoSize: team.logoSize,
+        logoZoom: team.logoZoom,
+        logoFocusX: team.logoFocusX,
+        logoFocusY: team.logoFocusY,
         color: team.color,
         logo: team.logo,
         baseStars: team.baseStars,
@@ -677,6 +718,52 @@ function upsertParticipant(deviceId, name, group, department = '') {
   person.updatedAt = Date.now()
   participants.set(id, person)
   return person
+}
+
+function cleanupParticipantReferences(participantId) {
+  const id = sanitizeIdentifier(participantId, 128)
+  if (!id) return
+
+  for (let index = cheers.length - 1; index >= 0; index -= 1) {
+    if (cheers[index].participantId === id) cheers.splice(index, 1)
+  }
+
+  for (let index = voteEvents.length - 1; index >= 0; index -= 1) {
+    if (voteEvents[index].participantId === id) voteEvents.splice(index, 1)
+  }
+
+  if (quiz.answers.some((answer) => answer.participantId === id) || quiz.winners.some((answer) => answer.participantId === id)) {
+    quiz = {
+      ...quiz,
+      answers: quiz.answers.filter((answer) => answer.participantId !== id),
+      winners: quiz.winners.filter((answer) => answer.participantId !== id),
+      updatedAt: Date.now(),
+    }
+  }
+
+  lastRaffle = null
+}
+
+function resetParticipant(participantId) {
+  const id = sanitizeIdentifier(participantId, 128)
+  const person = participants.get(id)
+  if (!person) return false
+
+  person.allocations = {}
+  person.cheered = false
+  person.cheerSubmitted = false
+  person.updatedAt = Date.now()
+  cleanupParticipantReferences(id)
+  return true
+}
+
+function deleteParticipant(participantId) {
+  const id = sanitizeIdentifier(participantId, 128)
+  if (!participants.has(id)) return false
+
+  participants.delete(id)
+  cleanupParticipantReferences(id)
+  return true
 }
 
 function getRaffleCandidates(rule) {
@@ -1095,35 +1182,35 @@ function seedTestData() {
     {
       id: 'test-minjun',
       name: '민준',
-      group: '테스트',
+      group: 'test',
       allocations: { 'team-aurora': Math.min(settings.starBudget, 5) },
       messages: ['검색 데모가 바로 써볼 수 있어 보여요', '발표 때 반응 좋을 것 같아요'],
     },
     {
       id: 'test-seoyeon',
       name: '서연',
-      group: '테스트',
+      group: 'test',
       allocations: { 'team-prism': Math.min(settings.starBudget, 4) },
       messages: ['현장 적용성이 좋아요'],
     },
     {
       id: 'test-yuna',
       name: '유나',
-      group: '테스트',
+      group: 'test',
       allocations: { 'team-vector': Math.min(settings.starBudget, 5) },
       messages: ['리뷰 요약이 선명해요'],
     },
     {
       id: 'test-hana',
       name: '하나',
-      group: '테스트',
+      group: 'test',
       allocations: { 'team-lattice': Math.min(settings.starBudget, 3) },
       messages: ['장애 원인 추적 기대됩니다'],
     },
     {
       id: 'test-doyeon',
       name: '도연',
-      group: '테스트',
+      group: 'test',
       allocations: { 'team-pulse': Math.min(settings.starBudget, 2) },
       messages: ['VOC 엔진 좋습니다'],
     },
@@ -1428,6 +1515,28 @@ async function handleApi(request, response, url) {
 
     broadcast()
     sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    return
+  }
+
+  if (url.pathname === '/api/participant/reset') {
+    if (!resetParticipant(body.participantId)) {
+      sendJson(response, 404, { error: 'participant not found' })
+      return
+    }
+
+    broadcast()
+    sendJson(response, 200, getState())
+    return
+  }
+
+  if (url.pathname === '/api/participant/delete') {
+    if (!deleteParticipant(body.participantId)) {
+      sendJson(response, 404, { error: 'participant not found' })
+      return
+    }
+
+    broadcast()
+    sendJson(response, 200, getState())
     return
   }
 

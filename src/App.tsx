@@ -19,6 +19,7 @@ import {
   MoveHorizontal,
   Radio,
   RadioTower,
+  RefreshCcw,
   Save,
   Search,
   Settings2,
@@ -34,6 +35,9 @@ import {
 import './App.css'
 
 type LogoKind = 'orbit' | 'beam' | 'grid' | 'wave' | 'core'
+type ImageShape = 'circle' | 'rounded' | 'square' | 'wide'
+type ImageFit = 'cover' | 'contain'
+type ImageFrame = 'soft' | 'line' | 'glow' | 'clean'
 
 type Team = {
   id: string
@@ -42,6 +46,13 @@ type Team = {
   title: string
   members: string[]
   logoFile?: string
+  logoShape?: ImageShape
+  logoFrame?: ImageFrame
+  logoFit?: ImageFit
+  logoSize?: number
+  logoZoom?: number
+  logoFocusX?: number
+  logoFocusY?: number
   baseStars: number
   baseVoters: number
   color: string
@@ -182,6 +193,13 @@ type EventState = {
 type EventCopy = {
   appTitle: string
   appLogoFile: string
+  appLogoShape: string
+  appLogoFrame: string
+  appLogoFit: string
+  appLogoSize: string
+  appLogoZoom: string
+  appLogoFocusX: string
+  appLogoFocusY: string
   audienceEyeline: string
   adminEyeline: string
   audienceHeroTitle: string
@@ -256,7 +274,7 @@ type RaffleRule = 'all' | 'leader' | 'top2' | 'top3' | 'multi' | 'big' | 'cheer'
 type RaffleStyle = 'roulette' | 'lotto' | 'target'
 type ConnectionState = 'connecting' | 'live' | 'offline'
 type AppMode = 'admin' | 'vote' | 'wall'
-type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams' | 'quiz'
+type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams' | 'quiz' | 'export'
 type WallPanel = 'overview' | 'cheer' | 'raffle' | 'quiz'
 
 const raffleRuleOptions: Array<{ value: RaffleRule; label: string }> = [
@@ -354,6 +372,11 @@ type ParticipantSummary = Participant & {
   status: string
   statusClass: string
 }
+type TeamVisual = Pick<
+  Team,
+  'name' | 'logo' | 'color' | 'logoFile' | 'logoShape' | 'logoFrame' | 'logoFit' | 'logoSize' | 'logoZoom' | 'logoFocusX' | 'logoFocusY'
+>
+type ImageTuningField = 'shape' | 'frame' | 'fit' | 'size' | 'zoom' | 'focusX' | 'focusY'
 
 const DEFAULT_STAR_BUDGET = 10
 const DEFAULT_DURATION_MINUTES = 10
@@ -361,9 +384,33 @@ const DEFAULT_MIN_SCORE = 5
 const MAX_STARS_PER_TEAM = 10
 const CHEER_MESSAGE_MAX_LENGTH = 240
 const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
+const imageShapeOptions: Array<{ value: ImageShape; label: string }> = [
+  { value: 'circle', label: '원형' },
+  { value: 'rounded', label: '둥근 사각형' },
+  { value: 'square', label: '각진 사각형' },
+  { value: 'wide', label: '와이드' },
+]
+const imageFrameOptions: Array<{ value: ImageFrame; label: string }> = [
+  { value: 'soft', label: '부드러운 음영' },
+  { value: 'line', label: '얇은 테두리' },
+  { value: 'glow', label: '발광 강조' },
+  { value: 'clean', label: '테두리 없음' },
+]
+const imageFitOptions: Array<{ value: ImageFit; label: string }> = [
+  { value: 'cover', label: '채우기' },
+  { value: 'contain', label: '전체 보이기' },
+]
+const teamColorPalette = ['#A50034', '#FD312E', '#D85A6A', '#2E6F9E', '#007C73', '#52734D', '#A67835', '#6F58C9', '#C44B8E', '#4C5968']
 const copyLabels: Record<keyof EventCopy, string> = {
   appTitle: '앱 제목',
   appLogoFile: '상단 로고 이미지',
+  appLogoShape: '상단 로고 모양',
+  appLogoFrame: '상단 로고 테두리 효과',
+  appLogoFit: '상단 로고 맞춤 방식',
+  appLogoSize: '상단 로고 크기',
+  appLogoZoom: '상단 로고 확대',
+  appLogoFocusX: '상단 로고 가로 초점',
+  appLogoFocusY: '상단 로고 세로 초점',
   audienceEyeline: '관객 화면 상단 라벨',
   adminEyeline: '관리자 화면 상단 라벨',
   audienceHeroTitle: '관객 안내 제목',
@@ -546,6 +593,13 @@ const cookieMaxAge = 60 * 60 * 24 * 14
 const fallbackCopy: EventCopy = {
   appTitle: 'Vibe Vote Arena',
   appLogoFile: '',
+  appLogoShape: 'circle',
+  appLogoFrame: 'soft',
+  appLogoFit: 'cover',
+  appLogoSize: '52',
+  appLogoZoom: '1',
+  appLogoFocusX: '50',
+  appLogoFocusY: '50',
   audienceEyeline: 'Audience Vote',
   adminEyeline: 'Admin Arena Wall',
   audienceHeroTitle: '별 {starBudget}개를 원하는 팀에 나눠 담으세요.',
@@ -960,7 +1014,8 @@ function getInitialAdminPanel(): AdminPanel | null {
     panel === 'messages' ||
     panel === 'raffle' ||
     panel === 'teams' ||
-    panel === 'quiz'
+    panel === 'quiz' ||
+    panel === 'export'
     ? panel
     : null
 }
@@ -1001,7 +1056,7 @@ function Header({
   return (
     <header className={`topbar ${mode === 'admin' ? 'admin-topbar' : 'audience-topbar'} ${mode === 'wall' ? 'wall-topbar' : ''}`} aria-label="행사 상태">
       <div className="brand-lockup">
-        <BrandMark logoFile={state.copy.appLogoFile} />
+        <BrandMark copy={state.copy} />
         <div>
           <p className="eyeline">{mode === 'admin' ? state.copy.adminEyeline : mode === 'wall' ? state.copy.wallEyeline : state.copy.audienceEyeline}</p>
           <div className="brand-title-row">
@@ -1014,9 +1069,25 @@ function Header({
       <div className="event-controls">
         {mode === 'admin' ? (
           <>
-            <a className={`role-nav-link ${adminPanel ? '' : 'active'}`} href="/admin">
+            <a className={`role-nav-link ${adminPanel && adminPanel !== 'arena' ? '' : 'active'}`} href="/admin">
               <RadioTower size={15} />
               실시간 현황
+            </a>
+            <a className={`role-nav-link ${adminPanel === 'teams' ? 'active' : ''}`} href="/admin?panel=teams">
+              <Settings2 size={15} />
+              운영 콘텐츠
+            </a>
+            <a className={`role-nav-link ${adminPanel === 'messages' ? 'active' : ''}`} href="/admin?panel=messages">
+              <MessageCircle size={15} />
+              메시지 관리
+            </a>
+            <a className={`role-nav-link ${adminPanel === 'participants' ? 'active' : ''}`} href="/admin?panel=participants">
+              <Users size={15} />
+              참여자 리스트
+            </a>
+            <a className={`role-nav-link ${adminPanel === 'export' ? 'active' : ''}`} href="/admin?panel=export">
+              <FileSpreadsheet size={15} />
+              결과 내보내기
             </a>
             <a className={`role-nav-link ${adminPanel === 'quiz' ? 'active' : ''}`} href="/admin?panel=quiz">
               <CircleHelp size={15} />
@@ -1107,10 +1178,29 @@ function Header({
   )
 }
 
-function BrandMark({ logoFile }: { logoFile?: string }) {
+function BrandMark({ copy }: { copy: EventCopy }) {
+  const shape = normalizeImageShape(copy.appLogoShape, 'circle')
+  const frame = normalizeImageFrame(copy.appLogoFrame, 'soft')
+  const fit = normalizeImageFit(copy.appLogoFit, 'cover')
+
   return (
-    <div className={`lg-dot ${logoFile ? 'has-image' : ''}`} aria-hidden="true">
-      {logoFile ? <img src={logoFile} alt="" /> : 'V'}
+    <div
+      className={`lg-dot shape-${shape} frame-${frame} ${copy.appLogoFile ? 'has-image' : ''}`}
+      style={getAppLogoStyle(copy)}
+      aria-hidden="true"
+    >
+      {copy.appLogoFile ? (
+        <img
+          src={copy.appLogoFile}
+          alt=""
+          style={{
+            objectFit: fit,
+            objectPosition: `${getPercentValue(copy.appLogoFocusX, 50)}% ${getPercentValue(copy.appLogoFocusY, 50)}%`,
+            transform: `scale(${getZoomValue(copy.appLogoZoom, 1)})`,
+            transformOrigin: `${getPercentValue(copy.appLogoFocusX, 50)}% ${getPercentValue(copy.appLogoFocusY, 50)}%`,
+          }}
+        />
+      ) : 'V'}
     </div>
   )
 }
@@ -1909,10 +1999,11 @@ function AdminView({
       {activePanel ? (
         <AdminDetailPanel title={getAdminPanelTitle(activePanel)} onClose={() => setActivePanel(null)}>
           {activePanel === 'arena' ? <ArenaDetailPanel state={state} starBudget={starBudget} /> : null}
-          {activePanel === 'participants' ? <ParticipantDetailPanel state={state} /> : null}
+          {activePanel === 'participants' ? <ParticipantDetailPanel state={state} post={post} /> : null}
           {activePanel === 'messages' ? <MessageManagerDetail state={state} post={post} /> : null}
           {activePanel === 'teams' ? <TeamConfigDetail state={state} post={post} /> : null}
           {activePanel === 'quiz' ? <QuizAdminPanel state={state} post={post} detail /> : null}
+          {activePanel === 'export' ? <ResultExportDetailPanel state={state} /> : null}
           {activePanel === 'raffle' ? (
             <RaffleDetailPanel
               state={state}
@@ -2115,7 +2206,7 @@ function AdminView({
           <CheerModerationPanel state={state} post={post} onOpen={() => setActivePanel('messages')} />
           <TeamConfigPanel state={state} onOpen={() => setActivePanel('teams')} />
           <QuizAdminPanel state={state} post={post} onOpen={() => setActivePanel('quiz')} />
-          <ResultExportPanel state={state} />
+          <ResultExportPanel state={state} onOpen={() => setActivePanel('export')} />
           <RafflePanel
             state={state}
             raffleRule={raffleRule}
@@ -2769,6 +2860,7 @@ function getAdminPanelTitle(panel: AdminPanel) {
   if (panel === 'messages') return '응원 메시지 전체 관리'
   if (panel === 'teams') return '운영 콘텐츠 관리'
   if (panel === 'quiz') return '퀴즈 운영'
+  if (panel === 'export') return '결과 내보내기'
   return '행운권 추첨 쇼업'
 }
 
@@ -3067,8 +3159,22 @@ function ParticipantListPanel({ state, onOpen }: { state: EventState; onOpen: ()
   )
 }
 
-function ParticipantDetailPanel({ state }: { state: EventState }) {
+function ParticipantDetailPanel({
+  state,
+  post,
+}: {
+  state: EventState
+  post: (path: string, body: unknown) => Promise<EventState | null>
+}) {
   const participants = useMemo(() => getParticipantSummaries(state), [state])
+  const resetParticipant = (person: ParticipantSummary) => {
+    if (!window.confirm(`${person.name}님의 투표와 응원 메시지를 초기화할까요? 등록 정보는 유지됩니다.`)) return
+    void post('/api/participant/reset', { participantId: person.id })
+  }
+  const deleteParticipant = (person: ParticipantSummary) => {
+    if (!window.confirm(`${person.name}님을 참여자 리스트에서 삭제할까요? 투표, 응원 메시지, 퀴즈 답변도 함께 정리됩니다.`)) return
+    void post('/api/participant/delete', { participantId: person.id })
+  }
 
   return (
     <div className="detail-list participant-detail-list">
@@ -3077,7 +3183,7 @@ function ParticipantDetailPanel({ state }: { state: EventState }) {
           <article className={`participant-row detail ${person.statusClass}`} key={person.id}>
             <div className="participant-identity">
               <strong>{person.name}</strong>
-              <span>{person.group}</span>
+              <span>{person.group}{person.department ? ` · ${person.department}` : ''}</span>
             </div>
             <div className="participant-metrics" aria-label={`${person.name} 참여 현황`}>
               <span>
@@ -3109,6 +3215,16 @@ function ParticipantDetailPanel({ state }: { state: EventState }) {
             <div className="participant-foot">
               <small>최근 {formatMessageTime(person.updatedAt)} · ID {person.id}</small>
               <em>{person.status}</em>
+            </div>
+            <div className="participant-admin-actions" aria-label={`${person.name} 관리`}>
+              <button type="button" onClick={() => resetParticipant(person)} disabled={person.spent <= 0 && person.cheers.total <= 0}>
+                <RefreshCcw size={14} />
+                투표/응원 Reset
+              </button>
+              <button type="button" className="danger" onClick={() => deleteParticipant(person)}>
+                <Trash2 size={14} />
+                참여자 삭제
+              </button>
             </div>
           </article>
         ))
@@ -3308,7 +3424,7 @@ function TeamConfigPanel({ state, onOpen }: { state: EventState; onOpen: () => v
   )
 }
 
-function ResultExportPanel({ state }: { state: EventState }) {
+function ResultExportPanel({ state, onOpen }: { state: EventState; onOpen?: () => void }) {
   const totalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
 
   return (
@@ -3318,16 +3434,73 @@ function ResultExportPanel({ state }: { state: EventState }) {
           <p className="section-kicker">Export</p>
           <h2>결과 내보내기</h2>
         </div>
-        <button type="button" className="panel-open-button" onClick={() => exportResultsWorkbook(state)}>
-          <FileSpreadsheet size={14} />
-          XLSX
-        </button>
+        <div className="result-export-actions">
+          {onOpen ? (
+            <button type="button" className="panel-open-button" onClick={onOpen}>
+              <Maximize2 size={14} />
+              열기
+            </button>
+          ) : null}
+          <button type="button" className="panel-open-button" onClick={() => exportResultsWorkbook(state)}>
+            <FileSpreadsheet size={14} />
+            XLSX
+          </button>
+        </div>
       </div>
       <div className="config-summary">
         <strong>{totalStars}개 별</strong>
         <span>팀별 결과, 참여자, 응원 메시지, 추첨 결과를 엑셀 파일로 저장합니다.</span>
       </div>
     </section>
+  )
+}
+
+function ResultExportDetailPanel({ state }: { state: EventState }) {
+  const participants = useMemo(() => getParticipantSummaries(state), [state])
+  const totalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
+  const visibleCheers = state.cheers.filter((message) => !message.hidden).length
+  const hiddenCheers = state.cheers.length - visibleCheers
+
+  return (
+    <div className="result-export-detail">
+      <div className="export-summary-grid" aria-label="내보내기 요약">
+        <div>
+          <span>팀</span>
+          <strong>{state.teams.length}</strong>
+        </div>
+        <div>
+          <span>참여자</span>
+          <strong>{participants.length}</strong>
+        </div>
+        <div>
+          <span>누적 별</span>
+          <strong>{totalStars}</strong>
+        </div>
+        <div>
+          <span>응원 메시지</span>
+          <strong>{visibleCheers}/{state.cheers.length}</strong>
+        </div>
+      </div>
+      <button type="button" className="export-primary-button" onClick={() => exportResultsWorkbook(state)}>
+        <FileSpreadsheet size={18} />
+        엑셀 파일로 저장
+      </button>
+      <p className="config-help">
+        행사 요약, 팀별 결과, 참여자, 응원 메시지, 추첨 결과, 퀴즈 답변이 한 파일에 들어갑니다.
+        숨김 메시지는 별도 상태로 표시되며 삭제된 참여자는 내보내기 대상에서 제외됩니다.
+      </p>
+      <div className="export-preview-list" aria-label="내보내기 미리보기">
+        {participants.slice(0, 12).map((person) => (
+          <span key={person.id}>
+            <strong>{person.name}</strong>
+            <em>{person.group}</em>
+            <small>{person.status} · {person.spent}★</small>
+          </span>
+        ))}
+        {participants.length > 12 ? <span className="more">외 {participants.length - 12}명</span> : null}
+      </div>
+      {hiddenCheers ? <p className="config-status">{hiddenCheers}개의 숨김 메시지도 상태값과 함께 내보냅니다.</p> : null}
+    </div>
   )
 }
 
@@ -3486,6 +3659,32 @@ function TeamConfigDetail({
             onUpload={(file) => uploadCopyImage('appLogoFile', file)}
             onClear={() => updateCopy('appLogoFile', '')}
           />
+          <ImageTuningControls
+            title="상단 로고 표시 방식"
+            description="상단 아이콘의 크기, 모양, 테두리, 이미지 확대와 초점을 조정합니다."
+            values={{
+              shape: draftCopy.appLogoShape,
+              frame: draftCopy.appLogoFrame,
+              fit: draftCopy.appLogoFit,
+              size: draftCopy.appLogoSize,
+              zoom: draftCopy.appLogoZoom,
+              focusX: draftCopy.appLogoFocusX,
+              focusY: draftCopy.appLogoFocusY,
+            }}
+            sizeRange={[36, 92]}
+            onChange={(field, value) => {
+              const keyByField: Record<ImageTuningField, keyof EventCopy> = {
+                shape: 'appLogoShape',
+                frame: 'appLogoFrame',
+                fit: 'appLogoFit',
+                size: 'appLogoSize',
+                zoom: 'appLogoZoom',
+                focusX: 'appLogoFocusX',
+                focusY: 'appLogoFocusY',
+              }
+              updateCopy(keyByField[field], value)
+            }}
+          />
           {rafflePrizeImageFields.map((field) => (
             <ImageSourceField
               key={field.key}
@@ -3576,11 +3775,9 @@ function TeamConfigDetail({
                 onRawChange={(value) => updateTeam(index, 'logoFile', value)}
                 onUpload={(file) => uploadTeamLogo(index, file)}
                 onClear={() => updateTeam(index, 'logoFile', '')}
+                onTuningChange={(field, value) => updateTeam(index, field, value)}
               />
-              <label>
-                <span>색상</span>
-                <input value={team.color} onChange={(event) => updateTeam(index, 'color', event.target.value)} />
-              </label>
+              <ColorField value={team.color} onChange={(value) => updateTeam(index, 'color', value)} />
               <label>
                 <span>기본 로고</span>
                 <select value={team.logo} onChange={(event) => updateTeam(index, 'logo', event.target.value)}>
@@ -3688,6 +3885,7 @@ function LogoSourceField({
   onRawChange,
   onUpload,
   onClear,
+  onTuningChange,
 }: {
   team: TeamConfigDraft
   index: number
@@ -3695,6 +3893,7 @@ function LogoSourceField({
   onRawChange: (value: string) => void
   onUpload: (file: File | undefined) => void
   onClear: () => void
+  onTuningChange: (field: string, value: string) => void
 }) {
   const preview = teamEditorPreview(team)
 
@@ -3742,6 +3941,32 @@ function LogoSourceField({
           이미지가 크게 보입니다.
         </p>
       </div>
+      <ImageTuningControls
+        title="로고/팀 사진 표시 방식"
+        description="팀 카드와 발표장 팀 사진의 모양, 테두리, 확대, 초점 위치를 조정합니다."
+        values={{
+          shape: team.logoShape,
+          frame: team.logoFrame,
+          fit: team.logoFit,
+          size: team.logoSize,
+          zoom: team.logoZoom,
+          focusX: team.logoFocusX,
+          focusY: team.logoFocusY,
+        }}
+        sizeRange={[36, 88]}
+        onChange={(field, value) => {
+          const keyByField: Record<ImageTuningField, string> = {
+            shape: 'logoShape',
+            frame: 'logoFrame',
+            fit: 'logoFit',
+            size: 'logoSize',
+            zoom: 'logoZoom',
+            focusX: 'logoFocusX',
+            focusY: 'logoFocusY',
+          }
+          onTuningChange(keyByField[field], value)
+        }}
+      />
     </div>
   )
 }
@@ -3811,6 +4036,155 @@ function ImageSourceField({
             {previewLabel}
           </span>
         )}
+      </div>
+    </div>
+  )
+}
+
+function ImageTuningControls({
+  title,
+  description,
+  values,
+  sizeRange,
+  onChange,
+}: {
+  title: string
+  description: string
+  values: Record<ImageTuningField, string>
+  sizeRange: [number, number]
+  onChange: (field: ImageTuningField, value: string) => void
+}) {
+  const normalized = {
+    shape: normalizeImageShape(values.shape, 'rounded'),
+    frame: normalizeImageFrame(values.frame, 'line'),
+    fit: normalizeImageFit(values.fit, 'cover'),
+    size: String(getImageSizeValue(values.size, sizeRange[0] === 36 ? 52 : 48, sizeRange[0], sizeRange[1])),
+    zoom: String(getZoomValue(values.zoom, 1)),
+    focusX: String(getPercentValue(values.focusX, 50)),
+    focusY: String(getPercentValue(values.focusY, 50)),
+  }
+
+  return (
+    <div className="image-tuning-controls">
+      <div className="logo-source-head">
+        <span>{title}</span>
+        <small>{description}</small>
+      </div>
+      <div className="image-tuning-grid">
+        <label>
+          <span>모양</span>
+          <select value={normalized.shape} onChange={(event) => onChange('shape', event.target.value)}>
+            {imageShapeOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>테두리 효과</span>
+          <select value={normalized.frame} onChange={(event) => onChange('frame', event.target.value)}>
+            {imageFrameOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>맞춤</span>
+          <select value={normalized.fit} onChange={(event) => onChange('fit', event.target.value)}>
+            {imageFitOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <RangeField
+          label="크기"
+          value={normalized.size}
+          min={sizeRange[0]}
+          max={sizeRange[1]}
+          step={1}
+          suffix="px"
+          onChange={(value) => onChange('size', value)}
+        />
+        <RangeField
+          label="확대"
+          value={normalized.zoom}
+          min={1}
+          max={2.4}
+          step={0.05}
+          suffix="x"
+          onChange={(value) => onChange('zoom', value)}
+        />
+        <RangeField
+          label="가로 초점"
+          value={normalized.focusX}
+          min={0}
+          max={100}
+          step={1}
+          suffix="%"
+          onChange={(value) => onChange('focusX', value)}
+        />
+        <RangeField
+          label="세로 초점"
+          value={normalized.focusY}
+          min={0}
+          max={100}
+          step={1}
+          suffix="%"
+          onChange={(value) => onChange('focusY', value)}
+        />
+      </div>
+    </div>
+  )
+}
+
+function RangeField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  suffix,
+  onChange,
+}: {
+  label: string
+  value: string
+  min: number
+  max: number
+  step: number
+  suffix: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="range-field">
+      <span>{label}</span>
+      <div>
+        <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(event.target.value)} />
+        <em>{formatRangeValue(value)}{suffix}</em>
+      </div>
+    </label>
+  )
+}
+
+function ColorField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const normalized = /^#[0-9a-fA-F]{6}$/.test(value) ? value : '#A50034'
+
+  return (
+    <div className="color-field">
+      <span>색상</span>
+      <div className="color-input-row">
+        <input type="color" value={normalized} onChange={(event) => onChange(event.target.value.toUpperCase())} aria-label="팀 색상 선택" />
+        <input value={value} onChange={(event) => onChange(event.target.value)} onBlur={() => onChange(normalized.toUpperCase())} />
+      </div>
+      <div className="color-palette" aria-label="추천 색상 팔레트">
+        {teamColorPalette.map((color) => (
+          <button
+            key={color}
+            type="button"
+            className={normalized.toUpperCase() === color ? 'active' : ''}
+            style={{ '--swatch-color': color } as CSSProperties}
+            onClick={() => onChange(color)}
+            aria-label={`${color} 선택`}
+          />
+        ))}
       </div>
     </div>
   )
@@ -4780,26 +5154,56 @@ function StarWallet({
   )
 }
 
-function LogoMark({ team }: { team: Pick<Team, 'name' | 'logo' | 'color' | 'logoFile'> }) {
+function LogoMark({ team }: { team: TeamVisual }) {
+  const fit = normalizeImageFit(team.logoFit, 'cover')
+  const focusX = getPercentValue(team.logoFocusX, 50)
+  const focusY = getPercentValue(team.logoFocusY, 50)
+
   return (
     <div
-      className={`logo-mark ${team.logo}`}
-      style={{ '--team-color': team.color } as CSSProperties}
+      className={`logo-mark ${team.logo} shape-${normalizeImageShape(team.logoShape, 'rounded')} frame-${normalizeImageFrame(team.logoFrame, 'line')}`}
+      style={getTeamImageStyle(team)}
       aria-label={`${team.name} 로고 자리`}
     >
-      {team.logoFile ? <img src={team.logoFile} alt="" /> : null}
+      {team.logoFile ? (
+        <img
+          src={team.logoFile}
+          alt=""
+          style={{
+            objectFit: fit,
+            objectPosition: `${focusX}% ${focusY}%`,
+            transform: `scale(${getZoomValue(team.logoZoom, 1)})`,
+            transformOrigin: `${focusX}% ${focusY}%`,
+          }}
+        />
+      ) : null}
     </div>
   )
 }
 
-function TeamPhotoPreview({ team }: { team: Pick<Team, 'name' | 'logo' | 'color' | 'logoFile'> }) {
+function TeamPhotoPreview({ team }: { team: TeamVisual }) {
+  const fit = normalizeImageFit(team.logoFit, 'cover')
+  const focusX = getPercentValue(team.logoFocusX, 50)
+  const focusY = getPercentValue(team.logoFocusY, 50)
+
   return (
     <div
-      className={`team-photo-preview ${team.logoFile ? 'has-photo' : ''}`}
-      style={{ '--team-color': team.color } as CSSProperties}
+      className={`team-photo-preview shape-${normalizeImageShape(team.logoShape, 'rounded')} frame-${normalizeImageFrame(team.logoFrame, 'line')} ${team.logoFile ? 'has-photo' : ''}`}
+      style={getTeamImageStyle(team)}
       aria-label={`${team.name} 로고 또는 팀 사진`}
     >
-      {team.logoFile ? <img src={team.logoFile} alt="" /> : <LogoMark team={team} />}
+      {team.logoFile ? (
+        <img
+          src={team.logoFile}
+          alt=""
+          style={{
+            objectFit: fit,
+            objectPosition: `${focusX}% ${focusY}%`,
+            transform: `scale(${getZoomValue(team.logoZoom, 1)})`,
+            transformOrigin: `${focusX}% ${focusY}%`,
+          }}
+        />
+      ) : <LogoMark team={team} />}
     </div>
   )
 }
@@ -4958,6 +5362,13 @@ type TeamConfigDraft = {
   logo: string
   baseStars: string
   baseVoters: string
+  logoShape: string
+  logoFrame: string
+  logoFit: string
+  logoSize: string
+  logoZoom: string
+  logoFocusX: string
+  logoFocusY: string
   sortOrder: number
 }
 
@@ -5131,6 +5542,13 @@ function createTeamDrafts(teams: Team[]): TeamConfigDraft[] {
       logo: team.logo,
       baseStars: String(team.baseStars ?? 0),
       baseVoters: String(team.baseVoters ?? 0),
+      logoShape: team.logoShape || 'rounded',
+      logoFrame: team.logoFrame || 'line',
+      logoFit: team.logoFit || 'cover',
+      logoSize: String(team.logoSize ?? 48),
+      logoZoom: String(team.logoZoom ?? 1),
+      logoFocusX: String(team.logoFocusX ?? 50),
+      logoFocusY: String(team.logoFocusY ?? 50),
       sortOrder: team.sortOrder ?? index,
     }))
 }
@@ -5151,6 +5569,13 @@ function teamDraftToConfig(team: TeamConfigDraft, index: number) {
       .filter(Boolean)
       .slice(0, 3),
     logoFile: team.logoFile,
+    logoShape: normalizeImageShape(team.logoShape, 'rounded'),
+    logoFrame: normalizeImageFrame(team.logoFrame, 'line'),
+    logoFit: normalizeImageFit(team.logoFit, 'cover'),
+    logoSize: getImageSizeValue(team.logoSize, 48, 36, 88),
+    logoZoom: getZoomValue(team.logoZoom, 1),
+    logoFocusX: getPercentValue(team.logoFocusX, 50),
+    logoFocusY: getPercentValue(team.logoFocusY, 50),
     color: team.color,
     logo: logoKinds.includes(team.logo as LogoKind) ? team.logo : 'orbit',
     baseStars: Math.max(0, Math.floor(Number(team.baseStars) || 0)),
@@ -5176,12 +5601,19 @@ function quizDraftToConfig(quiz: QuizConfigDraft, index: number): QuizConfig {
   }
 }
 
-function teamEditorPreview(team: TeamConfigDraft): Pick<Team, 'name' | 'logo' | 'color' | 'logoFile'> {
+function teamEditorPreview(team: TeamConfigDraft): TeamVisual {
   return {
     name: team.name,
     logo: logoKinds.includes(team.logo as LogoKind) ? (team.logo as LogoKind) : 'orbit',
     color: /^#[0-9a-fA-F]{6}$/.test(team.color) ? team.color : '#A50034',
     logoFile: team.logoFile,
+    logoShape: normalizeImageShape(team.logoShape, 'rounded'),
+    logoFrame: normalizeImageFrame(team.logoFrame, 'line'),
+    logoFit: normalizeImageFit(team.logoFit, 'cover'),
+    logoSize: getImageSizeValue(team.logoSize, 48, 36, 88),
+    logoZoom: getZoomValue(team.logoZoom, 1),
+    logoFocusX: getPercentValue(team.logoFocusX, 50),
+    logoFocusY: getPercentValue(team.logoFocusY, 50),
   }
 }
 
@@ -5643,6 +6075,79 @@ function getMinScore(state: EventState) {
 
 function getCheerNameMode(state: EventState): CheerNameMode {
   return state.settings.cheerNameMode === 'real' ? 'real' : 'masked'
+}
+
+function normalizeImageShape(value: unknown, fallback: ImageShape): ImageShape {
+  return value === 'circle' || value === 'rounded' || value === 'square' || value === 'wide' ? value : fallback
+}
+
+function normalizeImageFrame(value: unknown, fallback: ImageFrame): ImageFrame {
+  return value === 'soft' || value === 'line' || value === 'glow' || value === 'clean' ? value : fallback
+}
+
+function normalizeImageFit(value: unknown, fallback: ImageFit): ImageFit {
+  return value === 'cover' || value === 'contain' ? value : fallback
+}
+
+function getImageSizeValue(value: unknown, fallback: number, min = 32, max = 96) {
+  return clamp(Math.round(Number(value) || fallback), min, max)
+}
+
+function getZoomValue(value: unknown, fallback = 1) {
+  return clamp(Number(value) || fallback, 1, 2.4)
+}
+
+function getPercentValue(value: unknown, fallback = 50) {
+  return clamp(Math.round(Number(value) || fallback), 0, 100)
+}
+
+function formatRangeValue(value: string) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return value
+  return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+}
+
+function getImageShapeMetrics(shape: ImageShape, size: number) {
+  if (shape === 'wide') {
+    return {
+      width: Math.round(size * 1.56),
+      height: size,
+      radius: Math.round(size * 0.22),
+    }
+  }
+
+  if (shape === 'circle') return { width: size, height: size, radius: 999 }
+  if (shape === 'square') return { width: size, height: size, radius: Math.max(3, Math.round(size * 0.08)) }
+  return { width: size, height: size, radius: Math.max(8, Math.round(size * 0.18)) }
+}
+
+function getAppLogoStyle(copy: EventCopy) {
+  const shape = normalizeImageShape(copy.appLogoShape, 'circle')
+  const size = getImageSizeValue(copy.appLogoSize, 52, 36, 92)
+  const metrics = getImageShapeMetrics(shape, size)
+
+  return {
+    '--app-logo-width': `${metrics.width}px`,
+    '--app-logo-height': `${metrics.height}px`,
+    '--app-logo-radius': `${metrics.radius}px`,
+  } as CSSProperties
+}
+
+function getTeamImageStyle(team: TeamVisual) {
+  const shape = normalizeImageShape(team.logoShape, 'rounded')
+  const size = getImageSizeValue(team.logoSize, 48, 36, 88)
+  const metrics = getImageShapeMetrics(shape, size)
+
+  return {
+    '--team-color': team.color,
+    '--team-logo-width': `${metrics.width}px`,
+    '--team-logo-height': `${metrics.height}px`,
+    '--team-logo-radius': `${metrics.radius}px`,
+    '--team-image-fit': normalizeImageFit(team.logoFit, 'cover'),
+    '--team-image-focus-x': `${getPercentValue(team.logoFocusX, 50)}%`,
+    '--team-image-focus-y': `${getPercentValue(team.logoFocusY, 50)}%`,
+    '--team-image-zoom': getZoomValue(team.logoZoom, 1),
+  } as CSSProperties
 }
 
 function getThemeMode(state: EventState): ThemeMode {

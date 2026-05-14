@@ -9,6 +9,9 @@ const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
 const quizIntroMs = 2400
 const quizCountdownMs = 3600
+const imageShapes = new Set(['circle', 'rounded', 'square', 'wide'])
+const imageFrames = new Set(['soft', 'line', 'glow', 'clean'])
+const imageFits = new Set(['cover', 'contain'])
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const snapshotKey = 'event-state-v1'
@@ -31,6 +34,13 @@ type TeamConfig = {
   title: string
   members: string[]
   logoFile: string
+  logoShape: string
+  logoFrame: string
+  logoFit: string
+  logoSize: number
+  logoZoom: number
+  logoFocusX: number
+  logoFocusY: number
   baseStars: number
   baseVoters: number
   color: string
@@ -197,6 +207,13 @@ const emptyQuizState: QuizState = {
 const defaultCopy = {
   appTitle: 'Vibe Vote Arena',
   appLogoFile: '',
+  appLogoShape: 'circle',
+  appLogoFrame: 'soft',
+  appLogoFit: 'cover',
+  appLogoSize: '52',
+  appLogoZoom: '1',
+  appLogoFocusX: '50',
+  appLogoFocusY: '50',
   audienceEyeline: 'Audience Vote',
   adminEyeline: 'Admin Arena Wall',
   audienceHeroTitle: '별 {starBudget}개를 원하는 팀에 나눠 담으세요.',
@@ -267,6 +284,13 @@ const defaultTeams: TeamConfig[] = [
     title: '사내 지식 검색 Copilot',
     members: ['김도윤', '이서진', '박민재'],
     logoFile: '',
+    logoShape: 'rounded',
+    logoFrame: 'line',
+    logoFit: 'cover',
+    logoSize: 48,
+    logoZoom: 1,
+    logoFocusX: 50,
+    logoFocusY: 50,
     baseStars: 128,
     baseVoters: 46,
     color: '#A50034',
@@ -611,6 +635,20 @@ export class ArenaRoom {
       return json(this.getState(), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
+    if (pathname === '/api/participant/reset') {
+      if (!this.resetParticipant(body.participantId)) return json({ error: 'participant not found' }, 404)
+
+      await this.commit()
+      return json(this.getState())
+    }
+
+    if (pathname === '/api/participant/delete') {
+      if (!this.deleteParticipant(body.participantId)) return json({ error: 'participant not found' }, 404)
+
+      await this.commit()
+      return json(this.getState())
+    }
+
     if (pathname === '/api/settings') {
       this.settings = {
         ...this.settings,
@@ -862,6 +900,50 @@ export class ArenaRoom {
     person.updatedAt = Date.now()
     this.participants.set(id, person)
     return person
+  }
+
+  private cleanupParticipantReferences(participantIdValue: unknown) {
+    const participantId = sanitizeIdentifier(participantIdValue, 128)
+    if (!participantId) return
+
+    this.cheers = this.cheers.filter((message) => message.participantId !== participantId)
+    this.voteEvents = this.voteEvents.filter((event) => event.participantId !== participantId)
+
+    if (
+      this.quiz.answers.some((answer) => answer.participantId === participantId) ||
+      this.quiz.winners.some((answer) => answer.participantId === participantId)
+    ) {
+      this.quiz = {
+        ...this.quiz,
+        answers: this.quiz.answers.filter((answer) => answer.participantId !== participantId),
+        winners: this.quiz.winners.filter((answer) => answer.participantId !== participantId),
+        updatedAt: Date.now(),
+      }
+    }
+
+    this.lastRaffle = null
+  }
+
+  private resetParticipant(participantIdValue: unknown) {
+    const participantId = sanitizeIdentifier(participantIdValue, 128)
+    const person = this.participants.get(participantId)
+    if (!person) return false
+
+    person.allocations = {}
+    person.cheered = false
+    person.cheerSubmitted = false
+    person.updatedAt = Date.now()
+    this.cleanupParticipantReferences(participantId)
+    return true
+  }
+
+  private deleteParticipant(participantIdValue: unknown) {
+    const participantId = sanitizeIdentifier(participantIdValue, 128)
+    if (!this.participants.has(participantId)) return false
+
+    this.participants.delete(participantId)
+    this.cleanupParticipantReferences(participantId)
+    return true
   }
 
   private findParticipantByNormalizedIdentity(deviceId: string, name: string, group: string) {
@@ -1123,35 +1205,35 @@ export class ArenaRoom {
       {
         id: 'test-minjun',
         name: '민준',
-        group: '테스트',
+        group: 'test',
         allocations: { 'team-aurora': Math.min(this.settings.starBudget, 5) },
         message: '검색 데모가 바로 써볼 수 있어 보여요',
       },
       {
         id: 'test-seoyeon',
         name: '서연',
-        group: '테스트',
+        group: 'test',
         allocations: { 'team-prism': Math.min(this.settings.starBudget, 4) },
         message: '현장 적용성이 좋아요',
       },
       {
         id: 'test-yuna',
         name: '유나',
-        group: '테스트',
+        group: 'test',
         allocations: { 'team-vector': Math.min(this.settings.starBudget, 5) },
         message: '리뷰 시간이 줄어들 것 같아요',
       },
       {
         id: 'test-hana',
         name: '하나',
-        group: '테스트',
+        group: 'test',
         allocations: { 'team-lattice': Math.min(this.settings.starBudget, 3) },
         message: '장애 리포트 연결이 인상적입니다',
       },
       {
         id: 'test-doyeon',
         name: '도연',
-        group: '테스트',
+        group: 'test',
         allocations: { 'team-pulse': Math.min(this.settings.starBudget, 2) },
         message: '고객 목소리 우선순위가 명확해질 것 같아요',
       },
@@ -1229,12 +1311,36 @@ function normalizeTeam(teamValue: unknown, fallback: TeamConfig, index: number):
     title: sanitizeText(team.title, 64) || fallback.title || '프로젝트명 미정',
     members,
     logoFile: sanitizeLogoPath(String(team.logoFile || fallback.logoFile || '')),
+    logoShape: sanitizeImageShape(team.logoShape, fallback.logoShape || 'rounded'),
+    logoFrame: sanitizeImageFrame(team.logoFrame, fallback.logoFrame || 'line'),
+    logoFit: sanitizeImageFit(team.logoFit, fallback.logoFit || 'cover'),
+    logoSize: clampNumber(team.logoSize ?? fallback.logoSize ?? 48, 36, 88, 48),
+    logoZoom: clampNumber(team.logoZoom ?? fallback.logoZoom ?? 1, 1, 2.4, 1),
+    logoFocusX: clampNumber(team.logoFocusX ?? fallback.logoFocusX ?? 50, 0, 100, 50),
+    logoFocusY: clampNumber(team.logoFocusY ?? fallback.logoFocusY ?? 50, 0, 100, 50),
     baseStars: Math.max(0, Math.floor(Number(team.baseStars ?? fallback.baseStars ?? 0))),
     baseVoters: Math.max(0, Math.floor(Number(team.baseVoters ?? fallback.baseVoters ?? 0))),
     color: sanitizeColor(team.color) || fallback.color || '#A50034',
     logo,
     sortOrder: Math.max(0, Math.floor(Number(team.sortOrder ?? index))),
   }
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback = min) {
+  const number = Number(value)
+  return Math.min(max, Math.max(min, Number.isFinite(number) ? number : fallback))
+}
+
+function sanitizeImageShape(value: unknown, fallback = 'rounded') {
+  return imageShapes.has(String(value || '')) ? String(value) : fallback
+}
+
+function sanitizeImageFrame(value: unknown, fallback = 'line') {
+  return imageFrames.has(String(value || '')) ? String(value) : fallback
+}
+
+function sanitizeImageFit(value: unknown, fallback = 'cover') {
+  return imageFits.has(String(value || '')) ? String(value) : fallback
 }
 
 function normalizeQuizBank(input: unknown, fallback: QuizConfig[] = defaultQuizBank) {
