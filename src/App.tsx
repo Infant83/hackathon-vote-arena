@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type {
+  CSSProperties,
+  FormEvent as ReactFormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  WheelEvent as ReactWheelEvent,
+  ReactNode,
+} from 'react'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import {
   ArrowRight,
@@ -13,6 +20,8 @@ import {
   Gift,
   ImagePlus,
   Link2,
+  LockKeyhole,
+  LogIn,
   Maximize2,
   Megaphone,
   MessageCircle,
@@ -56,7 +65,11 @@ type Team = {
   logoFocusX?: number
   logoFocusY?: number
   photoFit?: ImageFit
+  photoShape?: ImageShape
+  photoFrame?: ImageFrame
+  photoWidth?: number
   photoHeight?: number
+  photoRadius?: number
   photoZoom?: number
   photoFocusX?: number
   photoFocusY?: number
@@ -116,6 +129,38 @@ type RaffleWinner = {
   department?: string
   cheered: boolean
   rank?: number
+  supportDetails?: RaffleSupportDetail[]
+  cheerDetails?: RaffleCheerDetail[]
+}
+
+type RaffleSupportDetail = {
+  teamId: string
+  teamName: string
+  stars: number
+  rank?: number
+}
+
+type RaffleCheerDetail = {
+  teamId: string
+  teamName: string
+  text: string
+  createdAt: number
+}
+
+type AwardRecord = {
+  id: string
+  participantId: string
+  participantName?: string
+  participantGroup?: string
+  participantDepartment?: string
+  kind: 'raffle' | 'quiz'
+  rank?: number
+  rule?: RaffleRule
+  quizId?: number
+  question?: string
+  prizeImageFile?: string
+  prizeName?: string
+  createdAt: number
 }
 
 type LastRaffle = {
@@ -123,6 +168,8 @@ type LastRaffle = {
   winnerCount: number
   candidates: number
   winners: RaffleWinner[]
+  prizeImageFile?: string
+  prizeName?: string
   createdAt: number
 }
 
@@ -176,6 +223,7 @@ type EventState = {
   participants: Participant[]
   cheers: CheerMessage[]
   voteEvents: VoteEvent[]
+  awardHistory: AwardRecord[]
   closed: boolean
   closesAt: number
   lastRaffle: LastRaffle | null
@@ -261,10 +309,23 @@ type EventCopy = {
   rafflePrizeImageFile: string
   rafflePrizeImageAll: string
   rafflePrizeImageLeader: string
-  rafflePrizeImageTop2: string
   rafflePrizeImageTop3: string
+  rafflePrizeImageRank456: string
+  rafflePrizeImageLowerPack: string
   rafflePrizeImageMulti: string
   rafflePrizeImageBig: string
+  rafflePrizeImageLongestCheer: string
+  rafflePrizeNameFile: string
+  rafflePrizeNameAll: string
+  rafflePrizeNameLeader: string
+  rafflePrizeNameTop3: string
+  rafflePrizeNameRank456: string
+  rafflePrizeNameLowerPack: string
+  rafflePrizeNameMulti: string
+  rafflePrizeNameBig: string
+  rafflePrizeNameLongestCheer: string
+  raffleStartButtonLabel: string
+  raffleStopButtonLabel: string
 }
 
 type EventCopyImageKey =
@@ -272,16 +333,35 @@ type EventCopyImageKey =
   | 'rafflePrizeImageFile'
   | 'rafflePrizeImageAll'
   | 'rafflePrizeImageLeader'
-  | 'rafflePrizeImageTop2'
   | 'rafflePrizeImageTop3'
+  | 'rafflePrizeImageRank456'
+  | 'rafflePrizeImageLowerPack'
   | 'rafflePrizeImageMulti'
   | 'rafflePrizeImageBig'
+  | 'rafflePrizeImageLongestCheer'
 type RafflePrizeImageKey = Exclude<EventCopyImageKey, 'appLogoFile'>
+type RafflePrizeNameKey =
+  | 'rafflePrizeNameFile'
+  | 'rafflePrizeNameAll'
+  | 'rafflePrizeNameLeader'
+  | 'rafflePrizeNameTop3'
+  | 'rafflePrizeNameRank456'
+  | 'rafflePrizeNameLowerPack'
+  | 'rafflePrizeNameMulti'
+  | 'rafflePrizeNameBig'
+  | 'rafflePrizeNameLongestCheer'
 
 type CheerNameMode = 'masked' | 'real'
-type RaffleRule = 'all' | 'leader' | 'top2' | 'top3' | 'multi' | 'big' | 'cheer'
-type RaffleStyle = 'roulette' | 'lotto' | 'target'
+type RaffleRule = 'all' | 'leader' | 'top3' | 'rank456' | 'rank7to10Three' | 'multi' | 'big' | 'longestCheer' | 'cheer'
 type ConnectionState = 'connecting' | 'live' | 'offline'
+type AdminSessionState = {
+  ready: boolean
+  required: boolean
+  authenticated: boolean
+  loading: boolean
+  error: string
+  login: (passcode: string) => Promise<boolean>
+}
 type AppMode = 'admin' | 'vote' | 'wall' | 'team'
 type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams' | 'quiz' | 'export'
 type WallPanel = 'overview' | 'cheer' | 'raffle' | 'quiz'
@@ -289,20 +369,36 @@ type WallPanel = 'overview' | 'cheer' | 'raffle' | 'quiz'
 const raffleRuleOptions: Array<{ value: RaffleRule; label: string }> = [
   { value: 'all', label: '공개 응원 메시지 참여자' },
   { value: 'leader', label: '현재 1위 팀에 별을 준 참여자' },
-  { value: 'top2', label: '현재 1·2위 팀 모두에 별을 준 참여자' },
   { value: 'top3', label: '현재 1·2·3위 팀 모두에 별을 준 참여자' },
-  { value: 'multi', label: '3개 이상 팀에 별을 나눠 준 참여자' },
+  { value: 'rank456', label: '현재 4·5·6위 팀 모두에 별을 준 참여자' },
+  { value: 'rank7to10Three', label: '현재 7·8·9·10위 중 3팀 이상에 별을 준 참여자' },
+  { value: 'multi', label: '5개 이상 팀에 별을 나눠 준 참여자' },
   { value: 'big', label: '한 팀에 별 7개 이상을 준 참여자' },
+  { value: 'longestCheer', label: '가장 긴 응원 메시지를 남긴 참여자' },
 ]
 
 const rafflePrizeImageKeyByRule: Record<RaffleRule, RafflePrizeImageKey> = {
   all: 'rafflePrizeImageAll',
   leader: 'rafflePrizeImageLeader',
-  top2: 'rafflePrizeImageTop2',
   top3: 'rafflePrizeImageTop3',
+  rank456: 'rafflePrizeImageRank456',
+  rank7to10Three: 'rafflePrizeImageLowerPack',
   multi: 'rafflePrizeImageMulti',
   big: 'rafflePrizeImageBig',
+  longestCheer: 'rafflePrizeImageLongestCheer',
   cheer: 'rafflePrizeImageAll',
+}
+
+const rafflePrizeNameKeyByRule: Record<RaffleRule, RafflePrizeNameKey> = {
+  all: 'rafflePrizeNameAll',
+  leader: 'rafflePrizeNameLeader',
+  top3: 'rafflePrizeNameTop3',
+  rank456: 'rafflePrizeNameRank456',
+  rank7to10Three: 'rafflePrizeNameLowerPack',
+  multi: 'rafflePrizeNameMulti',
+  big: 'rafflePrizeNameBig',
+  longestCheer: 'rafflePrizeNameLongestCheer',
+  cheer: 'rafflePrizeNameAll',
 }
 
 const rafflePrizeImageFields: Array<{ key: RafflePrizeImageKey; label: string; description: string }> = [
@@ -322,32 +418,85 @@ const rafflePrizeImageFields: Array<{ key: RafflePrizeImageKey; label: string; d
     description: '추첨 룰이 “현재 1위 팀에 별을 준 참여자”일 때 보여줄 상품 이미지입니다.',
   },
   {
-    key: 'rafflePrizeImageTop2',
-    label: '1·2위 팀 참여자 상품',
-    description: '추첨 룰이 “현재 1·2위 팀 모두에 별을 준 참여자”일 때 보여줄 상품 이미지입니다.',
-  },
-  {
     key: 'rafflePrizeImageTop3',
     label: '1·2·3위 팀 참여자 상품',
     description: '추첨 룰이 “현재 1·2·3위 팀 모두에 별을 준 참여자”일 때 보여줄 상품 이미지입니다.',
   },
   {
+    key: 'rafflePrizeImageRank456',
+    label: '4·5·6위 팀 참여자 상품',
+    description: '추첨 룰이 “현재 4·5·6위 팀 모두에 별을 준 참여자”일 때 보여줄 상품 이미지입니다.',
+  },
+  {
+    key: 'rafflePrizeImageLowerPack',
+    label: '7·8·9·10위 중 3팀 참여자 상품',
+    description: '추첨 룰이 “현재 7·8·9·10위 중 3팀 이상에 별을 준 참여자”일 때 보여줄 상품 이미지입니다.',
+  },
+  {
     key: 'rafflePrizeImageMulti',
-    label: '3개 이상 팀 참여자 상품',
-    description: '추첨 룰이 “3개 이상 팀에 별을 나눠 준 참여자”일 때 보여줄 상품 이미지입니다.',
+    label: '5개 이상 팀 참여자 상품',
+    description: '추첨 룰이 “5개 이상 팀에 별을 나눠 준 참여자”일 때 보여줄 상품 이미지입니다.',
   },
   {
     key: 'rafflePrizeImageBig',
     label: '한 팀 7개 이상 참여자 상품',
     description: '추첨 룰이 “한 팀에 별 7개 이상을 준 참여자”일 때 보여줄 상품 이미지입니다.',
   },
+  {
+    key: 'rafflePrizeImageLongestCheer',
+    label: '가장 긴 응원 메시지 참여자 상품',
+    description: '추첨 룰이 “가장 긴 응원 메시지를 남긴 참여자”일 때 보여줄 상품 이미지입니다.',
+  },
 ]
 
-const raffleStyleOptions: Array<{ value: RaffleStyle; label: string }> = [
-  { value: 'roulette', label: '룰렛 쇼업' },
-  { value: 'lotto', label: '로또볼 쇼업' },
-  { value: 'target', label: '과녁 쇼업' },
+const rafflePrizeNameFields: Array<{ key: RafflePrizeNameKey; label: string; description: string }> = [
+  {
+    key: 'rafflePrizeNameFile',
+    label: '기본 행운권 상품 이름',
+    description: '룰별 상품명이 비어 있을 때 대신 보여줄 기본 상품명입니다.',
+  },
+  {
+    key: 'rafflePrizeNameAll',
+    label: '공개 응원 메시지 참여자 상품 이름',
+    description: '추첨룰 1의 상품명을 운영자 화면과 당첨 안내에 표시합니다.',
+  },
+  {
+    key: 'rafflePrizeNameLeader',
+    label: '현재 1위 팀 참여자 상품 이름',
+    description: '추첨룰 2의 상품명입니다.',
+  },
+  {
+    key: 'rafflePrizeNameTop3',
+    label: '1·2·3위 팀 참여자 상품 이름',
+    description: '추첨룰 3의 상품명입니다.',
+  },
+  {
+    key: 'rafflePrizeNameRank456',
+    label: '4·5·6위 팀 참여자 상품 이름',
+    description: '추첨룰 4의 상품명입니다.',
+  },
+  {
+    key: 'rafflePrizeNameLowerPack',
+    label: '7·8·9·10위 중 3팀 참여자 상품 이름',
+    description: '추첨룰 5의 상품명입니다.',
+  },
+  {
+    key: 'rafflePrizeNameMulti',
+    label: '5개 이상 팀 참여자 상품 이름',
+    description: '추첨룰 6의 상품명입니다.',
+  },
+  {
+    key: 'rafflePrizeNameBig',
+    label: '한 팀 7개 이상 참여자 상품 이름',
+    description: '추첨룰 7의 상품명입니다.',
+  },
+  {
+    key: 'rafflePrizeNameLongestCheer',
+    label: '가장 긴 응원 메시지 참여자 상품 이름',
+    description: '추첨룰 8의 상품명입니다.',
+  },
 ]
+
 type Point = {
   x: number
   y: number
@@ -397,7 +546,11 @@ type TeamVisual = Pick<
   | 'logoFocusX'
   | 'logoFocusY'
   | 'photoFit'
+  | 'photoShape'
+  | 'photoFrame'
+  | 'photoWidth'
   | 'photoHeight'
+  | 'photoRadius'
   | 'photoZoom'
   | 'photoFocusX'
   | 'photoFocusY'
@@ -409,8 +562,8 @@ const DEFAULT_STAR_BUDGET = 10
 const DEFAULT_DURATION_MINUTES = 10
 const DEFAULT_MIN_SCORE = 5
 const MAX_STARS_PER_TEAM = 10
-const CHEER_MESSAGE_MAX_LENGTH = 240
 const KST_OFFSET_MINUTES = 9 * 60
+const DEFAULT_TEAM_PHOTO_RADIUS = 18
 const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
 const imageShapeOptions: Array<{ value: ImageShape; label: string }> = [
   { value: 'circle', label: '원형' },
@@ -428,7 +581,7 @@ const imageFitOptions: Array<{ value: ImageFit; label: string }> = [
   { value: 'cover', label: '채우기' },
   { value: 'contain', label: '전체 보이기' },
 ]
-const teamColorPalette = ['#A50034', '#FD312E', '#D85A6A', '#2E6F9E', '#007C73', '#52734D', '#A67835', '#6F58C9', '#C44B8E', '#4C5968']
+const teamColorPalette = ['#D85A6A', '#4F8EF7', '#22A699', '#F2A93B', '#8B6CF6', '#EF7A45', '#5BA85A', '#D65DB1', '#4C78A8', '#9C755F']
 const copyLabels: Record<keyof EventCopy, string> = {
   appTitle: '앱 제목',
   appLogoFile: '상단 로고 이미지',
@@ -493,10 +646,23 @@ const copyLabels: Record<keyof EventCopy, string> = {
   rafflePrizeImageFile: '행운권 상품 이미지',
   rafflePrizeImageAll: '공개 응원 메시지 참여자 상품 이미지',
   rafflePrizeImageLeader: '현재 1위 팀 참여자 상품 이미지',
-  rafflePrizeImageTop2: '1·2위 팀 참여자 상품 이미지',
   rafflePrizeImageTop3: '1·2·3위 팀 참여자 상품 이미지',
-  rafflePrizeImageMulti: '3개 이상 팀 참여자 상품 이미지',
+  rafflePrizeImageRank456: '4·5·6위 팀 참여자 상품 이미지',
+  rafflePrizeImageLowerPack: '7·8·9·10위 중 3팀 참여자 상품 이미지',
+  rafflePrizeImageMulti: '5개 이상 팀 참여자 상품 이미지',
   rafflePrizeImageBig: '한 팀 7개 이상 참여자 상품 이미지',
+  rafflePrizeImageLongestCheer: '가장 긴 응원 메시지 참여자 상품 이미지',
+  rafflePrizeNameFile: '기본 행운권 상품 이름',
+  rafflePrizeNameAll: '공개 응원 메시지 참여자 상품 이름',
+  rafflePrizeNameLeader: '현재 1위 팀 참여자 상품 이름',
+  rafflePrizeNameTop3: '1·2·3위 팀 참여자 상품 이름',
+  rafflePrizeNameRank456: '4·5·6위 팀 참여자 상품 이름',
+  rafflePrizeNameLowerPack: '7·8·9·10위 중 3팀 참여자 상품 이름',
+  rafflePrizeNameMulti: '5개 이상 팀 참여자 상품 이름',
+  rafflePrizeNameBig: '한 팀 7개 이상 참여자 상품 이름',
+  rafflePrizeNameLongestCheer: '가장 긴 응원 메시지 참여자 상품 이름',
+  raffleStartButtonLabel: '행운권 시작 버튼 문구',
+  raffleStopButtonLabel: '행운권 정지 버튼 문구',
 }
 
 const copyHelp: Partial<Record<keyof EventCopy, string>> = {
@@ -518,10 +684,23 @@ const copyHelp: Partial<Record<keyof EventCopy, string>> = {
   rafflePrizeImageFile: '행운권 추첨 화면의 선물 아이콘을 눌렀을 때 보여줄 상품 이미지입니다.',
   rafflePrizeImageAll: '공개 응원 메시지 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
   rafflePrizeImageLeader: '현재 1위 팀 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
-  rafflePrizeImageTop2: '1·2위 팀 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
   rafflePrizeImageTop3: '1·2·3위 팀 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
-  rafflePrizeImageMulti: '3개 이상 팀 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeImageRank456: '4·5·6위 팀 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeImageLowerPack: '7·8·9·10위 중 3팀 이상 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeImageMulti: '5개 이상 팀 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
   rafflePrizeImageBig: '한 팀 7개 이상 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeImageLongestCheer: '가장 긴 응원 메시지 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeNameFile: '상품 이미지가 없거나 룰별 상품 이름이 비어 있을 때 쓰는 기본 상품명입니다.',
+  rafflePrizeNameAll: '공개 응원 메시지 참여자 추첨 룰에서 보여줄 상품명입니다.',
+  rafflePrizeNameLeader: '현재 1위 팀 참여자 추첨 룰에서 보여줄 상품명입니다.',
+  rafflePrizeNameTop3: '1·2·3위 팀 참여자 추첨 룰에서 보여줄 상품명입니다.',
+  rafflePrizeNameRank456: '4·5·6위 팀 참여자 추첨 룰에서 보여줄 상품명입니다.',
+  rafflePrizeNameLowerPack: '7·8·9·10위 중 3팀 이상 참여자 추첨 룰에서 보여줄 상품명입니다.',
+  rafflePrizeNameMulti: '5개 이상 팀 참여자 추첨 룰에서 보여줄 상품명입니다.',
+  rafflePrizeNameBig: '한 팀 7개 이상 참여자 추첨 룰에서 보여줄 상품명입니다.',
+  rafflePrizeNameLongestCheer: '가장 긴 응원 메시지 추첨 룰에서 보여줄 상품명입니다.',
+  raffleStartButtonLabel: '행운권 패널과 송출 화면의 시작 버튼 문구입니다.',
+  raffleStopButtonLabel: '행운권 패널과 송출 화면의 정지 버튼 문구입니다.',
 }
 
 const copyGroups: Array<{
@@ -592,7 +771,17 @@ const copyGroups: Array<{
     eyeline: 'Showup',
     title: '말풍선/행운권 쇼업',
     description: '말풍선 쇼업과 행운권 추첨 송출 화면에서 사용하는 문구입니다.',
-    keys: ['showupEyeline', 'showupTitle', 'showupShuffleLabel', 'wallRaffleEyeline', 'wallRaffleTitle', 'rafflePanelEyeline', 'rafflePanelTitle'],
+    keys: [
+      'showupEyeline',
+      'showupTitle',
+      'showupShuffleLabel',
+      'wallRaffleEyeline',
+      'wallRaffleTitle',
+      'rafflePanelEyeline',
+      'rafflePanelTitle',
+      'raffleStartButtonLabel',
+      'raffleStopButtonLabel',
+    ],
   },
   {
     id: 'quiz',
@@ -619,6 +808,7 @@ const registeredKey = 'vibe-vote-registered'
 const registeredSessionKey = 'vibe-vote-registered-session'
 const raffleDismissedKey = 'vibe-vote-raffle-dismissed-at'
 const quizWinnerDismissedKey = 'vibe-vote-quiz-winner-dismissed'
+const themeModeKey = 'vibe-vote-theme-mode'
 const cookieMaxAge = 60 * 60 * 24 * 14
 const fallbackCopy: EventCopy = {
   appTitle: 'Vibe Vote Arena',
@@ -688,10 +878,23 @@ const fallbackCopy: EventCopy = {
   rafflePrizeImageFile: '',
   rafflePrizeImageAll: '',
   rafflePrizeImageLeader: '',
-  rafflePrizeImageTop2: '',
   rafflePrizeImageTop3: '',
+  rafflePrizeImageRank456: '',
+  rafflePrizeImageLowerPack: '',
   rafflePrizeImageMulti: '',
   rafflePrizeImageBig: '',
+  rafflePrizeImageLongestCheer: '',
+  rafflePrizeNameFile: '',
+  rafflePrizeNameAll: '',
+  rafflePrizeNameLeader: '',
+  rafflePrizeNameTop3: '',
+  rafflePrizeNameRank456: '',
+  rafflePrizeNameLowerPack: '',
+  rafflePrizeNameMulti: '',
+  rafflePrizeNameBig: '',
+  rafflePrizeNameLongestCheer: '',
+  raffleStartButtonLabel: '추첨 시작',
+  raffleStopButtonLabel: '정지',
 }
 
 const fallbackTeams: Team[] = [
@@ -900,6 +1103,7 @@ const fallbackState: EventState = {
     },
   ],
   voteEvents: [],
+  awardHistory: [],
   closed: false,
   closesAt: Date.now() + 10 * 60 * 1000,
   lastRaffle: null,
@@ -930,7 +1134,7 @@ const fallbackState: EventState = {
     targetTime: '',
     minScore: DEFAULT_MIN_SCORE,
     cheerNameMode: 'masked',
-    themeMode: 'light',
+    themeMode: 'stage',
   },
   copy: fallbackCopy,
 }
@@ -944,7 +1148,9 @@ const messageTimeFormatter = new Intl.DateTimeFormat('ko-KR', {
 function App() {
   const mode = getAppMode()
   const [participantId] = useState(getOrCreateParticipantId)
-  const { state, connection, post } = useEventState(mode, participantId)
+  const adminSession = useAdminSession(mode === 'admin')
+  const allowProtectedRealtime = mode !== 'admin' || adminSession.authenticated
+  const { state, connection, post } = useEventState(mode, participantId, true, allowProtectedRealtime)
   const themeMode = getThemeMode(state)
   const [name, setName] = useState(() => getStoredValue(nameKey))
   const [group, setGroup] = useState(() => getStoredValue(groupKey))
@@ -953,8 +1159,9 @@ function App() {
   const [showCheerConstellation, setShowCheerConstellation] = useState(
     () => new URLSearchParams(window.location.search).get('showCheer') === '1',
   )
+  const visibleWallPanel: WallPanel = mode === 'wall' && state.quiz.mode !== 'idle' ? 'quiz' : wallPanel
 
-  const participant = state.participants.find((person) => isSameParticipantIdentity(person, participantId, name, group))
+  const participant = state.participants.find((person) => isSameParticipantDevice(person, participantId))
   const allocations = participant?.allocations ?? {}
   const starBudget = getStarBudget(state)
   const spentStars = sumStars(allocations)
@@ -962,7 +1169,12 @@ function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode
+    storeValue(themeModeKey, themeMode)
   }, [themeMode])
+
+  useEffect(() => {
+    document.title = getDocumentTitle(mode, visibleWallPanel)
+  }, [mode, visibleWallPanel])
 
   const saveName = (nextName: string) => {
     setName(nextName)
@@ -979,20 +1191,30 @@ function App() {
     storeValue(departmentKey, nextDepartment)
   }
 
+  if (mode === 'admin' && (!adminSession.ready || (adminSession.required && !adminSession.authenticated))) {
+    return (
+      <main className={`app-shell theme-${themeMode}`}>
+        <AdminLoginView session={adminSession} />
+      </main>
+    )
+  }
+
   return (
     <main className={`app-shell theme-${themeMode} ${mode === 'wall' ? 'wall-shell-app' : ''}`}>
       <Header
         mode={mode}
         connection={connection}
         state={state}
-        wallPanel={wallPanel}
+        wallPanel={visibleWallPanel}
         onWallPanelChange={setWallPanel}
         onOpenCheerConstellation={() => setShowCheerConstellation(true)}
         onPrepareQuiz={() => {
-          if (mode === 'wall') void post('/api/quiz/prepare', {})
+          if (mode === 'admin' || mode === 'wall') return post('/api/quiz/prepare', {})
+          return null
         }}
         onEndQuiz={() => {
-          if (mode === 'wall') void post('/api/quiz/clear', {})
+          if (mode === 'admin' || mode === 'wall') return post('/api/quiz/clear', {})
+          return null
         }}
       />
       {mode === 'admin' ? (
@@ -1001,7 +1223,7 @@ function App() {
         <PublicWallView
           state={state}
           post={post}
-          wallPanel={wallPanel}
+          wallPanel={visibleWallPanel}
           onWallPanelChange={setWallPanel}
           showCheerConstellation={showCheerConstellation}
           onShowCheerConstellationChange={setShowCheerConstellation}
@@ -1030,6 +1252,47 @@ function App() {
   )
 }
 
+function AdminLoginView({ session }: { session: AdminSessionState }) {
+  const [passcode, setPasscode] = useState('')
+
+  const submit = (event: ReactFormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void session.login(passcode)
+  }
+
+  return (
+    <section className="admin-auth-shell" aria-label="관리자 인증">
+      <div className="admin-auth-card">
+        <div className="auth-lock" aria-hidden="true">
+          <LockKeyhole size={28} />
+        </div>
+        <p className="section-kicker">Admin Access</p>
+        <h1>관리자 화면 보호</h1>
+        <p className="auth-copy">
+          운영 콘솔, 메시지 관리, 추첨, 초기화 기능은 관리자 passcode 확인 후 사용할 수 있습니다.
+        </p>
+        <form className="admin-auth-form" onSubmit={submit}>
+          <label htmlFor="admin-passcode">Passcode</label>
+          <input
+            id="admin-passcode"
+            type="password"
+            value={passcode}
+            onChange={(event) => setPasscode(event.target.value)}
+            placeholder={session.ready ? '관리자 passcode 입력' : '상태 확인 중'}
+            autoComplete="current-password"
+            disabled={!session.ready || session.loading}
+          />
+          {session.error ? <p className="auth-error" role="alert">{session.error}</p> : null}
+          <button type="submit" className="primary-action" disabled={!session.ready || session.loading || !passcode.trim()}>
+            <LogIn size={17} />
+            {session.loading ? '확인 중' : '입장'}
+          </button>
+        </form>
+      </div>
+    </section>
+  )
+}
+
 function getAppMode(): AppMode {
   if (window.location.pathname.startsWith('/admin')) return 'admin'
   if (window.location.pathname.startsWith('/wall')) return 'wall'
@@ -1053,6 +1316,35 @@ function getInitialAdminPanel(): AdminPanel | null {
     panel === 'export'
     ? panel
     : null
+}
+
+function syncAdminPanelRoute(panel: AdminPanel | null) {
+  if (!window.location.pathname.startsWith('/admin')) return
+
+  const nextUrl = new URL(window.location.href)
+
+  if (panel) {
+    nextUrl.searchParams.delete('showCheer')
+    nextUrl.searchParams.set('panel', panel)
+  } else {
+    nextUrl.searchParams.delete('panel')
+  }
+
+  const nextPath = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`
+  window.history.replaceState(null, '', nextPath)
+}
+
+function getDocumentTitle(mode: AppMode, wallPanel: WallPanel) {
+  if (mode === 'wall') return `vibe-compete/wall${wallPanel === 'overview' ? '' : `/${wallPanel}`}`
+  if (mode === 'admin') {
+    const panel = getInitialAdminPanel()
+    return `vibe-compete/admin${panel ? `/${panel}` : ''}`
+  }
+  if (mode === 'team') {
+    const teamId = getTeamEditRouteId()
+    return `vibe-compete/team${teamId ? `/${teamId}` : ''}`
+  }
+  return 'vibe-compete/vote'
 }
 
 function getTeamEditRouteId() {
@@ -1097,8 +1389,8 @@ function Header({
   wallPanel: WallPanel
   onWallPanelChange: (panel: WallPanel) => void
   onOpenCheerConstellation: () => void
-  onPrepareQuiz?: () => void
-  onEndQuiz?: () => void
+  onPrepareQuiz?: () => Promise<EventState | null> | EventState | null | void
+  onEndQuiz?: () => Promise<EventState | null> | EventState | null | void
 }) {
   const [now, setNow] = useState(() => Date.now())
 
@@ -1113,6 +1405,8 @@ function Header({
   const wallTotalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
   const wallVisibleCheers = state.cheers.filter((message) => !message.hidden).length
   const adminPanel = new URLSearchParams(window.location.search).get('panel')
+  const adminOverviewActive = state.quiz.mode === 'idle' && (!adminPanel || adminPanel === 'arena')
+  const adminQuizActive = adminPanel === 'quiz' || state.quiz.mode !== 'idle'
 
   return (
     <header className={`topbar ${mode === 'admin' ? 'admin-topbar' : 'audience-topbar'} ${mode === 'wall' ? 'wall-topbar' : ''}`} aria-label="행사 상태">
@@ -1130,7 +1424,7 @@ function Header({
       <div className="event-controls">
         {mode === 'admin' ? (
           <>
-            <a className={`role-nav-link ${adminPanel && adminPanel !== 'arena' ? '' : 'active'}`} href="/admin">
+            <a className={`role-nav-link ${adminOverviewActive ? 'active' : ''}`} href="/admin">
               <RadioTower size={15} />
               실시간 현황
             </a>
@@ -1150,7 +1444,15 @@ function Header({
               <FileSpreadsheet size={15} />
               결과 내보내기
             </a>
-            <a className={`role-nav-link ${adminPanel === 'quiz' ? 'active' : ''}`} href="/admin?panel=quiz">
+            <a
+              className={`role-nav-link ${adminQuizActive ? 'active' : ''}`}
+              href="/admin?panel=quiz"
+              onClick={(event) => {
+                if (!onPrepareQuiz) return
+                event.preventDefault()
+                void onPrepareQuiz()
+              }}
+            >
               <CircleHelp size={15} />
               퀴즈 운영
             </a>
@@ -1211,7 +1513,7 @@ function Header({
                 type="button"
                 className={wallPanel === 'quiz' ? 'active' : ''}
                 onClick={() => {
-                  onWallPanelChange('quiz')
+                  onWallPanelChange('overview')
                   onPrepareQuiz?.()
                 }}
               >
@@ -1262,6 +1564,141 @@ function BrandMark({ copy }: { copy: EventCopy }) {
           }}
         />
       ) : 'V'}
+    </div>
+  )
+}
+
+type BrandLogoEditMode = 'focus' | 'width' | 'height' | 'frame'
+
+function BrandLogoFrameEditor({
+  copy,
+  onChange,
+  onUpload,
+}: {
+  copy: EventCopy
+  onChange: (field: ImageTuningField, value: string) => void
+  onUpload: (file: File | undefined) => void
+}) {
+  const frameRef = useRef<HTMLDivElement | null>(null)
+  const dragRef = useRef<{
+    mode: BrandLogoEditMode
+    startX: number
+    startY: number
+    width: number
+    height: number
+    focusX: number
+    focusY: number
+    renderedWidth: number
+    renderedHeight: number
+  } | null>(null)
+  const shape = normalizeImageShape(copy.appLogoShape, 'circle')
+  const size = getImageSizeValue(copy.appLogoSize, 52, 36, 92)
+  const fallbackFrame = getDefaultImageFrameDimensions(shape, size)
+  const width = getImageDimensionValue(copy.appLogoWidth, fallbackFrame.width, 36, 220)
+  const height = getImageDimensionValue(copy.appLogoHeight, fallbackFrame.height, 32, 120)
+  const focusX = getPercentValue(copy.appLogoFocusX, 50)
+  const focusY = getPercentValue(copy.appLogoFocusY, 50)
+  const zoom = getZoomValue(copy.appLogoZoom, 1)
+
+  const beginDrag = (mode: BrandLogoEditMode, event: ReactPointerEvent<HTMLElement>) => {
+    const bounds = frameRef.current?.getBoundingClientRect()
+    if (!bounds) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = {
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      width,
+      height,
+      focusX,
+      focusY,
+      renderedWidth: bounds.width,
+      renderedHeight: bounds.height,
+    }
+  }
+
+  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag) return
+
+    const deltaX = event.clientX - drag.startX
+    const deltaY = event.clientY - drag.startY
+
+    if (drag.mode === 'focus') {
+      onChange('focusX', String(clamp(Math.round(drag.focusX + (deltaX / Math.max(1, drag.renderedWidth)) * 100), 0, 100)))
+      onChange('focusY', String(clamp(Math.round(drag.focusY + (deltaY / Math.max(1, drag.renderedHeight)) * 100), 0, 100)))
+      return
+    }
+
+    const scaleX = drag.width / Math.max(1, drag.renderedWidth)
+    const scaleY = drag.height / Math.max(1, drag.renderedHeight)
+
+    if (drag.mode === 'width' || drag.mode === 'frame') {
+      onChange('width', String(clamp(Math.round(drag.width + deltaX * scaleX), 36, 220)))
+    }
+
+    if (drag.mode === 'height' || drag.mode === 'frame') {
+      onChange('height', String(clamp(Math.round(drag.height + deltaY * scaleY), 32, 120)))
+    }
+  }
+
+  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    } catch {
+      // Pointer capture may already be released by the browser.
+    }
+    dragRef.current = null
+  }
+
+  const adjustZoom = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (!copy.appLogoFile) return
+    event.preventDefault()
+    const step = event.deltaY < 0 ? 0.05 : -0.05
+    onChange('zoom', String(Number(clamp(zoom + step, 1, 2.4).toFixed(2))))
+  }
+
+  return (
+    <div
+      className="brand-logo-frame-editor"
+      ref={frameRef}
+      onPointerMove={moveDrag}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onWheel={adjustZoom}
+    >
+      <BrandMark copy={copy} />
+      {copy.appLogoFile ? (
+        <>
+          <button
+            type="button"
+            className="photo-editor-surface"
+            aria-label="상단 로고 초점 이동"
+            title="상단 로고 초점 이동"
+            onPointerDown={(event) => beginDrag('focus', event)}
+          />
+          <span className="photo-editor-focus" style={{ left: `${focusX}%`, top: `${focusY}%` }} aria-hidden="true" />
+        </>
+      ) : null}
+      <label className="photo-upload-hotspot compact" title="상단 로고 파일 변경">
+        <ImagePlus size={13} />
+        변경
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon"
+          onChange={(event) => {
+            onUpload(event.currentTarget.files?.[0])
+            event.currentTarget.value = ''
+          }}
+        />
+      </label>
+      <button type="button" className="photo-resize-handle width" aria-label="상단 로고 가로 조절" onPointerDown={(event) => beginDrag('width', event)} />
+      <button type="button" className="photo-resize-handle height" aria-label="상단 로고 세로 조절" onPointerDown={(event) => beginDrag('height', event)} />
+      <button type="button" className="photo-resize-handle corner" aria-label="상단 로고 크기 조절" onPointerDown={(event) => beginDrag('frame', event)} />
     </div>
   )
 }
@@ -1337,24 +1774,28 @@ function VoteView({
   starBudget: number
   post: (path: string, body: unknown) => Promise<EventState | null>
 }) {
-  const [hasRegistered, setHasRegistered] = useState(() => getStoredValue(registeredKey) === '1')
-  const [registeredSession, setRegisteredSession] = useState(() => getStoredValue(registeredSessionKey))
   const [cheerTexts, setCheerTexts] = useState<Record<string, string>>({})
   const [quizAnswerDraft, setQuizAnswerDraft] = useState({ quizId: 0, text: '' })
   const [quizFeedbackDraft, setQuizFeedbackDraft] = useState({ quizId: 0, text: '' })
   const [dismissedRaffleAt, setDismissedRaffleAt] = useState(() => Number(getStoredValue(raffleDismissedKey)) || 0)
   const [dismissedQuizWinner, setDismissedQuizWinner] = useState(() => getStoredValue(quizWinnerDismissedKey))
+  const [noticeMountedAt] = useState(() => Date.now())
+  const [cheerReadAtByTeam, setCheerReadAtByTeam] = useState<Record<string, number>>({})
   const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null)
+  const directTeamRefs = useRef<Record<string, HTMLElement | null>>({})
   const cheerThreadRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const cheerInputRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
+  const pendingExpandedTeamFrameRef = useRef<string | null>(null)
+  const pendingCheerFocusTeamRef = useRef<string | null>(null)
+  const pendingCollapsedTeamFocusRef = useRef<string | null>(null)
 
   const audienceTeams = useMemo(() => {
     return [...state.teams].sort((a, b) => (fallbackTeamOrder.get(a.id) ?? 0) - (fallbackTeamOrder.get(b.id) ?? 0))
   }, [state.teams])
-  const hasRegistrationInfo = Boolean(name.trim() && normalizeLetsIdDisplay(group))
+  const hasRegistrationInfo = Boolean(name.trim() && normalizeLetsIdDisplay(group) && department.trim())
   const departmentDisplay = department.trim() || participant?.department || ''
   const sessionReady = state.sessionId > 0
-  const sessionRegistered = hasRegistered && registeredSession === String(state.sessionId)
-  const isRegistered = hasRegistrationInfo && (sessionRegistered || Boolean(participant))
+  const isRegistered = Boolean(participant)
   const canVote = sessionReady && isRegistered && !state.closed
   const perTeamStarLimit = Math.min(starBudget, MAX_STARS_PER_TEAM)
   const currentParticipantId = participant?.id ?? participantId
@@ -1370,15 +1811,21 @@ function VoteView({
   const latestMyQuizAnswer = myQuizAnswers[0]
   const myWinningQuizAnswer = state.quiz.winners.find((answer) => answer.participantId === currentParticipantId)
   const quizWinnerNoticeKey = myWinningQuizAnswer ? `${myWinningQuizAnswer.quizId}:${myWinningQuizAnswer.id}` : ''
-  const showQuizWinnerNotice = Boolean(myWinningQuizAnswer && quizWinnerNoticeKey !== dismissedQuizWinner)
-  const raffleWinner = state.lastRaffle?.winners.find((winner) => {
-    if (winner.id === currentParticipantId) return true
-    return (
-      normalizeParticipantNameIdentity(winner.name) === normalizeParticipantNameIdentity(name) &&
-      normalizeParticipantGroupIdentity(winner.group || '') === normalizeParticipantGroupIdentity(group)
-    )
-  })
-  const showRaffleWinnerNotice = Boolean(state.lastRaffle && raffleWinner && state.lastRaffle.createdAt !== dismissedRaffleAt)
+  const showQuizWinnerNotice = Boolean(
+    myWinningQuizAnswer &&
+      myWinningQuizAnswer.createdAt > noticeMountedAt &&
+      quizWinnerNoticeKey !== dismissedQuizWinner,
+  )
+  const raffleWinner = isRegistered ? state.lastRaffle?.winners.find((winner) => winner.id === currentParticipantId) : undefined
+  const showRaffleWinnerNotice = Boolean(
+    state.lastRaffle &&
+      raffleWinner &&
+      state.lastRaffle.createdAt > noticeMountedAt &&
+      state.lastRaffle.createdAt !== dismissedRaffleAt,
+  )
+  const myAwardHistory = useMemo(() => {
+    return buildParticipantAwardHistory(state, currentParticipantId)
+  }, [currentParticipantId, state])
   const hasVisibleCheer = participantMessages.some((message) => !message.hidden)
   const hasHiddenCheer = participantMessages.some((message) => message.hidden)
   const hasSubmittedCheer = Boolean(participant?.cheerSubmitted || participantMessages.length)
@@ -1409,15 +1856,36 @@ function VoteView({
   }, [expandedTeamId, state.cheers.length])
 
   useEffect(() => {
-    if (!sessionReady || !hasRegistrationInfo || !sessionRegistered || participant) return
-    post('/api/register', {
-      sessionId: state.sessionId,
-      participantId,
-      name: name.trim(),
-      group: normalizeLetsIdDisplay(group),
-      department: departmentDisplay,
+    const teamId = pendingCheerFocusTeamRef.current
+    if (!teamId || expandedTeamId !== teamId) return
+
+    pendingCheerFocusTeamRef.current = null
+    window.requestAnimationFrame(() => {
+      directTeamRefs.current[teamId]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      cheerThreadRefs.current[teamId]?.scrollTo({ top: cheerThreadRefs.current[teamId]?.scrollHeight ?? 0, behavior: 'smooth' })
+      cheerInputRefs.current[teamId]?.focus({ preventScroll: true })
     })
-  }, [departmentDisplay, group, hasRegistrationInfo, name, participant, participantId, post, sessionReady, sessionRegistered, state.sessionId])
+  }, [expandedTeamId, state.cheers.length])
+
+  useEffect(() => {
+    const teamId = pendingExpandedTeamFrameRef.current
+    if (!teamId || expandedTeamId !== teamId) return
+
+    pendingExpandedTeamFrameRef.current = null
+    window.requestAnimationFrame(() => {
+      directTeamRefs.current[teamId]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+  }, [expandedTeamId])
+
+  useEffect(() => {
+    const teamId = pendingCollapsedTeamFocusRef.current
+    if (!teamId || expandedTeamId) return
+
+    pendingCollapsedTeamFocusRef.current = null
+    window.requestAnimationFrame(() => {
+      directTeamRefs.current[teamId]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+  }, [expandedTeamId])
 
   const setTeamStars = async (teamId: string, targetStars: number) => {
     if (!canVote) return
@@ -1455,9 +1923,26 @@ function VoteView({
       onGroupChange(letsId)
       storeValue(registeredKey, '1')
       storeValue(registeredSessionKey, String(response.sessionId))
-      setRegisteredSession(String(response.sessionId))
-      setHasRegistered(true)
     }
+  }
+
+  const handleRegistrationSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void registerParticipant()
+  }
+
+  const markTeamCheerRead = (teamId: string) => {
+    setCheerReadAtByTeam((current) => ({ ...current, [teamId]: Date.now() }))
+  }
+
+  const toggleTeamCheer = (teamId: string, expanded: boolean) => {
+    markTeamCheerRead(teamId)
+    if (expanded) {
+      pendingCollapsedTeamFocusRef.current = teamId
+    } else {
+      pendingExpandedTeamFrameRef.current = teamId
+    }
+    setExpandedTeamId(expanded ? null : teamId)
   }
 
   const sendCheer = async (teamId: string) => {
@@ -1475,6 +1960,9 @@ function VoteView({
     })
 
     if (response) {
+      pendingCheerFocusTeamRef.current = teamId
+      setExpandedTeamId(teamId)
+      markTeamCheerRead(teamId)
       setCheerTexts((current) => ({ ...current, [teamId]: '' }))
     }
   }
@@ -1543,7 +2031,7 @@ function VoteView({
       {!quizActive ? (
         <section className="hero-band audience">
           <div>
-            <h2>{formatCopy(state.copy.audienceHeroTitle, { starBudget, maxStarsPerTeam: MAX_STARS_PER_TEAM })}</h2>
+            <h2>{renderStarAccent(formatCopy(state.copy.audienceHeroTitle, { starBudget, maxStarsPerTeam: MAX_STARS_PER_TEAM }))}</h2>
             <p>{formatCopy(state.copy.audienceHeroSubtitle, { starBudget, maxStarsPerTeam: MAX_STARS_PER_TEAM })}</p>
           </div>
           <StarWallet remainingStars={remainingStars} spentStars={spentStars} starBudget={starBudget} />
@@ -1551,7 +2039,7 @@ function VoteView({
       ) : null}
 
       {showRaffleWinnerNotice && raffleWinner ? (
-        <RaffleWinnerNotice winner={raffleWinner} onDismiss={dismissRaffleWinnerNotice} />
+        <RaffleWinnerNotice state={state} winner={raffleWinner} onDismiss={dismissRaffleWinnerNotice} />
       ) : null}
 
       {showQuizWinnerNotice && myWinningQuizAnswer ? (
@@ -1570,7 +2058,7 @@ function VoteView({
           </div>
           {departmentDisplay ? (
             <div>
-              <span>부서/소속</span>
+            <span>팀명/부서/소속</span>
               <strong>{departmentDisplay}</strong>
             </div>
           ) : null}
@@ -1585,7 +2073,7 @@ function VoteView({
               <h2>{state.copy.checkInTitle}</h2>
             </div>
           </div>
-          <div className="registration-form">
+          <form className="registration-form" onSubmit={handleRegistrationSubmit}>
             <label>
               <span>이름</span>
               <input
@@ -1613,13 +2101,13 @@ function VoteView({
                 placeholder="예: DX팀"
               />
             </label>
-            <button type="button" onClick={registerParticipant} disabled={!hasRegistrationInfo || !sessionReady}>
+            <button type="submit" disabled={!hasRegistrationInfo || !sessionReady}>
               <Check size={17} />
               등록하고 투표 시작
             </button>
-          </div>
+          </form>
           <p className="registration-note">
-            {sessionReady ? state.copy.registrationReady : state.copy.registrationConnecting}
+            {sessionReady ? `${state.copy.registrationReady} 팀명/부서/소속도 함께 입력해야 입장할 수 있습니다.` : state.copy.registrationConnecting}
           </p>
         </section>
       ) : quizActive ? (
@@ -1644,7 +2132,7 @@ function VoteView({
             <div className="section-heading compact">
               <div>
                 <p className="section-kicker">{state.copy.teamVoteEyeline}</p>
-                <h2>{state.copy.teamVoteTitle}</h2>
+                <h2>{renderStarAccent(state.copy.teamVoteTitle)}</h2>
               </div>
               <div className="participant-chip">
                 <strong>{name}</strong>
@@ -1656,6 +2144,7 @@ function VoteView({
               <Gift size={18} />
               <span>{raffleStatusText}</span>
             </div>
+            <ParticipantAwardHistory awards={myAwardHistory} state={state} />
             {moderationNoticeText ? (
               <div className="inline-alert moderation-alert" role="status" aria-live="assertive">
                 <EyeOff size={17} />
@@ -1671,18 +2160,30 @@ function VoteView({
                 const canCheerForTeam = canVote && myStars > 0
                 const maxSelectable = Math.min(perTeamStarLimit, myStars + remainingStars)
                 const expanded = expandedTeamId === team.id
-                const teamCheers = state.cheers
+                const visibleTeamCheers = state.cheers
                   .filter((message) => message.teamId === team.id && !message.hidden)
                   .sort((a, b) => a.createdAt - b.createdAt)
-                  .slice(-10)
+                const teamCheers = visibleTeamCheers.slice(-10)
+                const unreadCheerCount = visibleTeamCheers.filter(
+                  (message) =>
+                    message.participantId !== currentParticipantId &&
+                    message.createdAt > (cheerReadAtByTeam[team.id] ?? noticeMountedAt),
+                ).length
 
                 return (
-                  <article className={`direct-team ${myStars > 0 ? 'has-stars' : ''}`} key={team.id}>
+                  <article
+                    className={`direct-team ${myStars > 0 ? 'has-stars' : ''} ${expanded ? 'is-expanded' : ''}`}
+                    key={team.id}
+                    style={{ '--team-color': team.color } as CSSProperties}
+                    ref={(node) => {
+                      directTeamRefs.current[team.id] = node
+                    }}
+                  >
                     <div className="direct-team-head">
                       <button
                         type="button"
                         className="direct-team-summary"
-                        onClick={() => setExpandedTeamId(expanded ? null : team.id)}
+                        onClick={() => toggleTeamCheer(team.id, expanded)}
                         aria-expanded={expanded}
                       >
                         <LogoMark team={team} />
@@ -1690,36 +2191,53 @@ function VoteView({
                           <strong>{team.name}</strong>
                           <span>{team.title}</span>
                         </div>
-                        <small>{expanded ? '닫기' : state.copy.cheerButtonLabel}</small>
                       </button>
 
-                      <div className="team-star-picker" aria-label={`${team.name}에 준 별 ${myStars}개`}>
-                        {Array.from({ length: perTeamStarLimit }).map((_, index) => {
-                          const target = index + 1
-                          const disabled = !canVote || target > maxSelectable
-                          const filled = index < myStars
-                          const className = filled ? 'filled' : disabled ? 'locked' : 'available'
+                      <div className="team-vote-control">
+                        <div className="team-vote-meta">
+                          <button
+                            type="button"
+                            className="cheer-summary-action"
+                            onClick={() => toggleTeamCheer(team.id, expanded)}
+                            aria-expanded={expanded}
+                          >
+                            <span>{expanded ? '닫기' : state.copy.cheerButtonLabel}</span>
+                            {!expanded && unreadCheerCount > 0 ? (
+                              <em aria-label={`읽지 않은 응원 메시지 ${unreadCheerCount}개`}>
+                                {Math.min(unreadCheerCount, 99)}
+                              </em>
+                            ) : null}
+                          </button>
+                          <span className="team-star-count">{myStars} / {perTeamStarLimit}</span>
+                        </div>
 
-                          return (
-                            <button
-                              type="button"
-                              key={target}
-                              className={className}
-                              onClick={() => setTeamStars(team.id, target)}
-                              disabled={disabled}
-                              title={
-                                state.closed
-                                  ? '투표가 마감되었습니다.'
-                                  : target > maxSelectable
-                                    ? '남은 별이 부족합니다.'
-                                    : `${team.name}에 별 ${target}개 적용`
-                              }
-                            >
-                              <Star size={20} />
-                            </button>
-                          )
-                        })}
-                        <span>{myStars} / {perTeamStarLimit}</span>
+                        <div className="team-star-picker" aria-label={`${team.name}에 준 별 ${myStars}개`}>
+                          {Array.from({ length: perTeamStarLimit }).map((_, index) => {
+                            const target = index + 1
+                            const disabled = !canVote || target > maxSelectable
+                            const filled = index < myStars
+                            const className = filled ? 'filled' : disabled ? 'locked' : 'available'
+
+                            return (
+                              <button
+                                type="button"
+                                key={target}
+                                className={className}
+                                onClick={() => setTeamStars(team.id, target)}
+                                disabled={disabled}
+                                title={
+                                  state.closed
+                                    ? '투표가 마감되었습니다.'
+                                    : target > maxSelectable
+                                      ? '남은 별이 부족합니다.'
+                                      : `${team.name}에 별 ${target}개 적용`
+                                }
+                              >
+                                <Star size={20} />
+                              </button>
+                            )
+                          })}
+                        </div>
                       </div>
                     </div>
 
@@ -1739,7 +2257,11 @@ function VoteView({
                                 key={message.id}
                               >
                                 <div>
-                                  <strong>{message.participantId === currentParticipantId ? '나' : message.author}</strong>
+                                  <strong>
+                                    {message.participantId === currentParticipantId
+                                      ? '나'
+                                      : formatCheerAuthor(message.author, 'masked')}
+                                  </strong>
                                   <time>{formatMessageTime(message.createdAt)}</time>
                                 </div>
                                 <p>{message.text}</p>
@@ -1752,7 +2274,9 @@ function VoteView({
 
                         <div className="cheer-composer">
                           <textarea
-                            maxLength={CHEER_MESSAGE_MAX_LENGTH}
+                            ref={(node) => {
+                              cheerInputRefs.current[team.id] = node
+                            }}
                             value={cheerTexts[team.id] ?? ''}
                             onChange={(event) =>
                               setCheerTexts((current) => ({ ...current, [team.id]: event.target.value }))
@@ -1770,8 +2294,8 @@ function VoteView({
                             onClick={() => sendCheer(team.id)}
                             disabled={!canCheerForTeam || !(cheerTexts[team.id] ?? '').trim()}
                           >
-                            <Megaphone size={15} />
-                            전송
+                            <MessageCircle size={16} />
+                            응원 전송
                           </button>
                         </div>
                       </div>
@@ -1787,7 +2311,9 @@ function VoteView({
   )
 }
 
-function RaffleWinnerNotice({ winner, onDismiss }: { winner: RaffleWinner; onDismiss: () => void }) {
+function RaffleWinnerNotice({ state, winner, onDismiss }: { state: EventState; winner: RaffleWinner; onDismiss: () => void }) {
+  const details = getRaffleWinnerDetails(state, winner)
+
   return (
     <section className="raffle-winner-notice" role="status" aria-live="assertive">
       <div>
@@ -1797,6 +2323,16 @@ function RaffleWinnerNotice({ winner, onDismiss }: { winner: RaffleWinner; onDis
         {winner.rank ? <p className="winner-rank-label">{winner.rank}등 당첨</p> : null}
         <strong>{winner.name}</strong>
         {[winner.group, winner.department].filter(Boolean).length ? <span>{[winner.group, winner.department].filter(Boolean).join(' · ')}</span> : null}
+        <div className="winner-notice-details">
+          <div>
+            <b>응원한 팀</b>
+            {details.supports.length ? details.supports.map((item) => <em key={item.teamId}>{item.teamName} {item.stars}★</em>) : <em>기록 없음</em>}
+          </div>
+          <div>
+            <b>응원 메시지</b>
+            {details.cheers.length ? details.cheers.map((message, index) => <p key={`${message.teamId}-${message.createdAt}-${index}`}>{message.teamName} · {message.text}</p>) : <p>표시할 공개 메시지가 없습니다.</p>}
+          </div>
+        </div>
         <button type="button" onClick={onDismiss}>
           투표 화면으로 돌아가기
         </button>
@@ -1820,6 +2356,117 @@ function QuizWinnerNotice({ winner, onDismiss }: { winner: QuizAnswer; onDismiss
       </div>
     </section>
   )
+}
+
+function ParticipantAwardHistory({ awards, state }: { awards: AwardRecord[]; state: EventState }) {
+  if (!awards.length) return null
+
+  return (
+    <section className="award-history-panel" aria-label="내 수상 이력">
+      <div className="award-history-heading">
+        <Trophy size={17} />
+        <div>
+          <strong>내 수상 이력</strong>
+          <span>행운권 당첨과 퀴즈 정답 기록을 확인할 수 있습니다.</span>
+        </div>
+      </div>
+      <div className="award-history-list">
+        {awards.map((award) => {
+          const isRaffle = award.kind === 'raffle'
+          const ruleLabel = award.rule ? getRaffleRuleLabel(award.rule) : ''
+          const prizeInfo = isRaffle && award.rule ? getRafflePrizeInfo(state.copy, award.rule) : null
+          const prizeLabel = award.prizeName || prizeInfo?.name || (isRaffle ? getRafflePrizeLabel(award.rule) : '퀴즈 상품')
+          const prizeImage = award.prizeImageFile || prizeInfo?.image || ''
+          const title = isRaffle ? `행운권 ${award.rank ? `${award.rank}등 ` : ''}당첨` : `퀴즈 ${award.rank ? `${award.rank}번째 ` : ''}정답`
+          const detail = isRaffle ? ruleLabel || '행운권 추첨' : award.question || '퀴즈 정답'
+
+          return (
+            <details className="award-history-item" key={award.id}>
+              <summary>
+                <span>{title}</span>
+                <small>{formatMessageTime(award.createdAt)}</small>
+              </summary>
+              <dl>
+                <div>
+                  <dt>선정 기준</dt>
+                  <dd>{detail}</dd>
+                </div>
+                <div>
+                  <dt>상품</dt>
+                  <dd>{prizeLabel}</dd>
+                </div>
+              </dl>
+              {prizeImage ? <img src={prizeImage} alt={prizeLabel} /> : null}
+            </details>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function buildQuizWinnerHistory(state: EventState) {
+  const participantMap = new Map(state.participants.map((person) => [person.id, person]))
+  const records = new Map<
+    string,
+    {
+      id: string
+      question: string
+      createdAt: number
+      winners: Array<{ id: string; rank?: number; name: string; group?: string; department?: string }>
+    }
+  >()
+
+  for (const award of state.awardHistory ?? []) {
+    if (award.kind !== 'quiz') continue
+
+    const key = `${award.quizId ?? 'unknown'}:${award.question || award.createdAt}`
+    const participant = participantMap.get(award.participantId)
+    const record = records.get(key) ?? {
+      id: key,
+      question: award.question || '이전 퀴즈',
+      createdAt: award.createdAt,
+      winners: [],
+    }
+
+    record.createdAt = Math.max(record.createdAt, award.createdAt)
+    record.winners.push({
+      id: award.participantId,
+      rank: award.rank,
+      name: award.participantName || participant?.name || award.participantId,
+      group: award.participantGroup || participant?.group,
+      department: award.participantDepartment || participant?.department,
+    })
+    records.set(key, record)
+  }
+
+  for (const winner of state.quiz.winners) {
+    const key = `${winner.quizId}:${state.quiz.question || state.quiz.createdAt}`
+    const record = records.get(key) ?? {
+      id: key,
+      question: state.quiz.question || '현재 퀴즈',
+      createdAt: winner.createdAt,
+      winners: [],
+    }
+
+    if (!record.winners.some((item) => item.id === winner.participantId && item.rank === winner.rank)) {
+      record.winners.push({
+        id: winner.participantId,
+        rank: winner.rank,
+        name: winner.author,
+        group: winner.group,
+        department: winner.department,
+      })
+    }
+    records.set(key, record)
+  }
+
+  return [...records.values()]
+    .map((record) => ({
+      ...record,
+      winners: record.winners.sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999)),
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt)
 }
 
 function QuizParticipationView({
@@ -1975,13 +2622,12 @@ function AdminView({
   post: (path: string, body: unknown) => Promise<EventState | null>
 }) {
   const [raffleRule, setRaffleRule] = useState<RaffleRule>('all')
-  const [raffleStyle, setRaffleStyle] = useState<RaffleStyle>('lotto')
-  const [winnerCount, setWinnerCount] = useState(4)
   const [isDrawing, setIsDrawing] = useState(false)
   const [showCheerConstellation, setShowCheerConstellation] = useState(
     () => new URLSearchParams(window.location.search).get('showCheer') === '1',
   )
   const [activePanel, setActivePanel] = useState<AdminPanel | null>(getInitialAdminPanel)
+  const visiblePanel: AdminPanel | null = state.quiz.mode !== 'idle' ? 'quiz' : activePanel
   const starBudget = getStarBudget(state)
   const durationMinutes = getDurationMinutes(state)
   const timerMode = getTimerMode(state)
@@ -2001,6 +2647,35 @@ function AdminView({
     return state.cheers.some((message) => message.participantId === person.id && !message.hidden)
   }).length
 
+  const openAdminPanel = (panel: AdminPanel | null) => {
+    setActivePanel(panel)
+    syncAdminPanelRoute(panel)
+  }
+
+  useEffect(() => {
+    syncAdminPanelRoute(visiblePanel)
+    document.title = visiblePanel ? `vibe-compete/admin/${visiblePanel}` : 'vibe-compete/admin'
+  }, [visiblePanel])
+
+  const openQuizPanel = () => {
+    openAdminPanel('quiz')
+    void post('/api/quiz/prepare', {})
+  }
+
+  const endQuizAndClosePanel = async () => {
+    await post('/api/quiz/clear', {})
+    openAdminPanel(null)
+  }
+
+  const closeDetailPanel = () => {
+    if (visiblePanel === 'quiz' && state.quiz.mode !== 'idle') {
+      void endQuizAndClosePanel()
+      return
+    }
+
+    openAdminPanel(null)
+  }
+
   const startDrawing = () => {
     setIsDrawing(true)
   }
@@ -2008,7 +2683,7 @@ function AdminView({
   const stopDrawing = async () => {
     if (!isDrawing) setIsDrawing(true)
     await new Promise((resolve) => window.setTimeout(resolve, isDrawing ? 320 : 900))
-    await post('/api/raffle', { rule: raffleRule, winnerCount })
+    await post('/api/raffle', { rule: raffleRule, winnerCount: 1 })
     setIsDrawing(false)
   }
 
@@ -2071,24 +2746,20 @@ function AdminView({
       {showCheerConstellation ? (
         <CheerConstellation state={state} starBudget={starBudget} onClose={() => setShowCheerConstellation(false)} />
       ) : null}
-      {activePanel ? (
-        <AdminDetailPanel title={getAdminPanelTitle(activePanel)} onClose={() => setActivePanel(null)}>
-          {activePanel === 'arena' ? <ArenaDetailPanel state={state} starBudget={starBudget} /> : null}
-          {activePanel === 'participants' ? <ParticipantDetailPanel state={state} post={post} /> : null}
-          {activePanel === 'messages' ? <MessageManagerDetail state={state} post={post} /> : null}
-          {activePanel === 'teams' ? <TeamConfigDetail key={getEditableConfigSignature(state)} state={state} post={post} /> : null}
-          {activePanel === 'quiz' ? <QuizAdminPanel state={state} post={post} detail /> : null}
-          {activePanel === 'export' ? <ResultExportDetailPanel state={state} /> : null}
-          {activePanel === 'raffle' ? (
+      {visiblePanel ? (
+        <AdminDetailPanel title={getAdminPanelTitle(visiblePanel)} onClose={closeDetailPanel}>
+          {visiblePanel === 'arena' ? <ArenaDetailPanel state={state} starBudget={starBudget} /> : null}
+          {visiblePanel === 'participants' ? <ParticipantDetailPanel state={state} post={post} /> : null}
+          {visiblePanel === 'messages' ? <MessageManagerDetail state={state} post={post} /> : null}
+          {visiblePanel === 'teams' ? <TeamConfigDetail key={getEditableConfigSignature(state)} state={state} post={post} /> : null}
+          {visiblePanel === 'quiz' ? <QuizAdminPanel state={state} post={post} onEndQuiz={endQuizAndClosePanel} detail /> : null}
+          {visiblePanel === 'export' ? <ResultExportDetailPanel state={state} /> : null}
+          {visiblePanel === 'raffle' ? (
             <RaffleDetailPanel
               state={state}
               raffleRule={raffleRule}
-              winnerCount={winnerCount}
               isDrawing={isDrawing}
-              raffleStyle={raffleStyle}
               onRuleChange={setRaffleRule}
-              onStyleChange={setRaffleStyle}
-              onWinnerCountChange={setWinnerCount}
               onStart={startDrawing}
               onStop={stopDrawing}
             />
@@ -2283,7 +2954,7 @@ function AdminView({
               <h2>실시간 별 현황</h2>
             </div>
             <div className="arena-heading-actions">
-              <button type="button" className="panel-open-button" onClick={() => setActivePanel('arena')}>
+              <button type="button" className="panel-open-button" onClick={() => openAdminPanel('arena')}>
                 <Maximize2 size={14} />
                 전체화면
               </button>
@@ -2308,23 +2979,19 @@ function AdminView({
         <aside className="admin-side">
           <CheerWall state={state} onOpen={() => setShowCheerConstellation(true)} />
           <VoteActivityFeed state={state} />
-          <ParticipantListPanel state={state} onOpen={() => setActivePanel('participants')} />
-          <CheerModerationPanel state={state} post={post} onOpen={() => setActivePanel('messages')} />
-          <TeamConfigPanel state={state} onOpen={() => setActivePanel('teams')} />
-          <QuizAdminPanel state={state} post={post} onOpen={() => setActivePanel('quiz')} />
-          <ResultExportPanel state={state} onOpen={() => setActivePanel('export')} />
+          <ParticipantListPanel state={state} onOpen={() => openAdminPanel('participants')} />
+          <CheerModerationPanel state={state} post={post} onOpen={() => openAdminPanel('messages')} />
+          <TeamConfigPanel state={state} onOpen={() => openAdminPanel('teams')} />
+          <QuizAdminPanel state={state} post={post} onOpen={openQuizPanel} />
+          <ResultExportPanel state={state} onOpen={() => openAdminPanel('export')} />
           <RafflePanel
             state={state}
             raffleRule={raffleRule}
-            winnerCount={winnerCount}
             isDrawing={isDrawing}
-            raffleStyle={raffleStyle}
             onRuleChange={setRaffleRule}
-            onStyleChange={setRaffleStyle}
-            onWinnerCountChange={setWinnerCount}
             onStart={startDrawing}
             onStop={stopDrawing}
-            onOpen={() => setActivePanel('raffle')}
+            onOpen={() => openAdminPanel('raffle')}
           />
         </aside>
       </section>
@@ -2349,12 +3016,9 @@ function PublicWallView({
 }) {
   const [selectedTeamId, setSelectedTeamId] = useState<string>('all')
   const [raffleRule, setRaffleRule] = useState<RaffleRule>('all')
-  const [raffleStyle, setRaffleStyle] = useState<RaffleStyle>('lotto')
-  const [winnerCount, setWinnerCount] = useState(4)
   const [isDrawing, setIsDrawing] = useState(false)
   const [wallSplit, setWallSplit] = useState(70)
   const wallGridRef = useRef<HTMLDivElement | null>(null)
-  const previousQuizModeRef = useRef(state.quiz.mode)
   const setWallPanel = onWallPanelChange
   const setShowCheerConstellation = onShowCheerConstellationChange
   const starBudget = getStarBudget(state)
@@ -2362,14 +3026,6 @@ function PublicWallView({
   const selectedTeam = selectedTeamId === 'all' ? null : state.teams.find((team) => team.id === selectedTeamId) ?? null
   const wallSplitMin = 54
   const wallSplitMax = 82
-
-  useEffect(() => {
-    const previousMode = previousQuizModeRef.current
-    if (wallPanel === 'quiz' && previousMode !== 'idle' && state.quiz.mode === 'idle') {
-      setWallPanel('overview')
-    }
-    previousQuizModeRef.current = state.quiz.mode
-  }, [setWallPanel, state.quiz.mode, wallPanel])
 
   const startDrawing = () => {
     setWallPanel('raffle')
@@ -2379,7 +3035,7 @@ function PublicWallView({
   const stopDrawing = async () => {
     if (!isDrawing) setIsDrawing(true)
     await new Promise((resolve) => window.setTimeout(resolve, isDrawing ? 320 : 900))
-    await post('/api/raffle', { rule: raffleRule, winnerCount })
+    await post('/api/raffle', { rule: raffleRule, winnerCount: 1 })
     setIsDrawing(false)
   }
 
@@ -2446,12 +3102,8 @@ function PublicWallView({
             <RaffleDetailPanel
               state={state}
               raffleRule={raffleRule}
-              winnerCount={winnerCount}
               isDrawing={isDrawing}
-              raffleStyle={raffleStyle}
               onRuleChange={setRaffleRule}
-              onStyleChange={setRaffleStyle}
-              onWinnerCountChange={setWinnerCount}
               onStart={startDrawing}
               onStop={stopDrawing}
               publicMode
@@ -2541,6 +3193,10 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
     latestWinner && now - latestWinner.createdAt <= 4300 && state.quiz.mode !== 'idle' ? latestWinner : null
   const answerCount = state.quiz.answers.length
   const correctCount = state.quiz.answers.filter((item) => item.correct).length
+  const orderedWinners = [...state.quiz.winners].sort(
+    (a, b) => (a.rank ?? 999) - (b.rank ?? 999) || a.createdAt - b.createdAt,
+  )
+  const answerHistory = state.quiz.answers.filter((item) => !item.rank)
 
   return (
     <section className={`quiz-wall-board wall-only phase-${phase}`} aria-label="퀴즈 진행">
@@ -2625,9 +3281,9 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
         </div>
       </div>
 
-      {state.quiz.winners.length ? (
+      {orderedWinners.length ? (
         <div className="quiz-winner-list wall-stack">
-          {state.quiz.winners.map((winner) => (
+          {orderedWinners.map((winner) => (
             <span key={`${winner.quizId}-${winner.id}`}>
               {winner.rank}등 {winner.author} {[winner.group, winner.department].filter(Boolean).length ? `(${[winner.group, winner.department].filter(Boolean).join(' · ')})` : ''}
             </span>
@@ -2635,9 +3291,9 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
         </div>
       ) : null}
 
-      <div className="quiz-answer-stream" aria-live="polite">
-        {state.quiz.answers.length ? (
-          state.quiz.answers.map((item) => (
+      <div className="quiz-answer-stream" aria-live="polite" aria-label="오답 및 기타 답변">
+        {answerHistory.length ? (
+          answerHistory.map((item) => (
             <article className={`quiz-answer-message ${item.correct ? 'correct' : ''}`} key={`${item.quizId}-${item.id}`}>
               <strong>
                 <span>{[item.author, item.group || 'ID 없음', item.department].filter(Boolean).join(' · ')}</span>
@@ -2647,7 +3303,9 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
             </article>
           ))
         ) : (
-          <p className="empty-state compact">{state.copy.quizAnswerEmpty}</p>
+          <p className="empty-state compact">
+            {orderedWinners.length ? '아직 오답 또는 기타 답변이 없습니다.' : state.copy.quizAnswerEmpty}
+          </p>
         )}
       </div>
     </section>
@@ -2700,11 +3358,13 @@ function QuizAdminPanel({
   state,
   post,
   onOpen,
+  onEndQuiz,
   detail = false,
 }: {
   state: EventState
   post: (path: string, body: unknown) => Promise<EventState | null>
   onOpen?: () => void
+  onEndQuiz?: () => void | Promise<void>
   detail?: boolean
 }) {
   const enabledQuizzes = state.quizBank.filter((quiz) => quiz.enabled)
@@ -2714,18 +3374,38 @@ function QuizAdminPanel({
   const selectedQuiz = availableQuizzes.find((quiz) => quiz.id === selectedQuizId) || initialQuiz
   const [question, setQuestion] = useState(selectedQuiz.question)
   const [answer, setAnswer] = useState(selectedQuiz.answer)
+  const [prizeImageFile, setPrizeImageFile] = useState(selectedQuiz.prizeImageFile)
   const [winnerCount, setWinnerCount] = useState(selectedQuiz.winnerCount)
+  const [prizeStatus, setPrizeStatus] = useState('')
   const now = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
   const phase = getQuizDisplayPhase(state.quiz, now)
   const answerCount = state.quiz.answers.length
   const correctCount = state.quiz.answers.filter((item) => item.correct).length
+  const quizWinnerHistory = buildQuizWinnerHistory(state)
 
   const selectQuiz = (quizId: string) => {
     const nextQuiz = availableQuizzes.find((quiz) => quiz.id === quizId) || initialQuiz
     setSelectedQuizId(nextQuiz.id)
     setQuestion(nextQuiz.question)
     setAnswer(nextQuiz.answer)
+    setPrizeImageFile(nextQuiz.prizeImageFile)
     setWinnerCount(nextQuiz.winnerCount)
+  }
+
+  const updatePrizeImage = (value: string) => {
+    setPrizeImageFile(normalizeLogoSourceValue(value))
+  }
+
+  const uploadPrizeImage = async (file: File | undefined) => {
+    if (!file) return
+
+    try {
+      const dataUrl = await readLogoFileAsDataUrl(file)
+      setPrizeImageFile(dataUrl)
+      setPrizeStatus('이번 퀴즈 상품 이미지를 불러왔습니다.')
+    } catch (error) {
+      setPrizeStatus(error instanceof Error ? error.message : '이미지 파일을 불러오지 못했습니다.')
+    }
   }
 
   const openQuiz = async () => {
@@ -2734,7 +3414,7 @@ function QuizAdminPanel({
       question,
       answer,
       acceptedAnswers: selectedQuiz.acceptedAnswers,
-      prizeImageFile: selectedQuiz.prizeImageFile,
+      prizeImageFile,
       winnerCount,
     })
   }
@@ -2743,8 +3423,13 @@ function QuizAdminPanel({
     post('/api/quiz/close', {})
   }
 
-  const clearQuiz = () => {
-    post('/api/quiz/clear', {})
+  const clearQuiz = async () => {
+    if (onEndQuiz) {
+      await onEndQuiz()
+      return
+    }
+
+    await post('/api/quiz/clear', {})
   }
 
   return (
@@ -2810,6 +3495,17 @@ function QuizAdminPanel({
             />
           </label>
         </div>
+        <ImageSourceField
+          label="이번 퀴즈 상품 이미지"
+          description="준비된 퀴즈 상품을 바꾸거나, 현장에서 바로 다른 상품 이미지를 지정할 수 있습니다."
+          value={prizeImageFile}
+          previewLabel="이번 퀴즈 상품 이미지 미리보기"
+          onRawChange={setPrizeImageFile}
+          onChange={updatePrizeImage}
+          onUpload={uploadPrizeImage}
+          onClear={() => setPrizeImageFile('')}
+        />
+        {prizeStatus ? <p className="quiz-accepted-answers">{prizeStatus}</p> : null}
         {selectedQuiz.acceptedAnswers.length ? (
           <p className="quiz-accepted-answers">추가 인정 답: {selectedQuiz.acceptedAnswers.join(', ')}</p>
         ) : null}
@@ -2817,7 +3513,7 @@ function QuizAdminPanel({
           <button type="button" className="primary-action" onClick={openQuiz} disabled={!question.trim() || !answer.trim()}>
             출제 / 다음 문제
           </button>
-          <button type="button" onClick={closeQuiz} disabled={state.quiz.mode === 'idle' || state.quiz.mode === 'standby' || state.quiz.mode === 'closed'}>
+          <button type="button" onClick={closeQuiz} disabled={state.quiz.mode === 'idle' || state.quiz.mode === 'standby'}>
             답변 마감
           </button>
           <button type="button" onClick={clearQuiz} disabled={state.quiz.mode === 'idle'}>
@@ -2860,6 +3556,27 @@ function QuizAdminPanel({
           )}
         </div>
       ) : null}
+      {detail && quizWinnerHistory.length ? (
+        <div className="quiz-history-panel">
+          <p className="section-kicker">Quiz History</p>
+          <h3>진행한 퀴즈 정답자 기록</h3>
+          {quizWinnerHistory.map((record) => (
+            <article key={record.id}>
+              <strong>{record.question}</strong>
+              <span>{formatMessageTime(record.createdAt)}</span>
+              <div>
+                {record.winners.map((winner) => (
+                  <em key={`${record.id}-${winner.id}-${winner.rank ?? 0}`}>
+                    {winner.rank ? `${winner.rank}등 ` : ''}
+                    {winner.name}
+                    {[winner.group, winner.department].filter(Boolean).length ? ` (${[winner.group, winner.department].filter(Boolean).join(' · ')})` : ''}
+                  </em>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
     </section>
   )
 }
@@ -2894,6 +3611,7 @@ function PublicCheerBoard({
   return (
     <section
       className={`public-cheer-board ${large ? 'large' : ''} ${selectedTeam ? 'has-team-preview' : ''} ${focusedCheer ? 'has-expanded-message' : ''}`}
+      style={selectedTeam ? ({ '--team-color': selectedTeam.color, ...getTeamPhotoStyle(selectedTeam) } as CSSProperties) : undefined}
       aria-label="응원 메시지 보드"
     >
       <div className="section-heading compact">
@@ -2928,9 +3646,6 @@ function PublicCheerBoard({
                     <ArrowRight size={14} strokeWidth={2.5} />
                   </span>
                   <span className="cheer-route-team">{team.name}</span>
-                  <time className="cheer-message-time" dateTime={new Date(message.createdAt).toISOString()}>
-                    {formatMessageTime(message.createdAt)}
-                  </time>
                 </strong>
                 <p>{message.text}</p>
               </button>
@@ -3779,7 +4494,23 @@ function TeamConfigDetail({
             preview={
               <div className="brand-logo-live-preview">
                 <div className="stage-preview-topbar">
-                  <BrandMark copy={draftCopy} />
+                  <BrandLogoFrameEditor
+                    copy={draftCopy}
+                    onChange={(field, value) => {
+                      const keyByField: Record<ImageTuningField, keyof EventCopy> = {
+                        shape: 'appLogoShape',
+                        frame: 'appLogoFrame',
+                        fit: 'appLogoFit',
+                        width: 'appLogoWidth',
+                        height: 'appLogoHeight',
+                        zoom: 'appLogoZoom',
+                        focusX: 'appLogoFocusX',
+                        focusY: 'appLogoFocusY',
+                      }
+                      updateCopy(keyByField[field], value)
+                    }}
+                    onUpload={(file) => uploadCopyImage('appLogoFile', file)}
+                  />
                   <div>
                     <span>{draftCopy.wallEyeline || draftCopy.audienceEyeline}</span>
                     <strong>{draftCopy.appTitle}</strong>
@@ -3830,6 +4561,24 @@ function TeamConfigDetail({
               onClear={() => updateCopy(field.key, '')}
             />
           ))}
+          <div className="prize-name-config">
+            <div className="logo-source-head">
+              <span>행운권 상품 이름</span>
+              <small>추첨 화면, 당첨 안내, 내 수상 이력에서 상품 이름을 함께 표시합니다.</small>
+            </div>
+            <div className="prize-name-grid">
+              {rafflePrizeNameFields.map((field) => (
+                <label key={field.key}>
+                  <span>{field.label}</span>
+                  <input
+                    value={draftCopy[field.key]}
+                    placeholder={field.description}
+                    onChange={(event) => updateCopy(field.key, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -4233,11 +4982,12 @@ function LogoSourceField({
               <span>{team.title || '프로젝트명 미정'}</span>
             </div>
           </div>
-          <TeamPhotoPreview team={preview} />
+          <TeamPhotoFrameEditor team={preview} onChange={onTuningChange} onUpload={onUpload} />
+          <TeamWallPhotoPreview team={preview} title={team.title} membersText={team.membersText} />
         </div>
         <p>
           Google Drive 링크는 공개 공유된 파일 링크를 붙여넣으면 표시용 이미지 주소로 자동 정리됩니다. 아래 조절값은 저장 전에도
-          이 미리보기에서 바로 반영됩니다. 현재 프레임은 {getTeamLogoFrameLabel(preview)}입니다.
+          이 미리보기에서 바로 반영됩니다. 작은 로고 프레임은 {getTeamLogoFrameLabel(preview)}, 송출 하단 사진 프레임은 {getTeamPhotoFrameLabel(preview)}입니다.
         </p>
       </div>
       <ImageTuningControls
@@ -4273,7 +5023,11 @@ function LogoSourceField({
       <TeamPhotoTuningControls
         values={{
           photoFit: team.photoFit,
+          photoShape: team.photoShape,
+          photoFrame: team.photoFrame,
+          photoWidth: team.photoWidth,
           photoHeight: team.photoHeight,
+          photoRadius: team.photoRadius,
           photoZoom: team.photoZoom,
           photoFocusX: team.photoFocusX,
           photoFocusY: team.photoFocusY,
@@ -4284,14 +5038,206 @@ function LogoSourceField({
   )
 }
 
+function TeamWallPhotoPreview({ team, title, membersText }: { team: TeamVisual; title: string; membersText: string }) {
+  const members = membersText
+    .split(/[\n,]/)
+    .map((member) => member.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+
+  return (
+    <div className="wall-photo-live-preview" style={getTeamPhotoStyle(team)}>
+      <span>Wall 하단 카드 표시</span>
+      <div className="selected-team-preview wall-live-selected-team">
+        <TeamPhotoPreview team={team} />
+        <div className="selected-team-copy">
+          <strong>{team.name}</strong>
+          <p>{title || '프로젝트명 미정'}</p>
+          {members.length ? <span>{members.join(' · ')}</span> : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type TeamPhotoEditMode = 'focus' | 'width' | 'height' | 'frame'
+
+type TeamPhotoEditDrag = {
+  mode: TeamPhotoEditMode
+  startX: number
+  startY: number
+  width: number
+  height: number
+  focusX: number
+  focusY: number
+  renderedWidth: number
+  renderedHeight: number
+}
+
+function TeamPhotoFrameEditor({
+  team,
+  onChange,
+  onUpload,
+}: {
+  team: TeamVisual
+  onChange: (field: string, value: string) => void
+  onUpload?: (file: File | undefined) => void
+}) {
+  const frameRef = useRef<HTMLDivElement | null>(null)
+  const dragRef = useRef<TeamPhotoEditDrag | null>(null)
+  const width = getImageDimensionValue(team.photoWidth, 560, 180, 820)
+  const height = getImageDimensionValue(team.photoHeight, 300, 150, 460)
+  const focusX = getPercentValue(team.photoFocusX, 50)
+  const focusY = getPercentValue(team.photoFocusY, 50)
+  const zoom = getZoomValue(team.photoZoom, 1)
+
+  const beginDrag = (mode: TeamPhotoEditMode, event: ReactPointerEvent<HTMLElement>) => {
+    const bounds = frameRef.current?.getBoundingClientRect()
+    if (!bounds) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = {
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      width,
+      height,
+      focusX,
+      focusY,
+      renderedWidth: bounds.width,
+      renderedHeight: bounds.height,
+    }
+  }
+
+  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag) return
+
+    const deltaX = event.clientX - drag.startX
+    const deltaY = event.clientY - drag.startY
+
+    if (drag.mode === 'focus') {
+      onChange('photoFocusX', String(clamp(Math.round(drag.focusX + (deltaX / Math.max(1, drag.renderedWidth)) * 100), 0, 100)))
+      onChange('photoFocusY', String(clamp(Math.round(drag.focusY + (deltaY / Math.max(1, drag.renderedHeight)) * 100), 0, 100)))
+      return
+    }
+
+    const scaleX = drag.width / Math.max(1, drag.renderedWidth)
+    const scaleY = drag.height / Math.max(1, drag.renderedHeight)
+
+    if (drag.mode === 'width' || drag.mode === 'frame') {
+      onChange('photoWidth', String(clamp(Math.round(drag.width + deltaX * scaleX), 180, 820)))
+    }
+
+    if (drag.mode === 'height' || drag.mode === 'frame') {
+      onChange('photoHeight', String(clamp(Math.round(drag.height + deltaY * scaleY), 150, 460)))
+    }
+  }
+
+  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    } catch {
+      // Pointer capture may already be released by the browser.
+    }
+    dragRef.current = null
+  }
+
+  const adjustZoom = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (!team.logoFile) return
+    event.preventDefault()
+    const step = event.deltaY < 0 ? 0.05 : -0.05
+    onChange('photoZoom', String(Number(clamp(zoom + step, 1, 2.4).toFixed(2))))
+  }
+
+  const resetCrop = () => {
+    onChange('photoFocusX', '50')
+    onChange('photoFocusY', '50')
+    onChange('photoZoom', '1')
+  }
+
+  return (
+    <div
+      className="photo-frame-editor"
+      ref={frameRef}
+      style={getTeamPhotoStyle(team)}
+      onPointerMove={moveDrag}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onWheel={adjustZoom}
+      onDoubleClick={resetCrop}
+    >
+      <TeamPhotoPreview team={team} />
+      {onUpload ? (
+        <label className="photo-upload-hotspot" title="사진 파일 변경">
+          <ImagePlus size={14} />
+          사진 변경
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon"
+            onChange={(event) => {
+              onUpload(event.currentTarget.files?.[0])
+              event.currentTarget.value = ''
+            }}
+          />
+        </label>
+      ) : null}
+      {team.logoFile ? (
+        <>
+          <button
+            type="button"
+            className="photo-editor-surface"
+            aria-label="사진 초점 이동"
+            title="사진 초점 이동"
+            onPointerDown={(event) => beginDrag('focus', event)}
+          />
+          <span
+            className="photo-editor-focus"
+            style={{ left: `${focusX}%`, top: `${focusY}%` }}
+            aria-hidden="true"
+          />
+        </>
+      ) : null}
+      <button
+        type="button"
+        className="photo-resize-handle width"
+        aria-label="사진 프레임 가로 조절"
+        title="사진 프레임 가로 조절"
+        onPointerDown={(event) => beginDrag('width', event)}
+      />
+      <button
+        type="button"
+        className="photo-resize-handle height"
+        aria-label="사진 프레임 높이 조절"
+        title="사진 프레임 높이 조절"
+        onPointerDown={(event) => beginDrag('height', event)}
+      />
+      <button
+        type="button"
+        className="photo-resize-handle corner"
+        aria-label="사진 프레임 크기 조절"
+        title="사진 프레임 크기 조절"
+        onPointerDown={(event) => beginDrag('frame', event)}
+      />
+    </div>
+  )
+}
+
 function TeamPhotoTuningControls({
   values,
   onChange,
 }: {
-  values: Pick<TeamConfigDraft, 'photoFit' | 'photoHeight' | 'photoZoom' | 'photoFocusX' | 'photoFocusY'>
+  values: Pick<TeamConfigDraft, 'photoFit' | 'photoShape' | 'photoFrame' | 'photoWidth' | 'photoHeight' | 'photoRadius' | 'photoZoom' | 'photoFocusX' | 'photoFocusY'>
   onChange: (field: string, value: string) => void
 }) {
-  const height = getImageDimensionValue(values.photoHeight, 260, 150, 460)
+  const shape = normalizeImageShape(values.photoShape, 'wide')
+  const frame = normalizeImageFrame(values.photoFrame, 'line')
+  const height = getImageDimensionValue(values.photoHeight, 300, 150, 460)
+  const width = getImageDimensionValue(values.photoWidth, 560, 180, 820)
+  const radius = String(getImageDimensionValue(values.photoRadius, DEFAULT_TEAM_PHOTO_RADIUS, 0, 160))
   const zoom = String(getZoomValue(values.photoZoom, 1))
   const focusX = String(getPercentValue(values.photoFocusX, 50))
   const focusY = String(getPercentValue(values.photoFocusY, 50))
@@ -4300,15 +5246,42 @@ function TeamPhotoTuningControls({
     <div className="photo-tuning-controls">
       <div className="image-tuning-head">
         <strong>와이드 팀 사진 표시 방식</strong>
-        <span>응원 메시지 하단 팀 정보 카드처럼 넓게 보이는 사진의 높이, 맞춤, 확대, 초점을 따로 조정합니다.</span>
+        <span>응원 메시지 하단 팀 정보 카드처럼 넓게 보이는 사진의 프레임, 높이, 맞춤, 확대, 초점을 따로 조정합니다.</span>
       </div>
       <div className="image-tuning-grid">
+        <label>
+          <span>프레임 모양</span>
+          <select value={shape} onChange={(event) => onChange('photoShape', event.target.value)}>
+            {imageShapeOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>테두리 효과</span>
+          <select value={frame} onChange={(event) => onChange('photoFrame', event.target.value)}>
+            {imageFrameOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
         <label>
           <span>맞춤</span>
           <select value={normalizeImageFit(values.photoFit, 'cover')} onChange={(event) => onChange('photoFit', event.target.value)}>
             <option value="cover">채우기</option>
             <option value="contain">전체보이기</option>
           </select>
+        </label>
+        <label className="range-field">
+          <span>사진 가로</span>
+          <input
+            type="range"
+            min={180}
+            max={820}
+            value={width}
+            onChange={(event) => onChange('photoWidth', event.target.value)}
+          />
+          <em>{width}px</em>
         </label>
         <label className="range-field">
           <span>사진 높이</span>
@@ -4320,6 +5293,17 @@ function TeamPhotoTuningControls({
             onChange={(event) => onChange('photoHeight', event.target.value)}
           />
           <em>{height}px</em>
+        </label>
+        <label className="range-field">
+          <span>둥근 정도</span>
+          <input
+            type="range"
+            min={0}
+            max={160}
+            value={radius}
+            onChange={(event) => onChange('photoRadius', event.target.value)}
+          />
+          <em>{radius}px</em>
         </label>
         <label className="range-field">
           <span>확대</span>
@@ -4609,7 +5593,6 @@ function CheerConstellation({
   const [openMessageId, setOpenMessageId] = useState<number | null>(null)
   const [dragPositions, setDragPositions] = useState<Record<string, Point>>({})
   const [draggingKey, setDraggingKey] = useState<string | null>(null)
-  const [isScattering, setIsScattering] = useState(false)
   const stageRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{
     key: string
@@ -4622,8 +5605,6 @@ function CheerConstellation({
   } | null>(null)
   const recentDragRef = useRef<string | null>(null)
   const releaseTimersRef = useRef<Record<string, number>>({})
-  const scatterTimersRef = useRef<number[]>([])
-  const scatterRoundRef = useRef(0)
   const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams])
   const participantMap = useMemo(
     () => new Map(state.participants.map((participant) => [participant.id, participant])),
@@ -4632,13 +5613,9 @@ function CheerConstellation({
 
   useEffect(() => {
     const releaseTimers = releaseTimersRef.current
-    const scatterTimers = scatterTimersRef.current
 
     return () => {
       for (const timer of Object.values(releaseTimers)) {
-        window.clearTimeout(timer)
-      }
-      for (const timer of scatterTimers) {
         window.clearTimeout(timer)
       }
     }
@@ -4646,16 +5623,16 @@ function CheerConstellation({
 
   const teamCenters = useMemo(() => {
     const centers = [
-      { x: 18, y: 27 },
-      { x: 39, y: 24 },
-      { x: 62, y: 27 },
-      { x: 81, y: 39 },
-      { x: 28, y: 52 },
-      { x: 51, y: 51 },
-      { x: 73, y: 61 },
-      { x: 20, y: 74 },
-      { x: 48, y: 76 },
-      { x: 74, y: 79 },
+      { x: 24, y: 28 },
+      { x: 44, y: 27 },
+      { x: 64, y: 29 },
+      { x: 78, y: 42 },
+      { x: 30, y: 50 },
+      { x: 51, y: 50 },
+      { x: 70, y: 55 },
+      { x: 27, y: 70 },
+      { x: 49, y: 72 },
+      { x: 70, y: 72 },
     ]
 
     return new Map(
@@ -4826,61 +5803,14 @@ function CheerConstellation({
     setOpenMessageId((current) => (current === messageId ? null : messageId))
   }, [])
 
-  const scatterBubbles = useCallback(() => {
-    if (!groupedBubbles.length) return
-
-    scatterRoundRef.current += 1
-    setOpenMessageId(null)
-    setIsScattering(true)
-
-    for (const timer of Object.values(releaseTimersRef.current)) {
-      window.clearTimeout(timer)
-    }
-    releaseTimersRef.current = {}
-
-    for (const timer of scatterTimersRef.current) {
-      window.clearTimeout(timer)
-    }
-    scatterTimersRef.current = []
-
-    const round = scatterRoundRef.current
-    const scattered = groupedBubbles.reduce<Record<string, Point>>((next, bubble, index) => {
-      next[bubble.key] = getScatterPointForBubble(bubble.teamId, bubble.key, index, bubble.size, round, territoryCells, teamCenters)
-      return next
-    }, {})
-
-    setDragPositions(scattered)
-
-    scatterTimersRef.current.push(
-      window.setTimeout(() => {
-        setIsScattering(false)
-      }, 900),
-    )
-    scatterTimersRef.current.push(
-      window.setTimeout(() => {
-        setDragPositions((current) => {
-          const next = { ...current }
-          for (const bubble of groupedBubbles) {
-            delete next[bubble.key]
-          }
-          return next
-        })
-      }, 3900),
-    )
-  }, [groupedBubbles, teamCenters, territoryCells])
-
   return (
-    <div className={`cheer-constellation ${isScattering ? 'is-scattering' : ''}`} role="dialog" aria-modal="true" aria-label="응원 메시지 쇼업">
+    <div className="cheer-constellation" role="dialog" aria-modal="true" aria-label="응원 메시지 쇼업">
       <div className="constellation-toolbar">
         <div>
           <p className="section-kicker">{state.copy.showupEyeline}</p>
           <h2>{state.copy.showupTitle}</h2>
         </div>
         <div className="constellation-actions">
-          <button type="button" className="shuffle-button" onClick={scatterBubbles}>
-            <Sparkles size={16} />
-            {state.copy.showupShuffleLabel}
-          </button>
           <button type="button" className="close-button" onClick={onClose}>
             닫기
           </button>
@@ -4929,7 +5859,6 @@ function CheerConstellation({
                 } as CSSProperties
               }
             >
-              <i aria-hidden="true" />
               <strong>{team.name}</strong>
               <small>{totalStars}★ · {count} messages</small>
             </div>
@@ -4997,24 +5926,16 @@ function CheerConstellation({
 function RafflePanel({
   state,
   raffleRule,
-  winnerCount,
   isDrawing,
-  raffleStyle,
   onRuleChange,
-  onStyleChange,
-  onWinnerCountChange,
   onStart,
   onStop,
   onOpen,
 }: {
   state: EventState
   raffleRule: RaffleRule
-  winnerCount: number
   isDrawing: boolean
-  raffleStyle: RaffleStyle
   onRuleChange: (rule: RaffleRule) => void
-  onStyleChange: (style: RaffleStyle) => void
-  onWinnerCountChange: (count: number) => void
   onStart: () => void
   onStop: () => void
   onOpen: () => void
@@ -5049,34 +5970,16 @@ function RafflePanel({
             ))}
           </select>
         </label>
-        <label>
-          <span>쇼업 방식</span>
-          <select value={raffleStyle} onChange={(event) => onStyleChange(event.target.value as RaffleStyle)}>
-            {raffleStyleOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>선발 인원</span>
-          <input
-            type="number"
-            min={1}
-            max={8}
-            value={winnerCount}
-            onChange={(event) => onWinnerCountChange(Number(event.target.value))}
-          />
-        </label>
-        <button type="button" className={`draw-button start ${isDrawing ? 'drawing' : ''}`} onClick={onStart} disabled={isDrawing}>
-          <Sparkles size={17} />
-          추첨 시작
-        </button>
-        <button type="button" className="draw-button stop" onClick={onStop} disabled={!isDrawing}>
-          <Trophy size={17} />
-          정지
-        </button>
+        <div className="raffle-action-row">
+          <button type="button" className={`draw-button start ${isDrawing ? 'drawing' : ''}`} onClick={onStart} disabled={isDrawing}>
+            <Sparkles size={17} />
+            {state.copy.raffleStartButtonLabel}
+          </button>
+          <button type="button" className="draw-button stop" onClick={onStop} disabled={!isDrawing}>
+            <Trophy size={17} />
+            {state.copy.raffleStopButtonLabel}
+          </button>
+        </div>
       </div>
 
       <div className={`draw-stage compact ${isDrawing ? 'drawing' : ''}`}>
@@ -5106,11 +6009,10 @@ function RafflePanel({
             <strong>후보를 섞는 중...</strong>
           </div>
         ) : state.lastRaffle?.winners.length ? (
-          state.lastRaffle.winners.map((winner, index) => (
+          state.lastRaffle.winners.map((winner) => (
             <div className="winner" key={winner.id}>
-              <span>{index + 1}</span>
               <strong>{winner.name}</strong>
-              <small>{winner.group ? `${winner.group} · ` : ''}{winner.cheered ? '응원 메시지 참여' : '투표 참여'}</small>
+              <small>{[winner.group ? `ID ${winner.group}` : '', winner.department].filter(Boolean).join(' · ')}</small>
             </div>
           ))
         ) : (
@@ -5124,24 +6026,16 @@ function RafflePanel({
 function RaffleDetailPanel({
   state,
   raffleRule,
-  winnerCount,
   isDrawing,
-  raffleStyle,
   onRuleChange,
-  onStyleChange,
-  onWinnerCountChange,
   onStart,
   onStop,
   publicMode = false,
 }: {
   state: EventState
   raffleRule: RaffleRule
-  winnerCount: number
   isDrawing: boolean
-  raffleStyle: RaffleStyle
   onRuleChange: (rule: RaffleRule) => void
-  onStyleChange: (style: RaffleStyle) => void
-  onWinnerCountChange: (count: number) => void
   onStart: () => void
   onStop: () => void
   publicMode?: boolean
@@ -5156,138 +6050,145 @@ function RaffleDetailPanel({
   const hasWinners = winners.length > 0
   const visualBallCount = rollingNames.length > 1 ? clamp(previewCandidates.length, 14, publicMode ? 30 : 22) : 14
   const candidateBalls = Array.from({ length: visualBallCount }, (_, index) => rollingNames[index % rollingNames.length])
-  const targetCandidates = Array.from({ length: 6 }, (_, index) => rollingNames[index % rollingNames.length])
-  const prizeImage = getRafflePrizeImage(state.copy, raffleRule)
+  const prizeInfo = getRafflePrizeInfo(state.copy, raffleRule)
+  const prizeImage = prizeInfo.image
+  const ruleOptions = raffleRuleOptions.map((option, index) => ({
+    ...option,
+    displayLabel: publicMode ? getRaffleRulePublicLabel(option.value, index) : option.label,
+  }))
+  const revealRule = isDrawing || hasWinners
+  const listedCandidates = previewCandidates.slice(0, publicMode ? 7 : 12)
+  const hiddenCandidateCount = Math.max(0, previewCandidates.length - listedCandidates.length)
 
   return (
     <div className={`raffle-detail ${publicMode ? 'public-mode' : ''}`}>
-      <section className={`raffle-showcase style-${raffleStyle} ${isDrawing ? 'drawing' : ''} ${hasWinners ? 'has-winners' : ''}`} aria-live="polite">
+      <section className={`raffle-showcase style-lotto ${isDrawing ? 'drawing' : ''} ${hasWinners ? 'has-winners' : ''}`} aria-live="polite">
         <CelebrationConfetti active={hasWinners} seedKey={state.lastRaffle?.createdAt ?? 0} />
-        {prizeImage ? (
+        {prizeImage || prizeInfo.name ? (
           <>
             <button
               type="button"
               className="prize-image-trigger"
               onClick={() => setShowPrizeImage(true)}
-              aria-label="행운권 상품 이미지 보기"
+              aria-label={`${prizeInfo.name} 상품 보기`}
             >
               <Gift size={22} />
             </button>
             {showPrizeImage ? (
-              <div className="prize-image-overlay" role="dialog" aria-modal="true" aria-label="행운권 상품 이미지">
+              <div className="prize-image-overlay" role="dialog" aria-modal="true" aria-label={`${prizeInfo.name} 상품`}>
                 <div>
                   <button type="button" onClick={() => setShowPrizeImage(false)} aria-label="상품 이미지 닫기">
                     <X size={18} />
                   </button>
-                  <img src={prizeImage} alt="행운권 상품" />
+                  <strong>{prizeInfo.name}</strong>
+                  {prizeImage ? <img src={prizeImage} alt={prizeInfo.name} /> : <p>등록된 상품 이미지는 없습니다.</p>}
                 </div>
               </div>
             ) : null}
           </>
         ) : null}
-        {raffleStyle === 'lotto' ? (
-          <div className="lotto-machine" aria-hidden="true">
-            <span className="lotto-stand left" />
-            <span className="lotto-stand right" />
-            <div className="lotto-bowl">
-              <div className="lotto-vortex">
-                <span />
-                <span />
-                <span />
-              </div>
-              {candidateBalls.map((person, index) => (
-                <span
-                  className="lotto-ball"
-                  key={`${person.id}-ball-${index}`}
-                  style={
-                    {
-                      '--i': index,
-                      '--x': `${22 + ((index * 37) % 56)}%`,
-                      '--y': `${20 + ((index * 53) % 56)}%`,
-                      '--dx': `${((index % 5) - 2) * 18}px`,
-                      '--dy': `${((index % 7) - 3) * 13}px`,
-                      '--ball-tone': `hsl(${(index * 41 + 344) % 360} 72% 66%)`,
-                    } as CSSProperties
-                  }
-                >
-                  <strong>{person.name}</strong>
-                </span>
-              ))}
-            </div>
-            <div className="lotto-chute">
+        <div className="lotto-machine" aria-hidden="true">
+          <span className="lotto-stand left" />
+          <span className="lotto-stand right" />
+          <div className="lotto-bowl">
+            <div className="lotto-vortex">
               <span />
-              <i />
+              <span />
+              <span />
             </div>
-            <div className="lotto-result-tray">
-              <div className="lotto-result-ball">
-                <strong>{hasWinners ? winners[0]?.name : isDrawing ? '선정 중' : '대기'}</strong>
-              </div>
-            </div>
-          </div>
-        ) : raffleStyle === 'target' ? (
-          <div className="target-showcase" aria-hidden="true">
-            <div className="arrow-track">
-              <span className="arrow-shaft" />
-              <span className="arrow-head" />
-            </div>
-            <div className="target-board">
-              {targetCandidates.map((person, index) => (
-                <span key={`${person.id}-target-${index}`} style={{ '--i': index } as CSSProperties}>
-                  {person.name}
-                </span>
-              ))}
-              <div className="target-center">
-                <Trophy size={46} />
-                <strong>{hasWinners ? winners[0]?.name : isDrawing ? '조준 중' : '대기'}</strong>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="raffle-globe" aria-hidden="true">
-            {Array.from({ length: 18 }).map((_, index) => (
-              <span key={index} style={{ '--i': index } as CSSProperties}>
-                {index % 3 === 0 ? '★' : index % 3 === 1 ? '◆' : '•'}
+            {candidateBalls.map((person, index) => (
+              <span
+                className="lotto-ball"
+                key={`${person.id}-ball-${index}`}
+                style={
+                  {
+                    '--i': index,
+                    '--x': `${22 + ((index * 37) % 56)}%`,
+                    '--y': `${20 + ((index * 53) % 56)}%`,
+                    '--dx': `${((index % 5) - 2) * 18}px`,
+                    '--dy': `${((index % 7) - 3) * 13}px`,
+                    '--ball-tone': `hsl(${(index * 47 + 342) % 360} 86% 61%)`,
+                  } as CSSProperties
+                }
+              >
+                <strong>{person.name}</strong>
               </span>
             ))}
-            <div className="raffle-core">
-              <Trophy size={54} />
-              <strong>{isDrawing ? '추첨 중' : state.lastRaffle?.winners.length ? '당첨 확정' : '대기'}</strong>
+          </div>
+          <div className="lotto-chute">
+            <span />
+            <i />
+          </div>
+          <div className="lotto-result-tray">
+            <div className="lotto-result-ball">
+              <strong>{hasWinners ? winners[0]?.name : isDrawing ? '선정 중' : '대기'}</strong>
             </div>
           </div>
-        )}
-
-        {raffleStyle === 'lotto' ? null : (
-          <div className="raffle-reel-large" aria-hidden="true">
-            <div>
-              {[...rollingNames, ...rollingNames, ...rollingNames].map((person, index) => (
-                <span key={`${person.id}-${index}`}>{person.group ? `${person.name} · ${person.group}` : person.name}</span>
-              ))}
-            </div>
-          </div>
-        )}
+        </div>
 
         {hasWinners ? (
           <div className="raffle-winner-showcase">
-            {winners.map((winner, index) => (
-              <article key={winner.id} style={{ '--i': index } as CSSProperties}>
-                <span>{index + 1}</span>
-                <strong>{winner.name}</strong>
-                <small>{winner.group ? `${winner.group} · ` : ''}{winner.cheered ? '응원 메시지 참여' : '투표 참여'}</small>
-              </article>
-            ))}
+            {winners.map((winner, index) => {
+              const details = getRaffleWinnerDetails(state, winner)
+              return (
+                <article key={winner.id} style={{ '--i': index } as CSSProperties}>
+                  <div>
+                    <strong>{winner.name}</strong>
+                    <small>
+                      {[winner.group ? `ID ${winner.group}` : '', winner.department ? `소속 ${winner.department}` : '', winner.cheered ? '응원 메시지 참여' : '투표 참여']
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </small>
+                    <em className="winner-prize-name">{prizeInfo.name}</em>
+                  </div>
+                  <div className="winner-detail-scroll">
+                    <div className="winner-support-list">
+                      <b>응원한 팀</b>
+                      {details.supports.length ? (
+                        details.supports.map((item) => (
+                          <em key={item.teamId}>
+                            {item.rank ? `${item.rank}위 ` : ''}{item.teamName} · {item.stars}★
+                          </em>
+                        ))
+                      ) : (
+                        <em>별 배분 기록이 없습니다.</em>
+                      )}
+                    </div>
+                    <div className="winner-cheer-log">
+                      <b>응원 메시지</b>
+                      {details.cheers.length ? (
+                        details.cheers.map((message, messageIndex) => (
+                          <p key={`${message.teamId}-${message.createdAt}-${messageIndex}`}>
+                            <span>{message.teamName}</span>
+                            {' '}
+                            {message.text}
+                          </p>
+                        ))
+                      ) : (
+                        <p>표시할 공개 응원 메시지가 없습니다.</p>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              )
+            })}
           </div>
         ) : (
           <p>{isDrawing ? '후보 이름을 섞는 중입니다.' : '룰과 인원을 정한 뒤 추첨을 시작하세요.'}</p>
         )}
 
         {hasWinners ? (
-          <div className="gift-agent" aria-hidden="true">
-            <span className="agent-head">V</span>
-            <span className="agent-body" />
+          <button
+            type="button"
+            className="gift-agent"
+            onClick={() => setShowPrizeImage(true)}
+            aria-label={`${prizeInfo.name} 상품 정보 보기`}
+          >
             <span className="agent-gift">
               <Gift size={34} />
             </span>
-          </div>
+            <strong>{prizeInfo.name}</strong>
+          </button>
         ) : null}
       </section>
 
@@ -5296,41 +6197,28 @@ function RaffleDetailPanel({
           <label>
             <span>추첨 룰</span>
             <select value={raffleRule} onChange={(event) => onRuleChange(event.target.value as RaffleRule)}>
-              {raffleRuleOptions.map((option) => (
+              {ruleOptions.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {option.displayLabel}
                 </option>
               ))}
             </select>
           </label>
-          <label>
-            <span>쇼업 방식</span>
-            <select value={raffleStyle} onChange={(event) => onStyleChange(event.target.value as RaffleStyle)}>
-              {raffleStyleOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>선발 인원</span>
-            <input
-              type="number"
-              min={1}
-              max={8}
-              value={winnerCount}
-              onChange={(event) => onWinnerCountChange(Number(event.target.value))}
-            />
-          </label>
-          <button type="button" className={`draw-button start ${isDrawing ? 'drawing' : ''}`} onClick={onStart} disabled={isDrawing}>
-            <Sparkles size={17} />
-            추첨 시작
-          </button>
-          <button type="button" className="draw-button stop" onClick={onStop} disabled={!isDrawing}>
-            <Trophy size={17} />
-            정지
-          </button>
+          <div className="raffle-action-row">
+            <button type="button" className={`draw-button start ${isDrawing ? 'drawing' : ''}`} onClick={onStart} disabled={isDrawing}>
+              <Sparkles size={17} />
+              {state.copy.raffleStartButtonLabel}
+            </button>
+            <button type="button" className="draw-button stop" onClick={onStop} disabled={!isDrawing}>
+              <Trophy size={17} />
+              {state.copy.raffleStopButtonLabel}
+            </button>
+          </div>
+        </div>
+
+        <div className={`raffle-rule-reveal ${revealRule ? 'is-revealed' : ''}`}>
+          <span>{revealRule ? '이번 추첨 조건' : '추첨 조건'}</span>
+          <strong>{revealRule ? getRaffleRuleLabel(raffleRule) : publicMode ? '시작하면 공개됩니다' : getRaffleRuleLabel(raffleRule)}</strong>
         </div>
 
         <div className={`draw-stage compact ${isDrawing ? 'drawing' : ''}`}>
@@ -5341,17 +6229,24 @@ function RaffleDetailPanel({
         </div>
 
         <div className="candidate-strip">
-          <strong>후보 명단</strong>
+          <strong>후보 {previewCandidates.length}명</strong>
           <div>
             {previewCandidates.length ? (
-              previewCandidates.map((person) => (
+              listedCandidates.map((person) => (
                 <span key={person.id}>{person.group ? `${person.name} · ${person.group}` : person.name}</span>
               ))
             ) : (
               <span>후보가 없습니다</span>
             )}
+            {hiddenCandidateCount > 0 ? <span className="candidate-more">... 외 {hiddenCandidateCount}명</span> : null}
           </div>
         </div>
+
+        <button type="button" className="raffle-prize-summary" onClick={() => setShowPrizeImage(true)}>
+          {prizeImage ? <img src={prizeImage} alt="" /> : <Gift size={28} />}
+          <span>상품</span>
+          <strong>{prizeInfo.name}</strong>
+        </button>
       </aside>
     </div>
   )
@@ -5473,8 +6368,22 @@ function CelebrationConfetti({ active, seedKey }: { active: boolean; seedKey: nu
 
 function getRaffleCandidatesForRule(state: EventState, rule: RaffleRule) {
   const leaderId = state.teams[0]?.id
-  const topTwoIds = state.teams.slice(0, 2).map((team) => team.id)
   const topThreeIds = state.teams.slice(0, 3).map((team) => team.id)
+  const rank456Ids = state.teams.slice(3, 6).map((team) => team.id)
+  const rank7to10Ids = state.teams.slice(6, 10).map((team) => team.id)
+  const longestCheerByParticipant = new Map<string, number>()
+
+  if (rule === 'longestCheer') {
+    for (const message of state.cheers) {
+      if (!message.participantId || message.hidden) continue
+      longestCheerByParticipant.set(
+        message.participantId,
+        Math.max(longestCheerByParticipant.get(message.participantId) ?? 0, message.text.trim().length),
+      )
+    }
+  }
+
+  const longestCheerLength = rule === 'longestCheer' ? Math.max(0, ...longestCheerByParticipant.values()) : 0
 
   return state.participants.filter((person) => {
     const spent = sumStars(person.allocations)
@@ -5483,18 +6392,132 @@ function getRaffleCandidatesForRule(state: EventState, rule: RaffleRule) {
     const allocationValues = Object.values(person.allocations || {}).filter((value) => value > 0)
 
     if (rule === 'leader') return Boolean(leaderId && person.allocations[leaderId])
-    if (rule === 'top2') return topTwoIds.every((teamId) => Boolean(person.allocations[teamId]))
     if (rule === 'top3') return topThreeIds.every((teamId) => Boolean(person.allocations[teamId]))
-    if (rule === 'multi') return allocationValues.length >= 3
+    if (rule === 'rank456') return rank456Ids.length === 3 && rank456Ids.every((teamId) => Boolean(person.allocations[teamId]))
+    if (rule === 'rank7to10Three') {
+      return rank7to10Ids.length >= 3 && rank7to10Ids.filter((teamId) => Boolean(person.allocations[teamId])).length >= 3
+    }
+    if (rule === 'multi') return allocationValues.length >= 5
     if (rule === 'big') return allocationValues.some((value) => value >= 7)
+    if (rule === 'longestCheer') return longestCheerLength > 0 && (longestCheerByParticipant.get(person.id) ?? 0) === longestCheerLength
     if (rule === 'cheer') return person.cheered
     return true
   })
 }
 
-function getRafflePrizeImage(copy: EventCopy, rule: RaffleRule) {
-  const ruleImageKey = rafflePrizeImageKeyByRule[rule] || 'rafflePrizeImageFile'
-  return copy[ruleImageKey] || copy.rafflePrizeImageFile
+function getRaffleWinnerDetails(state: EventState, winner: RaffleWinner) {
+  const teamMap = new Map(state.teams.map((team) => [team.id, team]))
+  const participant = state.participants.find((person) => person.id === winner.id)
+
+  const supports = winner.supportDetails?.length
+    ? winner.supportDetails
+    : Object.entries(participant?.allocations ?? {})
+        .filter(([, stars]) => stars > 0)
+        .map(([teamId, stars]) => {
+          const team = teamMap.get(teamId)
+          return {
+            teamId,
+            teamName: team?.name ?? teamId,
+            stars,
+            rank: team?.rank,
+          }
+        })
+        .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999))
+
+  const cheers = winner.cheerDetails?.length
+    ? winner.cheerDetails
+    : state.cheers
+        .filter((message) => message.participantId === winner.id && !message.hidden)
+        .map((message) => {
+          const team = teamMap.get(message.teamId)
+          return {
+            teamId: message.teamId,
+            teamName: team?.name ?? message.teamId,
+            text: message.text,
+            createdAt: message.createdAt,
+          }
+        })
+        .sort((a, b) => a.createdAt - b.createdAt)
+
+  return { supports, cheers }
+}
+
+function buildParticipantAwardHistory(state: EventState, participantId: string) {
+  const awards = new Map<string, AwardRecord>()
+
+  for (const award of state.awardHistory ?? []) {
+    if (award.participantId === participantId) awards.set(award.id, award)
+  }
+
+  if (state.lastRaffle) {
+    for (const winner of state.lastRaffle.winners) {
+      if (winner.id !== participantId) continue
+      const id = `raffle-${state.lastRaffle.createdAt}-${winner.id}`
+      if (!awards.has(id)) {
+        awards.set(id, {
+          id,
+          participantId: winner.id,
+          kind: 'raffle',
+          rank: winner.rank,
+          rule: state.lastRaffle.rule,
+          prizeImageFile: state.lastRaffle.prizeImageFile || getRafflePrizeInfo(state.copy, state.lastRaffle.rule).image,
+          prizeName: state.lastRaffle.prizeName || getRafflePrizeInfo(state.copy, state.lastRaffle.rule).name,
+          createdAt: state.lastRaffle.createdAt,
+        })
+      }
+    }
+  }
+
+  for (const winner of state.quiz.winners) {
+    if (winner.participantId !== participantId) continue
+    const id = `quiz-${winner.quizId}-${winner.id}-${winner.participantId}`
+    if (!awards.has(id)) {
+      awards.set(id, {
+        id,
+        participantId: winner.participantId,
+        kind: 'quiz',
+        rank: winner.rank,
+        quizId: winner.quizId,
+        question: state.quiz.question,
+        prizeImageFile: state.quiz.prizeImageFile,
+        prizeName: '퀴즈 상품',
+        createdAt: winner.createdAt,
+      })
+    }
+  }
+
+  return [...awards.values()].sort((a, b) => b.createdAt - a.createdAt)
+}
+
+function getRaffleRuleLabel(rule: RaffleRule | undefined) {
+  if (rule === 'cheer') return '공개 응원 메시지 참여자'
+  return raffleRuleOptions.find((option) => option.value === rule)?.label ?? '행운권 추첨'
+}
+
+function getRaffleRulePublicLabel(rule: RaffleRule, index = raffleRuleOptions.findIndex((option) => option.value === rule)) {
+  return `추첨룰 ${Math.max(1, index + 1)}`
+}
+
+function getRafflePrizeLabel(rule: RaffleRule | undefined) {
+  if (!rule) return '행운권 상품'
+  return rafflePrizeImageFields.find((field) => field.key === rafflePrizeImageKeyByRule[rule])?.label ?? '행운권 상품'
+}
+
+function getRafflePrizeInfo(copy: EventCopy, rule: RaffleRule | undefined) {
+  if (!rule) {
+    return {
+      name: copy.rafflePrizeNameFile || '행운권 상품',
+      image: copy.rafflePrizeImageFile,
+    }
+  }
+
+  const nameKey = rafflePrizeNameKeyByRule[rule] || 'rafflePrizeNameFile'
+  const imageKey = rafflePrizeImageKeyByRule[rule] || 'rafflePrizeImageFile'
+
+  return {
+    name: copy[nameKey] || copy.rafflePrizeNameFile || getRafflePrizeLabel(rule),
+    image: copy[imageKey] || copy.rafflePrizeImageFile,
+  }
 }
 
 function getParticipantSummaries(state: EventState): ParticipantSummary[] {
@@ -5592,10 +6615,12 @@ function TeamPhotoPreview({ team }: { team: TeamVisual }) {
   const fit = normalizeImageFit(team.photoFit, normalizeImageFit(team.logoFit, 'cover'))
   const focusX = getPercentValue(team.photoFocusX, getPercentValue(team.logoFocusX, 50))
   const focusY = getPercentValue(team.photoFocusY, getPercentValue(team.logoFocusY, 50))
+  const panX = Number(((50 - focusX) * 0.42).toFixed(2))
+  const panY = Number(((50 - focusY) * 0.42).toFixed(2))
 
   return (
     <div
-      className={`team-photo-preview shape-${normalizeImageShape(team.logoShape, 'rounded')} frame-${normalizeImageFrame(team.logoFrame, 'line')} ${team.logoFile ? 'has-photo' : ''}`}
+      className={`team-photo-preview shape-${normalizeImageShape(team.photoShape, normalizeImageShape(team.logoShape, 'wide'))} frame-${normalizeImageFrame(team.photoFrame, normalizeImageFrame(team.logoFrame, 'line'))} ${team.logoFile ? 'has-photo' : ''}`}
       style={getTeamPhotoStyle(team)}
       aria-label={`${team.name} 로고 또는 팀 사진`}
     >
@@ -5606,8 +6631,8 @@ function TeamPhotoPreview({ team }: { team: TeamVisual }) {
           style={{
             objectFit: fit,
             objectPosition: `${focusX}% ${focusY}%`,
-            transform: `scale(${getZoomValue(team.photoZoom, getZoomValue(team.logoZoom, 1))})`,
-            transformOrigin: `${focusX}% ${focusY}%`,
+            transform: `translate3d(${panX}%, ${panY}%, 0) scale(${getZoomValue(team.photoZoom, getZoomValue(team.logoZoom, 1))})`,
+            transformOrigin: 'center',
           }}
         />
       ) : <LogoMark team={team} />}
@@ -5636,8 +6661,90 @@ function FloatingStars() {
   )
 }
 
-function useEventState(mode: AppMode, participantId?: string) {
-  const [state, setState] = useState<EventState>(fallbackState)
+function useAdminSession(enabled: boolean): AdminSessionState {
+  const [ready, setReady] = useState(false)
+  const [required, setRequired] = useState(false)
+  const [authenticated, setAuthenticated] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!enabled) return
+
+    let active = true
+
+    const checkSession = async () => {
+      try {
+        const response = await fetch('/api/admin/status', { credentials: 'same-origin' })
+        if (!response.ok) throw new Error('status failed')
+        const next = (await response.json()) as { required?: boolean; authenticated?: boolean }
+        if (!active) return
+        setRequired(Boolean(next.required))
+        setAuthenticated(Boolean(next.authenticated))
+        setError('')
+      } catch {
+        if (!active) return
+        setRequired(true)
+        setAuthenticated(false)
+        setError('관리자 인증 상태를 확인하지 못했습니다.')
+      } finally {
+        if (active) setReady(true)
+      }
+    }
+
+    void checkSession()
+
+    return () => {
+      active = false
+    }
+  }, [enabled])
+
+  const login = useCallback(async (passcode: string) => {
+    if (!enabled) return true
+
+    setLoading(true)
+    setError('')
+
+    try {
+      const response = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ passcode }),
+      })
+
+      if (!response.ok) {
+        setAuthenticated(false)
+        setError('Passcode가 맞지 않습니다.')
+        return false
+      }
+
+      const next = (await response.json()) as { required?: boolean; authenticated?: boolean }
+      setRequired(Boolean(next.required))
+      setAuthenticated(Boolean(next.authenticated))
+      return Boolean(next.authenticated)
+    } catch {
+      setAuthenticated(false)
+      setError('관리자 인증 요청에 실패했습니다.')
+      return false
+    } finally {
+      setReady(true)
+      setLoading(false)
+    }
+  }, [enabled])
+
+  return {
+    ready: enabled ? ready : true,
+    required: enabled ? required : false,
+    authenticated: enabled ? authenticated : true,
+    loading: enabled ? loading : false,
+    error: enabled ? error : '',
+    login,
+  }
+}
+
+function useEventState(mode: AppMode, participantId?: string, enabled = true, allowProtectedRealtime = enabled) {
+  const [state, setState] = useState<EventState>(() => getInitialEventState())
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [voteRealtime, setVoteRealtime] = useState(false)
   const lastRankStateRef = useRef<EventState | null>(null)
@@ -5673,21 +6780,25 @@ function useEventState(mode: AppMode, participantId?: string) {
   }, [mode, participantId])
 
   useEffect(() => {
+    if (!enabled) return
+
     let active = true
     let events: EventSource | null = null
     let pollTimer: number | undefined
-    const realtime = Boolean(mode) || voteRealtime
+    const realtime = allowProtectedRealtime && (mode === 'admin' || mode === 'wall' || mode === 'vote' || voteRealtime)
+    const shouldPoll = mode === 'vote' || !realtime
+    const roleQuery = `role=${encodeURIComponent(mode)}`
 
     const fetchState = async () => {
       try {
-        const response = await fetch('/api/state')
+        const response = await fetch(`/api/state?${roleQuery}`, { credentials: 'same-origin' })
         if (!response.ok) throw new Error('state request failed')
         const nextState = (await response.json()) as EventState
         if (!active) return
         applyState(nextState)
         setConnection('live')
 
-        if (!realtime && nextState.closed && pollTimer) {
+        if (shouldPoll && nextState.closed && pollTimer && mode !== 'vote') {
           window.clearInterval(pollTimer)
           pollTimer = undefined
         }
@@ -5699,7 +6810,7 @@ function useEventState(mode: AppMode, participantId?: string) {
     const openEvents = () => {
       if (!realtime || events || document.hidden) return
 
-      events = new EventSource('/events')
+      events = new EventSource(`/events?${roleQuery}`)
       events.onopen = () => setConnection('live')
       events.addEventListener('state', (event) => {
         applyState(JSON.parse((event as MessageEvent).data) as EventState)
@@ -5722,7 +6833,7 @@ function useEventState(mode: AppMode, participantId?: string) {
     fetchState()
     openEvents()
 
-    if (!realtime) {
+    if (shouldPoll) {
       pollTimer = window.setInterval(fetchState, 15_000)
     }
 
@@ -5734,13 +6845,16 @@ function useEventState(mode: AppMode, participantId?: string) {
       if (pollTimer) window.clearInterval(pollTimer)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [applyState, mode, voteRealtime])
+  }, [allowProtectedRealtime, applyState, enabled, mode, voteRealtime])
 
   const post = useCallback(async (path: string, body: unknown) => {
+    if (!enabled || !allowProtectedRealtime) return null
+
     try {
       const response = await fetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify(body),
       })
 
@@ -5753,9 +6867,26 @@ function useEventState(mode: AppMode, participantId?: string) {
       setConnection('offline')
       return null
     }
-  }, [applyState])
+  }, [allowProtectedRealtime, applyState, enabled])
 
-  return { state, connection, post }
+  return { state, connection: enabled ? connection : 'connecting', post }
+}
+
+function getInitialEventState(): EventState {
+  const storedTheme = normalizeStoredThemeMode(getStoredValue(themeModeKey))
+  const initialTheme = storedTheme || fallbackState.settings.themeMode
+
+  return {
+    ...fallbackState,
+    settings: {
+      ...fallbackState.settings,
+      themeMode: initialTheme,
+    },
+  }
+}
+
+function normalizeStoredThemeMode(value: string): ThemeMode | '' {
+  return value === 'light' || value === 'stage' ? value : ''
 }
 
 type TeamConfigDraft = {
@@ -5779,7 +6910,11 @@ type TeamConfigDraft = {
   logoFocusX: string
   logoFocusY: string
   photoFit: string
+  photoShape: string
+  photoFrame: string
+  photoWidth: string
   photoHeight: string
+  photoRadius: string
   photoZoom: string
   photoFocusX: string
   photoFocusY: string
@@ -5970,7 +7105,11 @@ function createTeamDraft(team: Team, sortOrder = 0): TeamConfigDraft {
     logoFocusX: String(team.logoFocusX ?? 50),
     logoFocusY: String(team.logoFocusY ?? 50),
     photoFit: team.photoFit || 'cover',
-    photoHeight: String(team.photoHeight ?? 260),
+    photoShape: team.photoShape || 'wide',
+    photoFrame: team.photoFrame || team.logoFrame || 'line',
+    photoWidth: String(team.photoWidth ?? 560),
+    photoHeight: String(team.photoHeight ?? 300),
+    photoRadius: String(team.photoRadius ?? DEFAULT_TEAM_PHOTO_RADIUS),
     photoZoom: String(team.photoZoom ?? 1),
     photoFocusX: String(team.photoFocusX ?? 50),
     photoFocusY: String(team.photoFocusY ?? 50),
@@ -6004,7 +7143,11 @@ function teamDraftToConfig(team: TeamConfigDraft, index: number) {
     logoFocusX: getPercentValue(team.logoFocusX, 50),
     logoFocusY: getPercentValue(team.logoFocusY, 50),
     photoFit: normalizeImageFit(team.photoFit, 'cover'),
-    photoHeight: getImageDimensionValue(team.photoHeight, 260, 150, 460),
+    photoShape: normalizeImageShape(team.photoShape, 'wide'),
+    photoFrame: normalizeImageFrame(team.photoFrame, 'line'),
+    photoWidth: getImageDimensionValue(team.photoWidth, 560, 180, 820),
+    photoHeight: getImageDimensionValue(team.photoHeight, 300, 150, 460),
+    photoRadius: getImageDimensionValue(team.photoRadius, DEFAULT_TEAM_PHOTO_RADIUS, 0, 160),
     photoZoom: getZoomValue(team.photoZoom, 1),
     photoFocusX: getPercentValue(team.photoFocusX, 50),
     photoFocusY: getPercentValue(team.photoFocusY, 50),
@@ -6033,7 +7176,11 @@ function teamDraftToSelfConfig(team: TeamConfigDraft) {
     logoFocusX: config.logoFocusX,
     logoFocusY: config.logoFocusY,
     photoFit: config.photoFit,
+    photoShape: config.photoShape,
+    photoFrame: config.photoFrame,
+    photoWidth: config.photoWidth,
     photoHeight: config.photoHeight,
+    photoRadius: config.photoRadius,
     photoZoom: config.photoZoom,
     photoFocusX: config.photoFocusX,
     photoFocusY: config.photoFocusY,
@@ -6075,7 +7222,11 @@ function teamEditorPreview(team: TeamConfigDraft): TeamVisual {
     logoFocusX: getPercentValue(team.logoFocusX, 50),
     logoFocusY: getPercentValue(team.logoFocusY, 50),
     photoFit: normalizeImageFit(team.photoFit, 'cover'),
-    photoHeight: getImageDimensionValue(team.photoHeight, 260, 150, 460),
+    photoShape: normalizeImageShape(team.photoShape, 'wide'),
+    photoFrame: normalizeImageFrame(team.photoFrame, 'line'),
+    photoWidth: getImageDimensionValue(team.photoWidth, 560, 180, 820),
+    photoHeight: getImageDimensionValue(team.photoHeight, 300, 150, 460),
+    photoRadius: getImageDimensionValue(team.photoRadius, DEFAULT_TEAM_PHOTO_RADIUS, 0, 160),
     photoZoom: getZoomValue(team.photoZoom, 1),
     photoFocusX: getPercentValue(team.photoFocusX, 50),
     photoFocusY: getPercentValue(team.photoFocusY, 50),
@@ -6448,29 +7599,14 @@ function getOrCreateParticipantId() {
   return next
 }
 
-function isSameParticipantIdentity(person: Participant, deviceId: string, name: string, group: string) {
+function isSameParticipantDevice(person: Participant, deviceId: string) {
   if (person.id === deviceId) return true
   if (getParticipantDeviceIds(person).includes(deviceId)) return true
-
-  return (
-    normalizeParticipantNameIdentity(person.name) === normalizeParticipantNameIdentity(name) &&
-    normalizeParticipantGroupIdentity(person.group) === normalizeParticipantGroupIdentity(group)
-  )
+  return false
 }
 
 function getParticipantDeviceIds(person: Participant) {
   return [...new Set([...(person.deviceIds ?? []), person.deviceId].filter(Boolean) as string[])]
-}
-
-function normalizeParticipantNameIdentity(value: string) {
-  return value.normalize('NFKC').replace(/\s+/gu, '').toLocaleLowerCase('ko-KR')
-}
-
-function normalizeParticipantGroupIdentity(value: string) {
-  return normalizeLetsIdDisplay(value)
-    .normalize('NFKC')
-    .toLocaleLowerCase('ko-KR')
-    .replace(/\s+/gu, '')
 }
 
 function normalizeLetsIdDisplay(value: string) {
@@ -6667,17 +7803,27 @@ function getTeamImageStyle(team: TeamVisual) {
 }
 
 function getTeamPhotoStyle(team: TeamVisual) {
-  const shape = normalizeImageShape(team.logoShape, 'rounded')
-  const height = getImageDimensionValue(team.photoHeight, 260, 150, 460)
-  const metrics = getImageFrameMetrics(shape, Math.round(height * 1.6), height)
+  const shape = normalizeImageShape(team.photoShape, normalizeImageShape(team.logoShape, 'wide'))
+  const height = getImageDimensionValue(team.photoHeight, 300, 150, 460)
+  const width = getImageDimensionValue(team.photoWidth, 560, 180, 820)
+  const metrics = getImageFrameMetrics(shape, width, height)
+  const radius = getImageDimensionValue(team.photoRadius, DEFAULT_TEAM_PHOTO_RADIUS, 0, 160)
+  const focusX = getPercentValue(team.photoFocusX, getPercentValue(team.logoFocusX, 50))
+  const focusY = getPercentValue(team.photoFocusY, getPercentValue(team.logoFocusY, 50))
+  const panX = Number(((50 - focusX) * 0.42).toFixed(2))
+  const panY = Number(((50 - focusY) * 0.42).toFixed(2))
 
   return {
     '--team-color': team.color,
+    '--team-photo-width': `${metrics.width}px`,
     '--team-photo-height': `${height}px`,
-    '--team-photo-radius': `${metrics.radius}px`,
+    '--team-photo-aspect-ratio': `${metrics.width} / ${height}`,
+    '--team-photo-radius': `${radius}px`,
     '--team-image-fit': normalizeImageFit(team.photoFit, normalizeImageFit(team.logoFit, 'cover')),
-    '--team-image-focus-x': `${getPercentValue(team.photoFocusX, getPercentValue(team.logoFocusX, 50))}%`,
-    '--team-image-focus-y': `${getPercentValue(team.photoFocusY, getPercentValue(team.logoFocusY, 50))}%`,
+    '--team-image-focus-x': `${focusX}%`,
+    '--team-image-focus-y': `${focusY}%`,
+    '--team-image-pan-x': `${panX}%`,
+    '--team-image-pan-y': `${panY}%`,
     '--team-image-zoom': getZoomValue(team.photoZoom, getZoomValue(team.logoZoom, 1)),
   } as CSSProperties
 }
@@ -6690,6 +7836,11 @@ function getAppLogoFrameLabel(copy: EventCopy) {
 function getTeamLogoFrameLabel(team: TeamVisual) {
   const style = getTeamImageStyle(team) as Record<string, string>
   return `${style['--team-logo-width'] || '48px'} × ${style['--team-logo-height'] || '48px'}`
+}
+
+function getTeamPhotoFrameLabel(team: TeamVisual) {
+  const style = getTeamPhotoStyle(team) as Record<string, string>
+  return `${style['--team-photo-width'] || '560px'} × ${style['--team-photo-height'] || '300px'}`
 }
 
 function getThemeMode(state: EventState): ThemeMode {
@@ -6716,8 +7867,12 @@ function getEditableConfigSignature(state: EventState) {
       logoFocusX: team.logoFocusX,
       logoFocusY: team.logoFocusY,
       photoFit: team.photoFit,
-      photoHeight: team.photoHeight,
-      photoZoom: team.photoZoom,
+      photoShape: team.photoShape,
+          photoFrame: team.photoFrame,
+          photoWidth: team.photoWidth,
+          photoHeight: team.photoHeight,
+          photoRadius: team.photoRadius,
+          photoZoom: team.photoZoom,
       photoFocusX: team.photoFocusX,
       photoFocusY: team.photoFocusY,
       color: team.color,
@@ -6742,6 +7897,18 @@ function formatCheerAuthor(name: string, mode: CheerNameMode) {
 
 function formatCopy(template: string, values: Record<string, string | number>) {
   return template.replace(/\{(\w+)\}/g, (match, key) => String(values[key] ?? match))
+}
+
+function renderStarAccent(text: string) {
+  const parts = text.split('★')
+  if (parts.length === 1) return text
+
+  return parts.map((part, index) => (
+    <span key={`${part}-${index}`}>
+      {index > 0 ? <span className="star-text-accent">★</span> : null}
+      {part}
+    </span>
+  ))
 }
 
 function formatPointScore(score: number) {
@@ -6995,64 +8162,6 @@ function constrainFieldPointToStage(point: Point, bubbleSize: number) {
   }
 }
 
-function getScatterPointForBubble(
-  teamId: string,
-  key: string,
-  index: number,
-  size: number,
-  round: number,
-  territories: TerritoryCell[],
-  centers: Map<string, Point>,
-) {
-  const cell = territories.find((territory) => territory.team.id === teamId)
-  const center = centers.get(teamId) ?? { x: 50, y: 50 }
-  const labelPoint = {
-    x: (center.x / 100) * 1000,
-    y: (center.y / 100) * 600,
-  }
-
-  if (cell?.polygon.length) {
-    const bounds = getPolygonBounds(cell.polygon)
-    const minimumFromLabel = 78 + size * 0.44
-    const stageMargin = size * 0.52 + 10
-
-    for (let attempt = 0; attempt < 34; attempt += 1) {
-      const seed = `${key}:${round}:${attempt}`
-      const candidate = {
-        x: bounds.minX + hashToUnit(`${seed}:x`) * (bounds.maxX - bounds.minX),
-        y: bounds.minY + hashToUnit(`${seed}:y`) * (bounds.maxY - bounds.minY),
-      }
-      const isInsideStage =
-        candidate.x >= stageMargin &&
-        candidate.x <= 1000 - stageMargin &&
-        candidate.y >= stageMargin &&
-        candidate.y <= 600 - stageMargin
-
-      if (isInsideStage && pointInPolygon(candidate, cell.polygon) && distance(candidate, labelPoint) > minimumFromLabel) {
-        return {
-          x: clamp((candidate.x / 1000) * 100, 4.5, 95.5),
-          y: clamp((candidate.y / 600) * 100, 7, 93),
-        }
-      }
-    }
-  }
-
-  const angle = hashToUnit(`${key}:${round}:angle`) * Math.PI * 2 + index * 0.68
-  const radiusX = 16 + hashToUnit(`${key}:${round}:rx`) * 24
-  const radiusY = 12 + hashToUnit(`${key}:${round}:ry`) * 20
-
-  return constrainPercentPointToTerritory(
-    teamId,
-    {
-      x: center.x + Math.cos(angle) * radiusX,
-      y: center.y + Math.sin(angle) * radiusY,
-    },
-    territories,
-    centers,
-    size,
-  )
-}
-
 function constrainFieldPointToTerritory(point: Point, cell: TerritoryCell | undefined, fallback: Point) {
   if (!cell?.polygon.length || pointInPolygon(point, cell.polygon)) {
     return point
@@ -7107,27 +8216,6 @@ function getPolygonCentroid(polygon: Point[]) {
     x: sum.x / polygon.length,
     y: sum.y / polygon.length,
   }
-}
-
-function getPolygonBounds(polygon: Point[]) {
-  return polygon.reduce(
-    (bounds, point) => ({
-      minX: Math.min(bounds.minX, point.x),
-      maxX: Math.max(bounds.maxX, point.x),
-      minY: Math.min(bounds.minY, point.y),
-      maxY: Math.max(bounds.maxY, point.y),
-    }),
-    {
-      minX: Number.POSITIVE_INFINITY,
-      maxX: Number.NEGATIVE_INFINITY,
-      minY: Number.POSITIVE_INFINITY,
-      maxY: Number.NEGATIVE_INFINITY,
-    },
-  )
-}
-
-function distance(a: Point, b: Point) {
-  return Math.hypot(a.x - b.x, a.y - b.y)
 }
 
 function hashToUnit(value: string) {

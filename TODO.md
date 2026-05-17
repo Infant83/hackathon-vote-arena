@@ -14,13 +14,14 @@
   - 관객 송출 보드에는 심사용 환산점수를 노출하지 않고, 별 개수와 응원 댓글 중심으로 보여준다.
   - 투표자 이름이 실시간으로 노출되어 오해를 만들 수 있는 UI를 제거하거나 관리자 전용으로 제한한다.
 - [x] 관객용 실시간 동기화 비용을 줄인다.
-  - `/vote`는 SSE를 끄고 15초 polling 중심으로 동기화한다.
+  - `/vote`는 filtered SSE를 열어 퀴즈/마감/설정 같은 관객 필수 이벤트만 즉시 받는다.
+  - 별 이동과 일반 응원 흐름은 15초 polling과 POST 응답 갱신 중심으로 유지한다.
   - 투표/응원 메시지 전송 직후에는 POST 응답으로 즉시 갱신한다.
-  - 투표 마감 후에는 관객 화면 polling을 중지한다.
-  - `/admin`과 `/admin?showCheer=1`만 SSE를 유지한다.
-- [ ] 관리자 화면 접근 보호를 추가한다.
-  - 현재 `/admin` URL만 알면 관리자 화면에 접근할 수 있다.
-  - 최소한 간단한 admin passcode 또는 Cloudflare Access 보호를 붙이는 것이 좋다.
+  - `/admin`, `/wall`, `/admin?showCheer=1`은 운영용 전체 SSE를 유지한다.
+- [x] 관리자 화면 접근 보호를 추가한다.
+  - `ADMIN_PASSCODE`가 설정되면 `/admin`은 passcode 로그인 후 접근한다.
+  - 관리자 전용 API와 `/events?role=admin` SSE는 인증 쿠키가 있어야 사용할 수 있다.
+  - Cloudflare 운영 환경에서는 `wrangler secret put ADMIN_PASSCODE`로 설정한다.
 - [ ] 실제 행사 팀 정보와 로고를 반영한다.
   - `team_infos.zip` 또는 `team_info.json`으로 업로드한다.
   - 팀 로고는 `512 x 512 px` 정사각형 기준으로 받는다.
@@ -61,7 +62,7 @@
   - `cheers`
   - `raffle_runs`
   - `admin_audit_logs`
-- [ ] SSE broadcast를 역할별로 나눈다.
+- [x] SSE broadcast를 역할별로 나눈다.
   - 관객용 이벤트
   - 관리자용 이벤트
   - Showup용 이벤트

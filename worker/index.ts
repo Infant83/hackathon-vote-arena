@@ -5,7 +5,8 @@ const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const maxStarsPerTeam = 10
 const kstOffsetMinutes = 9 * 60
-const cheerMessageMaxLength = 240
+const cheerMessageMaxLength = 5000
+const defaultTeamPhotoRadius = 18
 const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
 const quizIntroMs = 2400
@@ -15,6 +16,8 @@ const imageFrames = new Set(['soft', 'line', 'glow', 'clean'])
 const imageFits = new Set(['cover', 'contain'])
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
+const adminCookieName = 'vibe-vote-admin'
+const adminCookieMaxAge = 60 * 60 * 8
 const snapshotKey = 'event-state-v1'
 const settingsVersion = 5
 
@@ -22,7 +25,10 @@ type Env = {
   ARENA_ROOM: DurableObjectNamespace
   ASSETS: Fetcher
   ARENA_ROOM_NAME?: string
+  ADMIN_PASSCODE?: string
 }
+
+type EventClientRole = 'admin' | 'wall' | 'vote'
 
 type LogoKind = 'orbit' | 'beam' | 'grid' | 'wave' | 'core'
 
@@ -45,7 +51,11 @@ type TeamConfig = {
   logoFocusX: number
   logoFocusY: number
   photoFit: string
+  photoShape: string
+  photoFrame: string
+  photoWidth: number
   photoHeight: number
+  photoRadius: number
   photoZoom: number
   photoFocusX: number
   photoFocusY: number
@@ -103,7 +113,21 @@ type VoteEvent = {
   createdAt: number
 }
 
-type RaffleRule = 'all' | 'leader' | 'top2' | 'top3' | 'multi' | 'big' | 'cheer'
+type RaffleRule = 'all' | 'leader' | 'top3' | 'rank456' | 'rank7to10Three' | 'multi' | 'big' | 'longestCheer' | 'cheer'
+
+type RaffleSupportDetail = {
+  teamId: string
+  teamName: string
+  stars: number
+  rank?: number
+}
+
+type RaffleCheerDetail = {
+  teamId: string
+  teamName: string
+  text: string
+  createdAt: number
+}
 
 type LastRaffle = {
   rule: RaffleRule
@@ -116,7 +140,27 @@ type LastRaffle = {
     department?: string
     cheered: boolean
     rank?: number
+    supportDetails?: RaffleSupportDetail[]
+    cheerDetails?: RaffleCheerDetail[]
   }>
+  prizeImageFile?: string
+  prizeName?: string
+  createdAt: number
+}
+
+type AwardRecord = {
+  id: string
+  participantId: string
+  participantName?: string
+  participantGroup?: string
+  participantDepartment?: string
+  kind: 'raffle' | 'quiz'
+  rank?: number
+  rule?: RaffleRule
+  quizId?: number
+  question?: string
+  prizeImageFile?: string
+  prizeName?: string
   createdAt: number
 }
 
@@ -180,6 +224,7 @@ type Snapshot = {
   closed: boolean
   closesAt: number
   lastRaffle: LastRaffle | null
+  awardHistory?: AwardRecord[]
   quiz?: QuizState
   quizAnswerKeys?: string[]
   quizAnswerId?: number
@@ -280,10 +325,23 @@ const defaultCopy = {
   rafflePrizeImageFile: '',
   rafflePrizeImageAll: '',
   rafflePrizeImageLeader: '',
-  rafflePrizeImageTop2: '',
   rafflePrizeImageTop3: '',
+  rafflePrizeImageRank456: '',
+  rafflePrizeImageLowerPack: '',
   rafflePrizeImageMulti: '',
   rafflePrizeImageBig: '',
+  rafflePrizeImageLongestCheer: '',
+  rafflePrizeNameFile: '',
+  rafflePrizeNameAll: '',
+  rafflePrizeNameLeader: '',
+  rafflePrizeNameTop3: '',
+  rafflePrizeNameRank456: '',
+  rafflePrizeNameLowerPack: '',
+  rafflePrizeNameMulti: '',
+  rafflePrizeNameBig: '',
+  rafflePrizeNameLongestCheer: '',
+  raffleStartButtonLabel: '추첨 시작',
+  raffleStopButtonLabel: '정지',
 }
 
 const defaultTeams: TeamConfig[] = [
@@ -304,7 +362,11 @@ const defaultTeams: TeamConfig[] = [
     logoFocusX: 50,
     logoFocusY: 50,
     photoFit: 'cover',
-    photoHeight: 260,
+    photoShape: 'wide',
+    photoFrame: 'line',
+    photoWidth: 560,
+    photoHeight: 300,
+    photoRadius: defaultTeamPhotoRadius,
     photoZoom: 1,
     photoFocusX: 50,
     photoFocusY: 50,
@@ -339,6 +401,30 @@ const defaultQuizBank: QuizConfig[] = [
   },
 ]
 
+const rafflePrizeImageKeyByRule: Record<RaffleRule, keyof EventCopy> = {
+  all: 'rafflePrizeImageAll',
+  leader: 'rafflePrizeImageLeader',
+  top3: 'rafflePrizeImageTop3',
+  rank456: 'rafflePrizeImageRank456',
+  rank7to10Three: 'rafflePrizeImageLowerPack',
+  multi: 'rafflePrizeImageMulti',
+  big: 'rafflePrizeImageBig',
+  longestCheer: 'rafflePrizeImageLongestCheer',
+  cheer: 'rafflePrizeImageAll',
+}
+
+const rafflePrizeNameKeyByRule: Record<RaffleRule, keyof EventCopy> = {
+  all: 'rafflePrizeNameAll',
+  leader: 'rafflePrizeNameLeader',
+  top3: 'rafflePrizeNameTop3',
+  rank456: 'rafflePrizeNameRank456',
+  rank7to10Three: 'rafflePrizeNameLowerPack',
+  multi: 'rafflePrizeNameMulti',
+  big: 'rafflePrizeNameBig',
+  longestCheer: 'rafflePrizeNameLongestCheer',
+  cheer: 'rafflePrizeNameAll',
+}
+
 const validLogos = new Set<LogoKind>(['orbit', 'beam', 'grid', 'wave', 'core'])
 const initialConfig = loadConfig(rawConfig)
 const encoder = new TextEncoder()
@@ -346,9 +432,52 @@ const encoder = new TextEncoder()
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
+    const adminPasscode = String(env.ADMIN_PASSCODE || '').trim()
 
     if (url.pathname === '/api/health') {
       return json({ ok: true, runtime: 'cloudflare-workers' })
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/admin/status') {
+      return json({
+        required: Boolean(adminPasscode),
+        authenticated: await isAdminAuthenticated(request, adminPasscode),
+      })
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/admin/login') {
+      const body = await readJson(request)
+      const passcode = String(body.passcode || '').trim()
+
+      if (!adminPasscode) {
+        return json(
+          { required: false, authenticated: true },
+          200,
+          { 'Set-Cookie': clearAdminCookieHeader(url.protocol === 'https:') },
+        )
+      }
+
+      if (passcode !== adminPasscode) {
+        return json({ error: 'invalid admin passcode' }, 401)
+      }
+
+      return json(
+        { required: true, authenticated: true },
+        200,
+        { 'Set-Cookie': await adminCookieHeader(adminPasscode, url.protocol === 'https:') },
+      )
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/admin/logout') {
+      return json(
+        { required: Boolean(adminPasscode), authenticated: !adminPasscode },
+        200,
+        { 'Set-Cookie': clearAdminCookieHeader(url.protocol === 'https:') },
+      )
+    }
+
+    if (isAdminProtectedRequest(url, request.method) && !(await isAdminAuthenticated(request, adminPasscode))) {
+      return json({ error: 'admin authentication required' }, 401)
     }
 
     if (url.pathname.startsWith('/api/') || url.pathname === '/events') {
@@ -365,7 +494,8 @@ export class ArenaRoom {
   private participants = new Map<string, Participant>()
   private cheers: CheerMessage[] = []
   private voteEvents: VoteEvent[] = []
-  private clients = new Set<ReadableStreamDefaultController<Uint8Array>>()
+  private awardHistory: AwardRecord[] = []
+  private clients = new Map<ReadableStreamDefaultController<Uint8Array>, EventClientRole>()
   private closed = false
   private closesAt = Date.now() + defaultDurationMinutes * 60 * 1000
   private lastRaffle: LastRaffle | null = null
@@ -384,7 +514,7 @@ export class ArenaRoom {
     targetTime: '',
     minScore: defaultMinScore,
     cheerNameMode: 'masked',
-    themeMode: 'light',
+    themeMode: 'stage',
   }
   private teams: TeamConfig[] = initialConfig.teams
   private copy: EventCopy = initialConfig.copy
@@ -408,7 +538,7 @@ export class ArenaRoom {
     }
 
     if (request.method === 'GET' && url.pathname === '/events') {
-      return this.openEventStream()
+      return this.openEventStream(url)
     }
 
     if (request.method !== 'POST') {
@@ -427,6 +557,7 @@ export class ArenaRoom {
     this.participants = new Map(snapshot.participants.map((person) => [person.id, person]))
     this.cheers = snapshot.cheers || []
     this.voteEvents = snapshot.voteEvents || []
+    this.awardHistory = Array.isArray(snapshot.awardHistory) ? snapshot.awardHistory.filter(Boolean).slice(0, 200) : []
     this.closed = Boolean(snapshot.closed)
     this.closesAt = Number(snapshot.closesAt || Date.now() + defaultDurationMinutes * 60 * 1000)
     this.lastRaffle = snapshot.lastRaffle || null
@@ -465,6 +596,7 @@ export class ArenaRoom {
       participants: [...this.participants.values()],
       cheers: this.cheers,
       voteEvents: this.voteEvents,
+      awardHistory: this.awardHistory,
       closed: this.closed,
       closesAt: this.closesAt,
       lastRaffle: this.lastRaffle,
@@ -540,7 +672,7 @@ export class ArenaRoom {
 
       message.hidden = Boolean(body.hidden)
       this.lastRaffle = null
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
@@ -563,14 +695,17 @@ export class ArenaRoom {
       }
 
       this.lastRaffle = null
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
     if (pathname === '/api/raffle') {
       const rule = isRaffleRule(body.rule) ? body.rule : 'all'
-      const winnerCount = clamp(Math.floor(Number(body.winnerCount) || 4), 1, 8)
+      const winnerCount = 1
       const candidates = this.getRaffleCandidates(rule)
+      const createdAt = Date.now()
+      const prizeImageFile = this.getRafflePrizeImage(rule)
+      const prizeName = this.getRafflePrizeName(rule)
       const winners = shuffle(candidates)
         .slice(0, Math.min(winnerCount, candidates.length))
         .map((person, index) => ({
@@ -580,6 +715,8 @@ export class ArenaRoom {
           department: person.department || '',
           cheered: person.cheered,
           rank: index + 1,
+          supportDetails: this.getRaffleSupportDetails(person),
+          cheerDetails: this.getRaffleCheerDetails(person),
         }))
 
       this.lastRaffle = {
@@ -587,23 +724,41 @@ export class ArenaRoom {
         winnerCount,
         candidates: candidates.length,
         winners,
-        createdAt: Date.now(),
+        prizeImageFile,
+        prizeName,
+        createdAt,
       }
 
-      await this.commit()
+      for (const winner of winners) {
+        this.addAwardRecord({
+          id: `raffle-${createdAt}-${winner.id}`,
+          participantId: winner.id,
+          participantName: winner.name,
+          participantGroup: winner.group,
+          participantDepartment: winner.department || '',
+          kind: 'raffle',
+          rank: winner.rank,
+          rule,
+          prizeImageFile,
+          prizeName,
+          createdAt,
+        })
+      }
+
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
     if (pathname === '/api/quiz/open') {
       if (!this.openQuiz(body)) return json({ error: 'quiz question and answer required' }, 400)
 
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
     if (pathname === '/api/quiz/prepare') {
       this.prepareQuiz()
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
@@ -616,19 +771,19 @@ export class ArenaRoom {
 
       if (!answer) return json({ error: 'quiz answer rejected' }, 400)
 
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState(), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
     if (pathname === '/api/quiz/close') {
       this.closeQuiz()
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
     if (pathname === '/api/quiz/clear') {
       this.clearQuiz()
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
@@ -637,7 +792,7 @@ export class ArenaRoom {
       if (!this.closed && Date.now() > this.closesAt) {
         this.closesAt = calculateClosesAt(this.settings)
       }
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
@@ -645,8 +800,9 @@ export class ArenaRoom {
       if (!this.isCurrentSession(body)) return json({ error: 'session expired' }, 409)
 
       const deviceId = this.getRequestDeviceId(request, body)
+      if (!sanitizeText(body.department, 40)) return json({ error: 'name, group, and department required' }, 400)
       const person = this.upsertParticipant(deviceId, body.name, body.group, body.department)
-      if (!person) return json({ error: 'name and group required' }, 400)
+      if (!person) return json({ error: 'name, group, and department required' }, 400)
 
       await this.commit()
       return json(this.getState(), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
@@ -655,14 +811,14 @@ export class ArenaRoom {
     if (pathname === '/api/participant/reset') {
       if (!this.resetParticipant(body.participantId)) return json({ error: 'participant not found' }, 404)
 
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
     if (pathname === '/api/participant/delete') {
       if (!this.deleteParticipant(body.participantId)) return json({ error: 'participant not found' }, 404)
 
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
@@ -686,7 +842,7 @@ export class ArenaRoom {
       this.closesAt = calculateClosesAt(this.settings)
       this.closed = false
       this.lastRaffle = null
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
@@ -694,7 +850,7 @@ export class ArenaRoom {
       const updated = this.applyTeamConfig(body)
       if (!updated) return json({ error: 'teams array required' }, 400)
 
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
@@ -702,13 +858,13 @@ export class ArenaRoom {
       const updated = this.applyTeamSelfConfig(body)
       if (!updated) return json({ error: 'team not found' }, 400)
 
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
     if (pathname === '/api/reset') {
       await this.resetRuntimeState({ seed: Boolean(body.seed), keepParticipants: Boolean(body.keepParticipants) && !body.seed })
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getState())
     }
 
@@ -769,6 +925,7 @@ export class ArenaRoom {
       participants: participantList,
       cheers: this.cheers.slice(0, 120),
       voteEvents: this.voteEvents.slice(0, 100),
+      awardHistory: this.awardHistory.slice(0, 200),
       closed: this.closed,
       closesAt: this.closesAt,
       lastRaffle: this.lastRaffle,
@@ -842,12 +999,13 @@ export class ArenaRoom {
     this.voteEvents = this.voteEvents.filter((event) => this.validTeamIds.has(event.teamId))
   }
 
-  private openEventStream() {
+  private openEventStream(url: URL) {
+    const role = getEventRole(url)
     let controllerRef: ReadableStreamDefaultController<Uint8Array>
     const stream = new ReadableStream<Uint8Array>({
       start: (controller) => {
         controllerRef = controller
-        this.clients.add(controller)
+        this.clients.set(controller, role)
         this.sendState(controller)
       },
       cancel: () => {
@@ -864,13 +1022,14 @@ export class ArenaRoom {
     })
   }
 
-  private async commit() {
+  private async commit(options: { audience?: boolean } = {}) {
     await this.persist()
-    this.broadcast()
+    this.broadcast(options)
   }
 
-  private broadcast() {
-    for (const client of this.clients) {
+  private broadcast({ audience = false }: { audience?: boolean } = {}) {
+    for (const [client, role] of this.clients.entries()) {
+      if (role === 'vote' && !audience) continue
       this.sendState(client)
     }
   }
@@ -958,6 +1117,7 @@ export class ArenaRoom {
 
     this.cheers = this.cheers.filter((message) => message.participantId !== participantId)
     this.voteEvents = this.voteEvents.filter((event) => event.participantId !== participantId)
+    this.awardHistory = this.awardHistory.filter((award) => award.participantId !== participantId)
 
     if (
       this.quiz.answers.some((answer) => answer.participantId === participantId) ||
@@ -1015,8 +1175,22 @@ export class ArenaRoom {
   private getRaffleCandidates(rule: RaffleRule) {
     const state = this.getState()
     const leaderId = state.teams[0]?.id
-    const topTwoIds = state.teams.slice(0, 2).map((team) => team.id)
     const topThreeIds = state.teams.slice(0, 3).map((team) => team.id)
+    const rank456Ids = state.teams.slice(3, 6).map((team) => team.id)
+    const rank7to10Ids = state.teams.slice(6, 10).map((team) => team.id)
+    const longestCheerByParticipant = new Map<string, number>()
+
+    if (rule === 'longestCheer') {
+      for (const message of this.cheers) {
+        if (!message.participantId || message.hidden) continue
+        longestCheerByParticipant.set(
+          message.participantId,
+          Math.max(longestCheerByParticipant.get(message.participantId) ?? 0, message.text.trim().length),
+        )
+      }
+    }
+
+    const longestCheerLength = rule === 'longestCheer' ? Math.max(0, ...longestCheerByParticipant.values()) : 0
 
     return state.participants.filter((person: ParticipantState) => {
       const spent = sumStars(person.allocations)
@@ -1024,14 +1198,69 @@ export class ArenaRoom {
       if (!person.cheered) return false
       const allocationValues = Object.values(person.allocations || {}).filter((value) => value > 0)
 
-      if (rule === 'leader') return Boolean(person.allocations[leaderId])
-      if (rule === 'top2') return topTwoIds.every((teamId) => Boolean(person.allocations[teamId]))
+      if (rule === 'leader') return Boolean(leaderId && person.allocations[leaderId])
       if (rule === 'top3') return topThreeIds.every((teamId) => Boolean(person.allocations[teamId]))
-      if (rule === 'multi') return allocationValues.length >= 3
+      if (rule === 'rank456') return rank456Ids.length === 3 && rank456Ids.every((teamId) => Boolean(person.allocations[teamId]))
+      if (rule === 'rank7to10Three') {
+        return rank7to10Ids.length >= 3 && rank7to10Ids.filter((teamId) => Boolean(person.allocations[teamId])).length >= 3
+      }
+      if (rule === 'multi') return allocationValues.length >= 5
       if (rule === 'big') return allocationValues.some((value) => value >= 7)
+      if (rule === 'longestCheer') return longestCheerLength > 0 && (longestCheerByParticipant.get(person.id) ?? 0) === longestCheerLength
       if (rule === 'cheer') return person.cheered
       return true
     })
+  }
+
+  private getRaffleSupportDetails(person: ParticipantState): RaffleSupportDetail[] {
+    const state = this.getState()
+    const teamMap = new Map(state.teams.map((team) => [team.id, team]))
+
+    return Object.entries(person.allocations || {})
+      .filter(([, stars]) => Number(stars) > 0)
+      .map(([teamId, stars]) => {
+        const team = teamMap.get(teamId)
+        return {
+          teamId,
+          teamName: team?.name || teamId,
+          stars: Number(stars),
+          rank: team?.rank,
+        }
+      })
+      .sort((a, b) => (a.rank || 999) - (b.rank || 999))
+  }
+
+  private getRaffleCheerDetails(person: ParticipantState): RaffleCheerDetail[] {
+    const state = this.getState()
+    const teamMap = new Map(state.teams.map((team) => [team.id, team]))
+
+    return this.cheers
+      .filter((message) => message.participantId === person.id && !message.hidden)
+      .map((message) => {
+        const team = teamMap.get(message.teamId)
+        return {
+          teamId: message.teamId,
+          teamName: team?.name || message.teamId,
+          text: message.text,
+          createdAt: message.createdAt,
+        }
+      })
+      .sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  private addAwardRecord(record: AwardRecord) {
+    this.awardHistory.unshift(record)
+    this.awardHistory.splice(200)
+  }
+
+  private getRafflePrizeImage(rule: RaffleRule) {
+    const imageKey = rafflePrizeImageKeyByRule[rule] || 'rafflePrizeImageFile'
+    return this.copy[imageKey] || this.copy.rafflePrizeImageFile || ''
+  }
+
+  private getRafflePrizeName(rule: RaffleRule) {
+    const nameKey = rafflePrizeNameKeyByRule[rule] || 'rafflePrizeNameFile'
+    return this.copy[nameKey] || this.copy.rafflePrizeNameFile || '행운권 상품'
   }
 
   private sanitizeQuizState(): QuizState {
@@ -1063,6 +1292,20 @@ export class ArenaRoom {
       ...emptyQuizState,
       mode: 'standby',
       createdAt: now,
+      updatedAt: now,
+    }
+    this.quizAnswerKeys = []
+    this.quizAnswerId = 1
+  }
+
+  private resetQuizTo(mode: QuizMode) {
+    const now = Date.now()
+    this.quiz = {
+      ...emptyQuizState,
+      id: this.quiz.id,
+      round: this.quiz.round,
+      mode,
+      createdAt: mode === 'standby' ? now : 0,
       updatedAt: now,
     }
     this.quizAnswerKeys = []
@@ -1107,17 +1350,11 @@ export class ArenaRoom {
   private closeQuiz() {
     if (this.quiz.mode === 'idle' || this.quiz.mode === 'standby') return
 
-    this.quiz = {
-      ...this.quiz,
-      mode: 'closed',
-      updatedAt: Date.now(),
-    }
+    this.resetQuizTo('standby')
   }
 
   private clearQuiz() {
-    this.quiz = { ...emptyQuizState }
-    this.quizAnswerKeys = []
-    this.quizAnswerId = 1
+    this.resetQuizTo('idle')
   }
 
   private submitQuizAnswer(person: Participant | null, textValue: unknown) {
@@ -1148,6 +1385,20 @@ export class ArenaRoom {
 
     if (rank) {
       this.quiz.winners.push(answer)
+      this.addAwardRecord({
+        id: `quiz-${answer.quizId}-${answer.id}-${answer.participantId}`,
+        participantId: answer.participantId,
+        participantName: answer.author,
+        participantGroup: answer.group,
+        participantDepartment: answer.department || '',
+        kind: 'quiz',
+        rank,
+        quizId: answer.quizId,
+        question: this.quiz.question,
+        prizeImageFile: this.quiz.prizeImageFile,
+        prizeName: '퀴즈 상품',
+        createdAt: answer.createdAt,
+      })
       if (this.quiz.winners.length >= this.quiz.winnerCount) {
         this.quiz = { ...this.quiz, mode: 'closed' }
       }
@@ -1236,6 +1487,7 @@ export class ArenaRoom {
     }
     this.cheers = []
     this.voteEvents = []
+    this.awardHistory = []
     this.cheerId = 1
     this.voteEventId = 1
     this.clearQuiz()
@@ -1372,7 +1624,11 @@ function normalizeTeam(teamValue: unknown, fallback: TeamConfig, index: number):
     logoFocusX: clampNumber(team.logoFocusX ?? fallback.logoFocusX ?? 50, 0, 100, 50),
     logoFocusY: clampNumber(team.logoFocusY ?? fallback.logoFocusY ?? 50, 0, 100, 50),
     photoFit: sanitizeImageFit(team.photoFit, fallback.photoFit || 'cover'),
-    photoHeight: clampNumber(team.photoHeight ?? fallback.photoHeight ?? 260, 150, 460, 260),
+    photoShape: sanitizeImageShape(team.photoShape, fallback.photoShape || 'wide'),
+    photoFrame: sanitizeImageFrame(team.photoFrame, fallback.photoFrame || fallback.logoFrame || 'line'),
+    photoWidth: clampNumber(team.photoWidth ?? fallback.photoWidth ?? 560, 180, 820, 560),
+    photoHeight: clampNumber(team.photoHeight ?? fallback.photoHeight ?? 300, 150, 460, 300),
+    photoRadius: clampNumber(team.photoRadius ?? fallback.photoRadius ?? defaultTeamPhotoRadius, 0, 160, defaultTeamPhotoRadius),
     photoZoom: clampNumber(team.photoZoom ?? fallback.photoZoom ?? 1, 1, 2.4, 1),
     photoFocusX: clampNumber(team.photoFocusX ?? fallback.photoFocusX ?? 50, 0, 100, 50),
     photoFocusY: clampNumber(team.photoFocusY ?? fallback.photoFocusY ?? 50, 0, 100, 50),
@@ -1647,6 +1903,57 @@ function parseCookies(cookieHeader = '') {
   )
 }
 
+function isAdminProtectedRequest(url: URL, method: string) {
+  if (method === 'GET' && url.pathname === '/events') {
+    return url.searchParams.get('role') === 'admin'
+  }
+
+  if (method !== 'POST') return false
+
+  return new Set([
+    '/api/cheer/moderate',
+    '/api/cheer/bulk',
+    '/api/raffle',
+    '/api/quiz/open',
+    '/api/quiz/prepare',
+    '/api/quiz/close',
+    '/api/quiz/clear',
+    '/api/close',
+    '/api/participant/reset',
+    '/api/participant/delete',
+    '/api/settings',
+    '/api/team-config',
+    '/api/reset',
+  ]).has(url.pathname)
+}
+
+function getEventRole(url: URL): EventClientRole {
+  const role = url.searchParams.get('role')
+  return role === 'vote' || role === 'wall' || role === 'admin' ? role : 'admin'
+}
+
+async function isAdminAuthenticated(request: Request, adminPasscode: string) {
+  if (!adminPasscode) return true
+
+  const cookies = parseCookies(request.headers.get('cookie') || '')
+  return cookies[adminCookieName] === await adminSessionToken(adminPasscode)
+}
+
+async function adminCookieHeader(adminPasscode: string, secure: boolean) {
+  const secureFlag = secure ? '; Secure' : ''
+  return `${adminCookieName}=${encodeURIComponent(await adminSessionToken(adminPasscode))}; Max-Age=${adminCookieMaxAge}; Path=/; SameSite=Lax; HttpOnly${secureFlag}`
+}
+
+function clearAdminCookieHeader(secure: boolean) {
+  const secureFlag = secure ? '; Secure' : ''
+  return `${adminCookieName}=; Max-Age=0; Path=/; SameSite=Lax; HttpOnly${secureFlag}`
+}
+
+async function adminSessionToken(adminPasscode: string) {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(`vibe-vote-admin:${adminPasscode}`))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 function participantCookieHeader(deviceId: string) {
   return `${participantCookieName}=${encodeURIComponent(deviceId)}; Max-Age=${participantCookieMaxAge}; Path=/; SameSite=Lax`
 }
@@ -1655,10 +1962,12 @@ function isRaffleRule(value: unknown): value is RaffleRule {
   return (
     value === 'all' ||
     value === 'leader' ||
-    value === 'top2' ||
     value === 'top3' ||
+    value === 'rank456' ||
+    value === 'rank7to10Three' ||
     value === 'multi' ||
     value === 'big' ||
+    value === 'longestCheer' ||
     value === 'cheer'
   )
 }

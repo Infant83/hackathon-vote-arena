@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -8,12 +9,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const distDir = path.join(__dirname, 'dist')
 const port = Number(process.env.PORT || 5173)
 const host = process.env.HOST || '0.0.0.0'
+const adminPasscode = String(process.env.ADMIN_PASSCODE || '').trim()
 const defaultStarBudget = 10
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const maxStarsPerTeam = 10
 const kstOffsetMinutes = 9 * 60
-const cheerMessageMaxLength = 240
+const cheerMessageMaxLength = 5000
+const defaultTeamPhotoRadius = 18
 const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
 const quizIntroMs = 2400
@@ -23,6 +26,8 @@ const imageFrames = new Set(['soft', 'line', 'glow', 'clean'])
 const imageFits = new Set(['cover', 'contain'])
 const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
+const adminCookieName = 'vibe-vote-admin'
+const adminCookieMaxAge = 60 * 60 * 8
 const teamsConfigPath = path.join(__dirname, 'teams.json')
 const teamLogoDir = path.join(__dirname, 'public', 'team-logos')
 const defaultCopy = {
@@ -93,10 +98,23 @@ const defaultCopy = {
   rafflePrizeImageFile: '',
   rafflePrizeImageAll: '',
   rafflePrizeImageLeader: '',
-  rafflePrizeImageTop2: '',
   rafflePrizeImageTop3: '',
+  rafflePrizeImageRank456: '',
+  rafflePrizeImageLowerPack: '',
   rafflePrizeImageMulti: '',
   rafflePrizeImageBig: '',
+  rafflePrizeImageLongestCheer: '',
+  rafflePrizeNameFile: '',
+  rafflePrizeNameAll: '',
+  rafflePrizeNameLeader: '',
+  rafflePrizeNameTop3: '',
+  rafflePrizeNameRank456: '',
+  rafflePrizeNameLowerPack: '',
+  rafflePrizeNameMulti: '',
+  rafflePrizeNameBig: '',
+  rafflePrizeNameLongestCheer: '',
+  raffleStartButtonLabel: '추첨 시작',
+  raffleStopButtonLabel: '정지',
 }
 
 const defaultTeams = [
@@ -245,6 +263,30 @@ const defaultQuizBank = [
   },
 ]
 
+const rafflePrizeImageKeyByRule = {
+  all: 'rafflePrizeImageAll',
+  leader: 'rafflePrizeImageLeader',
+  top3: 'rafflePrizeImageTop3',
+  rank456: 'rafflePrizeImageRank456',
+  rank7to10Three: 'rafflePrizeImageLowerPack',
+  multi: 'rafflePrizeImageMulti',
+  big: 'rafflePrizeImageBig',
+  longestCheer: 'rafflePrizeImageLongestCheer',
+  cheer: 'rafflePrizeImageAll',
+}
+
+const rafflePrizeNameKeyByRule = {
+  all: 'rafflePrizeNameAll',
+  leader: 'rafflePrizeNameLeader',
+  top3: 'rafflePrizeNameTop3',
+  rank456: 'rafflePrizeNameRank456',
+  rank7to10Three: 'rafflePrizeNameLowerPack',
+  multi: 'rafflePrizeNameMulti',
+  big: 'rafflePrizeNameBig',
+  longestCheer: 'rafflePrizeNameLongestCheer',
+  cheer: 'rafflePrizeNameAll',
+}
+
 const appConfig = loadConfig()
 let teams = appConfig.teams
 let copy = appConfig.copy
@@ -253,7 +295,8 @@ let validTeamIds = new Set(teams.map((team) => team.id))
 const participants = new Map()
 const cheers = []
 const voteEvents = []
-const clients = new Set()
+const awardHistory = []
+const clients = new Map()
 const emptyQuizState = {
   id: 0,
   round: 0,
@@ -288,7 +331,7 @@ let settings = {
   targetTime: '',
   minScore: defaultMinScore,
   cheerNameMode: 'masked',
-  themeMode: 'light',
+  themeMode: 'stage',
 }
 
 function loadConfig() {
@@ -353,7 +396,11 @@ function normalizeTeam(team, fallback = defaultTeams[0], index = 0) {
     logoFocusX: clampNumber(team?.logoFocusX ?? fallback.logoFocusX ?? 50, 0, 100, 50),
     logoFocusY: clampNumber(team?.logoFocusY ?? fallback.logoFocusY ?? 50, 0, 100, 50),
     photoFit: sanitizeImageFit(team?.photoFit, fallback.photoFit || 'cover'),
-    photoHeight: clampNumber(team?.photoHeight ?? fallback.photoHeight ?? 260, 150, 460, 260),
+    photoShape: sanitizeImageShape(team?.photoShape, fallback.photoShape || 'wide'),
+    photoFrame: sanitizeImageFrame(team?.photoFrame, fallback.photoFrame || fallback.logoFrame || 'line'),
+    photoWidth: clampNumber(team?.photoWidth ?? fallback.photoWidth ?? 560, 180, 820, 560),
+    photoHeight: clampNumber(team?.photoHeight ?? fallback.photoHeight ?? 300, 150, 460, 300),
+    photoRadius: clampNumber(team?.photoRadius ?? fallback.photoRadius ?? defaultTeamPhotoRadius, 0, 160, defaultTeamPhotoRadius),
     photoZoom: clampNumber(team?.photoZoom ?? fallback.photoZoom ?? 1, 1, 2.4, 1),
     photoFocusX: clampNumber(team?.photoFocusX ?? fallback.photoFocusX ?? 50, 0, 100, 50),
     photoFocusY: clampNumber(team?.photoFocusY ?? fallback.photoFocusY ?? 50, 0, 100, 50),
@@ -624,7 +671,11 @@ async function persistTeamConfig() {
         logoFocusX: team.logoFocusX,
         logoFocusY: team.logoFocusY,
         photoFit: team.photoFit,
+        photoShape: team.photoShape,
+        photoFrame: team.photoFrame,
+        photoWidth: team.photoWidth,
         photoHeight: team.photoHeight,
+        photoRadius: team.photoRadius,
         photoZoom: team.photoZoom,
         photoFocusX: team.photoFocusX,
         photoFocusY: team.photoFocusY,
@@ -690,6 +741,7 @@ function getState() {
     participants: participantList,
     cheers: cheers.slice(0, 120),
     voteEvents: voteEvents.slice(0, 100),
+    awardHistory: awardHistory.slice(0, 200),
     closed,
     closesAt,
     lastRaffle,
@@ -782,6 +834,10 @@ function cleanupParticipantReferences(participantId) {
     if (voteEvents[index].participantId === id) voteEvents.splice(index, 1)
   }
 
+  for (let index = awardHistory.length - 1; index >= 0; index -= 1) {
+    if (awardHistory[index].participantId === id) awardHistory.splice(index, 1)
+  }
+
   if (quiz.answers.some((answer) => answer.participantId === id) || quiz.winners.some((answer) => answer.participantId === id)) {
     quiz = {
       ...quiz,
@@ -819,8 +875,22 @@ function deleteParticipant(participantId) {
 function getRaffleCandidates(rule) {
   const state = getState()
   const leaderId = state.teams[0]?.id
-  const topTwoIds = state.teams.slice(0, 2).map((team) => team.id)
   const topThreeIds = state.teams.slice(0, 3).map((team) => team.id)
+  const rank456Ids = state.teams.slice(3, 6).map((team) => team.id)
+  const rank7to10Ids = state.teams.slice(6, 10).map((team) => team.id)
+  const longestCheerByParticipant = new Map()
+
+  if (rule === 'longestCheer') {
+    for (const message of cheers) {
+      if (!message.participantId || message.hidden) continue
+      longestCheerByParticipant.set(
+        message.participantId,
+        Math.max(longestCheerByParticipant.get(message.participantId) || 0, message.text.trim().length),
+      )
+    }
+  }
+
+  const longestCheerLength = rule === 'longestCheer' ? Math.max(0, ...longestCheerByParticipant.values()) : 0
 
   return state.participants.filter((person) => {
     const spent = sumStars(person.allocations)
@@ -829,13 +899,68 @@ function getRaffleCandidates(rule) {
     const allocationValues = Object.values(person.allocations || {}).filter((value) => value > 0)
 
     if (rule === 'leader') return Boolean(person.allocations[leaderId])
-    if (rule === 'top2') return topTwoIds.every((teamId) => Boolean(person.allocations[teamId]))
     if (rule === 'top3') return topThreeIds.every((teamId) => Boolean(person.allocations[teamId]))
-    if (rule === 'multi') return allocationValues.length >= 3
+    if (rule === 'rank456') return rank456Ids.length === 3 && rank456Ids.every((teamId) => Boolean(person.allocations[teamId]))
+    if (rule === 'rank7to10Three') {
+      return rank7to10Ids.length >= 3 && rank7to10Ids.filter((teamId) => Boolean(person.allocations[teamId])).length >= 3
+    }
+    if (rule === 'multi') return allocationValues.length >= 5
     if (rule === 'big') return allocationValues.some((value) => value >= 7)
+    if (rule === 'longestCheer') return longestCheerLength > 0 && (longestCheerByParticipant.get(person.id) || 0) === longestCheerLength
     if (rule === 'cheer') return person.cheered
     return true
   })
+}
+
+function getRaffleSupportDetails(person) {
+  const state = getState()
+  const teamMap = new Map(state.teams.map((team) => [team.id, team]))
+
+  return Object.entries(person.allocations || {})
+    .filter(([, stars]) => Number(stars) > 0)
+    .map(([teamId, stars]) => {
+      const team = teamMap.get(teamId)
+      return {
+        teamId,
+        teamName: team?.name || teamId,
+        stars: Number(stars),
+        rank: team?.rank,
+      }
+    })
+    .sort((a, b) => (a.rank || 999) - (b.rank || 999))
+}
+
+function getRaffleCheerDetails(person) {
+  const state = getState()
+  const teamMap = new Map(state.teams.map((team) => [team.id, team]))
+
+  return cheers
+    .filter((message) => message.participantId === person.id && !message.hidden)
+    .map((message) => {
+      const team = teamMap.get(message.teamId)
+      return {
+        teamId: message.teamId,
+        teamName: team?.name || message.teamId,
+        text: message.text,
+        createdAt: message.createdAt,
+      }
+    })
+    .sort((a, b) => a.createdAt - b.createdAt)
+}
+
+function addAwardRecord(record) {
+  awardHistory.unshift(record)
+  awardHistory.splice(200)
+}
+
+function getRafflePrizeImage(rule) {
+  const imageKey = rafflePrizeImageKeyByRule[rule] || 'rafflePrizeImageFile'
+  return copy[imageKey] || copy.rafflePrizeImageFile || ''
+}
+
+function getRafflePrizeName(rule) {
+  const nameKey = rafflePrizeNameKeyByRule[rule] || 'rafflePrizeNameFile'
+  return copy[nameKey] || copy.rafflePrizeNameFile || '행운권 상품'
 }
 
 function shuffle(items) {
@@ -881,6 +1006,20 @@ function prepareQuiz() {
   quizAnswerId = 1
 }
 
+function resetQuizTo(mode) {
+  const now = Date.now()
+  quiz = {
+    ...emptyQuizState,
+    id: quiz.id,
+    round: quiz.round,
+    mode,
+    createdAt: mode === 'standby' ? now : 0,
+    updatedAt: now,
+  }
+  quizAnswerKeys = []
+  quizAnswerId = 1
+}
+
 function openQuiz(body) {
   const selectedQuizId = sanitizeSlug(body.quizId)
   const selectedQuiz = selectedQuizId ? quizBank.find((item) => item.id === selectedQuizId && item.enabled !== false) : null
@@ -918,17 +1057,11 @@ function openQuiz(body) {
 
 function closeQuiz() {
   if (quiz.mode === 'idle' || quiz.mode === 'standby') return
-  quiz = {
-    ...quiz,
-    mode: 'closed',
-    updatedAt: Date.now(),
-  }
+  resetQuizTo('standby')
 }
 
 function clearQuiz() {
-  quiz = { ...emptyQuizState }
-  quizAnswerKeys = []
-  quizAnswerId = 1
+  resetQuizTo('idle')
 }
 
 function submitQuizAnswer(person, textValue) {
@@ -959,6 +1092,20 @@ function submitQuizAnswer(person, textValue) {
 
   if (rank) {
     quiz.winners.push(answer)
+    addAwardRecord({
+      id: `quiz-${answer.quizId}-${answer.id}-${answer.participantId}`,
+      participantId: answer.participantId,
+      participantName: answer.author,
+      participantGroup: answer.group,
+      participantDepartment: answer.department || '',
+      kind: 'quiz',
+      rank,
+      quizId: answer.quizId,
+      question: quiz.question,
+      prizeImageFile: quiz.prizeImageFile,
+      prizeName: '퀴즈 상품',
+      createdAt: answer.createdAt,
+    })
     if (quiz.winners.length >= quiz.winnerCount) {
       quiz = { ...quiz, mode: 'closed' }
     }
@@ -1211,6 +1358,60 @@ function getRequestDeviceId(request, body) {
   return cookies[participantCookieName] || body.participantId
 }
 
+function getAdminSessionStatus(request) {
+  return {
+    required: Boolean(adminPasscode),
+    authenticated: isAdminAuthenticated(request),
+  }
+}
+
+function isAdminAuthenticated(request) {
+  if (!adminPasscode) return true
+
+  const cookies = parseCookies(request.headers.cookie)
+  return safeEquals(cookies[adminCookieName] || '', adminSessionToken())
+}
+
+function isAdminProtectedPath(pathname) {
+  return new Set([
+    '/api/cheer/moderate',
+    '/api/cheer/bulk',
+    '/api/raffle',
+    '/api/quiz/open',
+    '/api/quiz/prepare',
+    '/api/quiz/close',
+    '/api/quiz/clear',
+    '/api/close',
+    '/api/participant/reset',
+    '/api/participant/delete',
+    '/api/settings',
+    '/api/team-config',
+    '/api/reset',
+  ]).has(pathname)
+}
+
+function isAdminEventRequest(url) {
+  return url.searchParams.get('role') === 'admin'
+}
+
+function adminSessionToken() {
+  return createHash('sha256').update(`vibe-vote-admin:${adminPasscode}`).digest('hex')
+}
+
+function adminCookieHeader() {
+  return `${adminCookieName}=${encodeURIComponent(adminSessionToken())}; Max-Age=${adminCookieMaxAge}; Path=/; SameSite=Lax; HttpOnly`
+}
+
+function clearAdminCookieHeader() {
+  return `${adminCookieName}=; Max-Age=0; Path=/; SameSite=Lax; HttpOnly`
+}
+
+function safeEquals(left, right) {
+  const leftBuffer = Buffer.from(String(left))
+  const rightBuffer = Buffer.from(String(right))
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer)
+}
+
 function isCurrentSession(body) {
   return Number(body.sessionId) === sessionId
 }
@@ -1236,6 +1437,7 @@ function resetRuntimeState({ seed = false, keepParticipants = false } = {}) {
   }
   cheers.splice(0)
   voteEvents.splice(0)
+  awardHistory.splice(0)
   cheerId = 1
   voteEventId = 1
   clearQuiz()
@@ -1336,21 +1538,65 @@ async function readJson(request) {
   return body ? JSON.parse(body) : {}
 }
 
-function broadcast() {
+function broadcast({ audience = false } = {}) {
   const payload = `event: state\ndata: ${JSON.stringify(getState())}\n\n`
 
-  for (const response of clients) {
-    response.write(payload)
+  for (const [response, role] of clients.entries()) {
+    if (role === 'vote' && !audience) continue
+
+    try {
+      response.write(payload)
+    } catch {
+      clients.delete(response)
+    }
   }
 }
 
+function getEventRole(url) {
+  const role = url.searchParams.get('role')
+  return role === 'vote' || role === 'wall' || role === 'admin' ? role : 'admin'
+}
+
 async function handleApi(request, response, url) {
+  if (request.method === 'GET' && url.pathname === '/api/admin/status') {
+    sendJson(response, 200, getAdminSessionStatus(request))
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/admin/login') {
+    const body = await readJson(request)
+    const passcode = String(body.passcode || '').trim()
+
+    if (!adminPasscode) {
+      sendJson(response, 200, getAdminSessionStatus(request), { 'Set-Cookie': clearAdminCookieHeader() })
+      return
+    }
+
+    if (!safeEquals(passcode, adminPasscode)) {
+      sendJson(response, 401, { error: 'invalid admin passcode' })
+      return
+    }
+
+    sendJson(response, 200, { required: true, authenticated: true }, { 'Set-Cookie': adminCookieHeader() })
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/admin/logout') {
+    sendJson(response, 200, { required: Boolean(adminPasscode), authenticated: !adminPasscode }, { 'Set-Cookie': clearAdminCookieHeader() })
+    return
+  }
+
   if (request.method === 'GET' && url.pathname === '/api/state') {
     sendJson(response, 200, getState())
     return
   }
 
   if (request.method === 'GET' && url.pathname === '/events') {
+    if (isAdminEventRequest(url) && !isAdminAuthenticated(request)) {
+      sendJson(response, 401, { error: 'admin authentication required' })
+      return
+    }
+
     response.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
@@ -1358,13 +1604,18 @@ async function handleApi(request, response, url) {
       'X-Accel-Buffering': 'no',
     })
     response.write(`event: state\ndata: ${JSON.stringify(getState())}\n\n`)
-    clients.add(response)
+    clients.set(response, getEventRole(url))
     request.on('close', () => clients.delete(response))
     return
   }
 
   if (request.method !== 'POST') {
     sendJson(response, 404, { error: 'not found' })
+    return
+  }
+
+  if (isAdminProtectedPath(url.pathname) && !isAdminAuthenticated(request)) {
+    sendJson(response, 401, { error: 'admin authentication required' })
     return
   }
 
@@ -1381,6 +1632,10 @@ async function handleApi(request, response, url) {
     }
 
     const deviceId = getRequestDeviceId(request, body)
+    if (!sanitizeText(body.department, 40)) {
+      sendJson(response, 400, { error: 'name, group, and department required' })
+      return
+    }
     const person = upsertParticipant(deviceId, body.name, body.group, body.department)
     if (!person) {
       sendJson(response, 400, { error: 'name, group, and device required' })
@@ -1409,6 +1664,10 @@ async function handleApi(request, response, url) {
     }
 
     const deviceId = getRequestDeviceId(request, body)
+    if (!sanitizeText(body.department, 40)) {
+      sendJson(response, 400, { error: 'name, group, and department required' })
+      return
+    }
     const person = upsertParticipant(deviceId, body.name, body.group, body.department)
     const teamId = String(body.teamId || '')
     const text = sanitizeText(body.text, cheerMessageMaxLength)
@@ -1450,7 +1709,7 @@ async function handleApi(request, response, url) {
 
     message.hidden = Boolean(body.hidden)
     lastRaffle = null
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
@@ -1479,15 +1738,18 @@ async function handleApi(request, response, url) {
     }
 
     lastRaffle = null
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
 
   if (url.pathname === '/api/raffle') {
-    const rule = ['all', 'leader', 'top2', 'top3', 'multi', 'big', 'cheer'].includes(body.rule) ? body.rule : 'all'
-    const winnerCount = Math.max(1, Math.min(8, Number(body.winnerCount) || 4))
+    const rule = ['all', 'leader', 'top3', 'rank456', 'rank7to10Three', 'multi', 'big', 'longestCheer', 'cheer'].includes(body.rule) ? body.rule : 'all'
+    const winnerCount = 1
     const candidates = getRaffleCandidates(rule)
+    const createdAt = Date.now()
+    const prizeImageFile = getRafflePrizeImage(rule)
+    const prizeName = getRafflePrizeName(rule)
     const winners = shuffle(candidates)
       .slice(0, Math.min(winnerCount, candidates.length))
       .map((person, index) => ({
@@ -1497,6 +1759,8 @@ async function handleApi(request, response, url) {
         department: person.department || '',
         cheered: person.cheered,
         rank: index + 1,
+        supportDetails: getRaffleSupportDetails(person),
+        cheerDetails: getRaffleCheerDetails(person),
       }))
 
     lastRaffle = {
@@ -1504,10 +1768,28 @@ async function handleApi(request, response, url) {
       winnerCount,
       candidates: candidates.length,
       winners,
-      createdAt: Date.now(),
+      prizeImageFile,
+      prizeName,
+      createdAt,
     }
 
-    broadcast()
+    for (const winner of winners) {
+      addAwardRecord({
+        id: `raffle-${createdAt}-${winner.id}`,
+        participantId: winner.id,
+        participantName: winner.name,
+        participantGroup: winner.group,
+        participantDepartment: winner.department || '',
+        kind: 'raffle',
+        rank: winner.rank,
+        rule,
+        prizeImageFile,
+        prizeName,
+        createdAt,
+      })
+    }
+
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
@@ -1518,14 +1800,14 @@ async function handleApi(request, response, url) {
       return
     }
 
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
 
   if (url.pathname === '/api/quiz/prepare') {
     prepareQuiz()
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
@@ -1545,21 +1827,21 @@ async function handleApi(request, response, url) {
       return
     }
 
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
   if (url.pathname === '/api/quiz/close') {
     closeQuiz()
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
 
   if (url.pathname === '/api/quiz/clear') {
     clearQuiz()
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
@@ -1569,7 +1851,7 @@ async function handleApi(request, response, url) {
     if (!closed && Date.now() > closesAt) {
       closesAt = calculateClosesAt(settings)
     }
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
@@ -1581,9 +1863,13 @@ async function handleApi(request, response, url) {
     }
 
     const deviceId = getRequestDeviceId(request, body)
+    if (!sanitizeText(body.department, 40)) {
+      sendJson(response, 400, { error: 'name, group, and department required' })
+      return
+    }
     const person = upsertParticipant(deviceId, body.name, body.group, body.department)
     if (!person) {
-      sendJson(response, 400, { error: 'name and group required' })
+      sendJson(response, 400, { error: 'name, group, and department required' })
       return
     }
 
@@ -1598,7 +1884,7 @@ async function handleApi(request, response, url) {
       return
     }
 
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
@@ -1609,7 +1895,7 @@ async function handleApi(request, response, url) {
       return
     }
 
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
@@ -1642,7 +1928,7 @@ async function handleApi(request, response, url) {
     normalizeAllParticipantAllocations()
     closed = false
     closesAt = calculateClosesAt(settings)
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
@@ -1650,7 +1936,7 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/team-config') {
     try {
       await applyTeamConfig(body)
-      broadcast()
+      broadcast({ audience: true })
       sendJson(response, 200, getState())
     } catch (error) {
       sendJson(response, 400, { error: error.message || 'invalid team config' })
@@ -1661,7 +1947,7 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/team-self-config') {
     try {
       await applyTeamSelfConfig(body)
-      broadcast()
+      broadcast({ audience: true })
       sendJson(response, 200, getState())
     } catch (error) {
       sendJson(response, 400, { error: error.message || 'invalid team config' })
@@ -1671,7 +1957,7 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/reset') {
     resetRuntimeState({ seed: Boolean(body.seed), keepParticipants: Boolean(body.keepParticipants) && !body.seed })
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getState())
     return
   }
@@ -1738,8 +2024,12 @@ const server = createServer(async (request, response) => {
 })
 
 setInterval(() => {
-  for (const response of clients) {
-    response.write(': ping\n\n')
+  for (const response of clients.keys()) {
+    try {
+      response.write(': ping\n\n')
+    } catch {
+      clients.delete(response)
+    }
   }
 }, 25_000)
 

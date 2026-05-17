@@ -138,6 +138,15 @@ http://localhost:5173/admin
 
 `npm run realtime`은 먼저 React 앱을 빌드한 뒤 `server.mjs`를 실행합니다. 모바일과 PC가 같은 투표 상태를 봐야 하므로 실제 테스트는 이 모드를 사용합니다.
 
+관리자 화면을 passcode로 보호하려면 실행 전에 `ADMIN_PASSCODE`를 설정합니다.
+
+```powershell
+$env:ADMIN_PASSCODE="운영팀이_정한_passcode"
+npm run realtime
+```
+
+`ADMIN_PASSCODE`가 비어 있으면 로컬 개발 편의를 위해 관리자 인증을 요구하지 않습니다. passcode가 설정되면 `/admin` 로그인 화면이 먼저 표시되고, 관리자 전용 API와 `/events?role=admin` 실시간 연결은 인증 쿠키가 있어야 사용할 수 있습니다.
+
 ### 4.3. 다른 포트로 실행하기
 
 이미 5173 포트를 쓰고 있으면 다른 포트로 실행합니다.
@@ -195,6 +204,12 @@ npx wrangler whoami
 
 ```powershell
 npx wrangler login
+```
+
+관리자 passcode는 Cloudflare secret으로 저장합니다. 값은 레포에 커밋하지 않습니다.
+
+```powershell
+npx wrangler secret put ADMIN_PASSCODE
 ```
 
 ### 5.2. 로컬 Cloudflare 런타임
@@ -280,17 +295,17 @@ git push origin cloudflare-migration
 - Durable Object duration
 - 장시간 열려 있는 SSE/EventSource 연결
 
-특히 Durable Object duration은 단순히 배포를 많이 했다고 크게 늘어나는 항목이 아닙니다. 배포 후 `/vote`, `/admin`, `/admin?showCheer=1` 같은 페이지를 오래 열어두고 실시간 연결이 유지될 때 빠르게 늘어날 수 있습니다. 개발 테스트는 가능하면 Cloudflare 배포 URL이 아니라 로컬 `npm run realtime` 서버에서 진행합니다.
+특히 Durable Object duration은 단순히 배포를 많이 했다고 크게 늘어나는 항목이 아닙니다. 배포 후 `/vote`, `/admin`, `/wall`, `/admin?showCheer=1` 같은 페이지를 오래 열어두고 실시간 연결이 유지될 때 빠르게 늘어날 수 있습니다. 개발 테스트는 가능하면 Cloudflare 배포 URL이 아니라 로컬 `npm run realtime` 서버에서 진행합니다.
 
 운영 전 최적화 목표는 다음과 같습니다.
 
-- `/vote`: 관객 화면은 SSE를 끄고 15초 polling 중심으로 동기화
-- `/admin`: 관리자 화면은 실시간성이 중요하므로 SSE 유지
-- `/admin?showCheer=1`: 발표장 Showup 화면은 SSE 유지
+- `/vote`: filtered SSE로 퀴즈/마감/설정/추첨 같은 관객 필수 이벤트만 즉시 반영하고, 별 이동 같은 일반 상태는 15초 polling과 POST 응답 갱신 중심으로 유지
+- `/admin`: 관리자 화면은 운영 전체 상태가 필요하므로 SSE 유지
+- `/wall`, `/admin?showCheer=1`: 발표장 송출 화면은 SSE 유지
 - 숨겨진 브라우저 탭은 가능하면 실시간 연결 종료
-- 투표 마감 후 관객 화면 polling 중지
+- 관객 화면은 SSE 실패나 일반 상태 보정을 위해 15초 polling fallback 유지
 
-1000명 관객, 30분 투표, 15초 polling을 기준으로 단순 계산하면 다음과 같습니다.
+1000명 관객, 30분 투표, 15초 polling fallback을 기준으로 단순 계산하면 다음과 같습니다.
 
 ```text
 1000명 x 30분 x 분당 4회 = 120,000회 상태 조회
@@ -300,7 +315,7 @@ git push origin cloudflare-migration
 
 Free 플랜은 개발과 작은 리허설에는 사용할 수 있지만, 전사 행사 운영용으로는 권장하지 않습니다. 1000명이 30분 정도 참여하면 요청 수만으로도 Free 일일 한도에 닿거나 넘을 수 있고, 실시간 연결을 오래 열어두면 Durable Object duration 경고가 먼저 발생할 수 있습니다.
 
-행사 운영에는 Workers Paid 플랜을 권장합니다. 공식 문서 기준 Paid 플랜은 월 최소 비용이 있고, Free보다 훨씬 큰 월간 포함량을 제공합니다. 이 앱의 1회성 행사 규모라면 15초 polling 최적화를 적용한 상태에서 기본 포함량 안에 들어갈 가능성이 높습니다. 다만 여러 번 대규모 리허설을 하거나 polling 주기를 짧게 줄이면 초과 사용량이 생길 수 있습니다.
+행사 운영에는 Workers Paid 플랜을 권장합니다. 공식 문서 기준 Paid 플랜은 월 최소 비용이 있고, Free보다 훨씬 큰 월간 포함량을 제공합니다. 이 앱의 1회성 행사 규모라면 filtered SSE와 15초 polling fallback을 적용한 상태에서 기본 포함량 안에 들어갈 가능성이 높습니다. 다만 여러 번 대규모 리허설을 하거나 polling 주기를 짧게 줄이면 초과 사용량이 생길 수 있습니다.
 
 운영 판단은 다음 기준으로 합니다.
 
@@ -454,7 +469,7 @@ vibe-vote-results-20260510105253.xlsx
 
 화면 표시는 사용자가 입력한 값을 최대한 유지합니다.
 
-한 번 등록한 사용자는 같은 브라우저 device ID로 재접속하면 기존 참여 내역을 이어갑니다. 다른 기기에서 접속하더라도 이름과 Let's ID가 같으면 같은 참여자로 묶고, 새 device ID를 같은 참여자에 추가합니다. 이 경우 기존 별 배분과 응원 메시지 상태를 이어받습니다.
+한 번 등록한 사용자는 같은 브라우저 device ID로 재접속하면 기존 참여 내역을 이어갑니다. 다른 기기에서 접속할 때는 이름과 Let's ID를 입력한 뒤 `등록하고 투표 시작` 버튼을 누르거나 Enter로 제출해야 동일성 판단을 수행합니다. 제출된 이름과 Let's ID가 기존 참여자와 같으면 같은 참여자로 묶고, 새 device ID를 같은 참여자에 추가합니다. 이 경우 기존 별 배분, 응원 메시지, 수상 이력 상태를 이어받습니다.
 
 강한 중복 방지는 하지 않습니다. 사번, 이메일, 사진, 카메라 QR 스캔, 강한 디바이스 fingerprint는 기본 흐름에 넣지 않습니다.
 
@@ -478,20 +493,21 @@ npm run cf:deploy:dry-run
 
 운영 리허설:
 
-1. `/admin` 접속
-2. `Reset` 실행
-3. 팀 정보와 안내 문구 확인
-4. 모바일 `/vote` 접속
-5. 이름/Let's ID 등록
-6. 여러 팀에 별 배분
-7. 별 회수와 재배분 확인
-8. 별을 준 팀에 응원 메시지 작성
-9. `/admin`에서 실시간 별 현황과 메시지 확인
-10. 메시지 숨김/공개 확인
-11. `/admin?showCheer=1`에서 버블 표시 확인
-12. 행운권 추첨 테스트
-13. 결과 XLSX 다운로드 확인
-14. 최종 `Reset`
+1. `ADMIN_PASSCODE`가 운영 환경에 설정되어 있는지 확인
+2. `/admin` 접속 후 passcode 로그인
+3. `Reset` 실행
+4. 팀 정보와 안내 문구 확인
+5. 모바일 `/vote` 접속
+6. 이름/Let's ID 등록
+7. 여러 팀에 별 배분
+8. 별 회수와 재배분 확인
+9. 별을 준 팀에 응원 메시지 작성
+10. `/admin`에서 실시간 별 현황과 메시지 확인
+11. 메시지 숨김/공개 확인
+12. `/admin?showCheer=1`에서 버블 표시 확인
+13. 행운권 추첨 테스트
+14. 결과 XLSX 다운로드 확인
+15. 최종 `Reset`
 
 ## 11. 개발 규칙
 
