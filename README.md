@@ -5,11 +5,11 @@
 현재 라이브 배포 주소는 다음과 같습니다.
 
 ```text
-https://lgdhack.aigov.workers.dev/vote
-https://lgdhack.aigov.workers.dev/admin
+https://hack.lgdisplay.workers.dev/vote
+https://hack.lgdisplay.workers.dev/admin
 ```
 
-운영 본체 Worker는 `hack.aigov.workers.dev`이며, 위 `lgdhack` 주소는 Cloudflare Service Binding으로 같은 Worker 상태 저장소에 이어지는 호환 주소입니다.
+운영 Worker 이름은 `hack`이고, Cloudflare workers.dev 서브도메인은 `lgdisplay`입니다.
 
 ## 1. 현재 개발 상태
 
@@ -237,19 +237,7 @@ npm run cf:deploy
 배포가 성공하면 다음과 같은 주소가 표시됩니다.
 
 ```text
-https://hack.aigov.workers.dev
-```
-
-기존 안내/QR에 `https://lgdhack.aigov.workers.dev`가 쓰였으면 호환 프록시도 함께 배포합니다.
-
-```powershell
-npm run cf:deploy:alias
-```
-
-둘을 한 번에 배포하려면:
-
-```powershell
-npm run cf:deploy:all
+https://hack.lgdisplay.workers.dev
 ```
 
 ### 5.5. Git Build 자동 배포

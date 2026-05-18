@@ -13,9 +13,7 @@
     "cf:types": "wrangler types",
     "cf:dev": "npm run build && wrangler dev",
     "cf:deploy:dry-run": "npm run build && wrangler deploy --dry-run",
-    "cf:deploy": "npm run build && wrangler deploy",
-    "cf:deploy:alias": "wrangler deploy --config wrangler.lgdhack-proxy.jsonc",
-    "cf:deploy:all": "npm run cf:deploy && npm run cf:deploy:alias"
+    "cf:deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "fflate": "^0.8.2",
