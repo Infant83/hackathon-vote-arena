@@ -937,7 +937,7 @@ const fallbackCopy: EventCopy = {
   rafflePrizeNameLongestCheer: '',
   raffleStartButtonLabel: '추첨 시작',
   raffleStopButtonLabel: '정지',
-  awardHistoryNotice: '당첨 선물은 행사 종료 후 운영진 확인을 거쳐 현장에서 순차적으로 전달됩니다.',
+  awardHistoryNotice: '당첨 선물은 행사 종료 후 운영진 확인을 거쳐 순차적으로 전달됩니다.',
 }
 
 const fallbackTeams: Team[] = [
