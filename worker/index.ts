@@ -8,6 +8,7 @@ const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
+const maxStoredCheerMessages = 5000
 const defaultTeamPhotoRadius = 18
 const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
@@ -39,6 +40,7 @@ type EventCopy = Record<keyof typeof defaultCopy, string>
 type TeamConfig = {
   id: string
   code: string
+  editKey?: string
   name: string
   title: string
   members: string[]
@@ -689,7 +691,7 @@ export class ArenaRoom {
         createdAt: Date.now(),
         hidden: false,
       })
-      this.cheers.splice(120)
+      this.cheers.splice(maxStoredCheerMessages)
       await this.commit()
       return json(this.getState(), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
@@ -799,10 +801,35 @@ export class ArenaRoom {
       const person = this.upsertParticipant(deviceId, body.name, body.group, body.department)
       const answer = this.submitQuizAnswer(person, body.text)
 
-      if (!answer) return json({ error: 'quiz answer rejected' }, 400)
+      if (!answer) {
+        return json(
+          {
+            ...this.getState(),
+            quizSubmission: {
+              accepted: false,
+              reason: this.getQuizAnswerRejectionReason(person, body.text),
+            },
+          },
+          200,
+          { 'Set-Cookie': participantCookieHeader(deviceId) },
+        )
+      }
 
       await this.commit({ audience: true })
-      return json(this.getState(), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+      return json(
+        {
+          ...this.getState(),
+          quizSubmission: {
+            accepted: true,
+            answerId: answer.id,
+            text: answer.text,
+            correct: answer.correct,
+            rank: answer.rank,
+          },
+        },
+        200,
+        { 'Set-Cookie': participantCookieHeader(deviceId) },
+      )
     }
 
     if (pathname === '/api/quiz/close') {
@@ -1474,6 +1501,22 @@ export class ArenaRoom {
     return answer
   }
 
+  private getQuizAnswerRejectionReason(person: Participant | null, textValue: unknown) {
+    const text = sanitizeText(textValue, quizAnswerMaxLength)
+    this.advanceQuizPhase()
+
+    if (!person) return '참가자 등록이 필요합니다.'
+    if (!text) return '답변을 입력해주세요.'
+    if (!this.quiz.id || this.quiz.mode === 'idle' || this.quiz.mode === 'standby') return '퀴즈가 아직 출제되지 않았습니다.'
+    if (this.quiz.mode === 'countdown') return '문제가 공개되면 답변을 제출해주세요.'
+    if (this.quiz.mode !== 'open') return '정답자 선정이 마감되었습니다.'
+    if (this.quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) {
+      return '이 문제는 최대 5번까지만 제출할 수 있습니다.'
+    }
+
+    return '답변을 접수하지 못했습니다.'
+  }
+
   private recordVoteEvents(
     person: Participant,
     previousAllocations: Record<string, number>,
@@ -1672,6 +1715,7 @@ function normalizeTeam(teamValue: unknown, fallback: TeamConfig, index: number):
   return {
     id: sanitizeSlug(team.id) || fallback.id || `team-${index + 1}`,
     code: sanitizeText(team.code, 8) || fallback.code || `${index + 1}`,
+    editKey: sanitizeSlug(team.editKey) || sanitizeSlug(fallback.editKey) || '',
     name: sanitizeText(team.name, 32) || fallback.name || `Team ${index + 1}`,
     title: sanitizeText(team.title, 64) || fallback.title || '프로젝트명 미정',
     members,
@@ -1962,6 +2006,7 @@ function hashIdentity(value: string) {
 }
 
 function getTeamEditKey(team: TeamConfig) {
+  if (sanitizeSlug(team.editKey)) return sanitizeSlug(team.editKey)
   return hashIdentity(`${team.id}|${team.code}|vibe-team-edit`)
 }
 

@@ -114,6 +114,7 @@
     {
       "id": "team-aurora",
       "code": "A1",
+      "editKey": "tabfy8",
       "name": "Aurora Lab",
       "title": "사내 지식 검색 Copilot",
       "members": [
@@ -148,6 +149,7 @@
     {
       "id": "team-prism",
       "code": "B2",
+      "editKey": "x2byp",
       "name": "Prism Works",
       "title": "제조 라인 이상 감지 대시보드",
       "members": [
@@ -182,6 +184,7 @@
     {
       "id": "team-nova",
       "code": "C3",
+      "editKey": "15orbsa",
       "name": "Nova Ops",
       "title": "회의록 자동 액션 추출기",
       "members": [
@@ -216,6 +219,7 @@
     {
       "id": "team-flow",
       "code": "D4",
+      "editKey": "mjzo86",
       "name": "Flow Mint",
       "title": "현장 작업자 음성 QA 봇",
       "members": [
@@ -250,6 +254,7 @@
     {
       "id": "team-signal",
       "code": "E5",
+      "editKey": "1scglnk",
       "name": "Signal One",
       "title": "영업 제안서 품질 평가기",
       "members": [
@@ -284,6 +289,7 @@
     {
       "id": "team-lattice",
       "code": "F6",
+      "editKey": "2nxyhu",
       "name": "Lattice AI",
       "title": "장애 리포트 원인 추적 Agent",
       "members": [
@@ -318,6 +324,7 @@
     {
       "id": "team-pulse",
       "code": "G7",
+      "editKey": "10gzeg7",
       "name": "Pulse Crew",
       "title": "고객 VOC 우선순위 엔진",
       "members": [
@@ -352,6 +359,7 @@
     {
       "id": "team-craft",
       "code": "H8",
+      "editKey": "sei62u",
       "name": "Craft Mode",
       "title": "신입 온보딩 튜터",
       "members": [
@@ -386,6 +394,7 @@
     {
       "id": "team-kindred",
       "code": "I9",
+      "editKey": "1j2fk6b",
       "name": "Kindred",
       "title": "협업 감정 온도 체크",
       "members": [
@@ -420,6 +429,7 @@
     {
       "id": "team-vector",
       "code": "J10",
+      "editKey": "14q333w",
       "name": "Vector Room",
       "title": "코드 리뷰 위험도 요약기",
       "members": [

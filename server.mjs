@@ -18,6 +18,7 @@ const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
+const maxStoredCheerMessages = 5000
 const defaultTeamPhotoRadius = 18
 const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
@@ -387,6 +388,7 @@ function normalizeTeam(team, fallback = defaultTeams[0], index = 0) {
   return {
     id: sanitizeSlug(team?.id) || fallback.id || `team-${index + 1}`,
     code: sanitizeText(team?.code, 8) || fallback.code || `${index + 1}`,
+    editKey: sanitizeSlug(team?.editKey) || sanitizeSlug(fallback.editKey) || '',
     name: sanitizeText(team?.name, 32) || fallback.name || `Team ${index + 1}`,
     title: sanitizeText(team?.title, 64) || fallback.title || '프로젝트명 미정',
     members,
@@ -585,6 +587,7 @@ function touchConfig() {
 }
 
 function getTeamEditKey(team) {
+  if (sanitizeSlug(team.editKey)) return sanitizeSlug(team.editKey)
   return hashIdentity(`${team.id}|${team.code}|vibe-team-edit`)
 }
 
@@ -667,6 +670,7 @@ async function persistTeamConfig() {
       .map((team, index) => ({
         id: team.id,
         code: team.code,
+        editKey: team.editKey,
         name: team.name,
         title: team.title,
         members: team.members,
@@ -1149,6 +1153,22 @@ function submitQuizAnswer(person, textValue) {
   }
 
   return answer
+}
+
+function getQuizAnswerRejectionReason(person, textValue) {
+  const text = sanitizeText(textValue, quizAnswerMaxLength)
+  advanceQuizPhase()
+
+  if (!person) return '참가자 등록이 필요합니다.'
+  if (!text) return '답변을 입력해주세요.'
+  if (!quiz.id || quiz.mode === 'idle' || quiz.mode === 'standby') return '퀴즈가 아직 출제되지 않았습니다.'
+  if (quiz.mode === 'countdown') return '문제가 공개되면 답변을 제출해주세요.'
+  if (quiz.mode !== 'open') return '정답자 선정이 마감되었습니다.'
+  if (quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) {
+    return '이 문제는 최대 5번까지만 제출할 수 있습니다.'
+  }
+
+  return '답변을 접수하지 못했습니다.'
 }
 
 function normalizeQuizAnswerKeys(value) {
@@ -1751,7 +1771,7 @@ async function handleApi(request, response, url) {
       createdAt: Date.now(),
       hidden: false,
     })
-    cheers.splice(120)
+    cheers.splice(maxStoredCheerMessages)
     broadcast()
     sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
@@ -1882,12 +1902,37 @@ async function handleApi(request, response, url) {
     const answer = submitQuizAnswer(person, body.text)
 
     if (!answer) {
-      sendJson(response, 400, { error: 'quiz answer rejected' })
+      sendJson(
+        response,
+        200,
+        {
+          ...getState(),
+          quizSubmission: {
+            accepted: false,
+            reason: getQuizAnswerRejectionReason(person, body.text),
+          },
+        },
+        { 'Set-Cookie': participantCookieHeader(deviceId) },
+      )
       return
     }
 
     broadcast({ audience: true })
-    sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(
+      response,
+      200,
+      {
+        ...getState(),
+        quizSubmission: {
+          accepted: true,
+          answerId: answer.id,
+          text: answer.text,
+          correct: answer.correct,
+          rank: answer.rank,
+        },
+      },
+      { 'Set-Cookie': participantCookieHeader(deviceId) },
+    )
     return
   }
 

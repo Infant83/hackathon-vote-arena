@@ -52,6 +52,7 @@ type ImageFrame = 'soft' | 'line' | 'glow' | 'clean'
 type Team = {
   id: string
   code: string
+  editKey?: string
   name: string
   title: string
   members: string[]
@@ -216,6 +217,15 @@ type QuizConfig = {
   enabled: boolean
 }
 
+type QuizSubmission = {
+  accepted: boolean
+  reason?: string
+  correct?: boolean
+  rank?: number
+  text?: string
+  answerId?: number
+}
+
 type ThemeMode = 'light' | 'stage'
 type TimerMode = 'duration' | 'targetTime'
 
@@ -254,6 +264,7 @@ type PostOptions = {
 }
 
 type PostEventState = (path: string, body: unknown, options?: PostOptions) => Promise<EventState | null>
+type QuizSubmissionResponse = EventState & { quizSubmission?: QuizSubmission }
 
 type EventCopy = {
   appTitle: string
@@ -1395,11 +1406,14 @@ function getTeamEditRouteKey() {
   return new URLSearchParams(window.location.search).get('key') || ''
 }
 
-function getTeamEditPath(teamId: string, teamCode = '') {
-  return `/team/${encodeURIComponent(teamId)}?key=${encodeURIComponent(getTeamEditKey(teamId, teamCode))}`
+function getTeamEditPath(teamId: string, teamCode = '', editKey = '') {
+  return `/team/${encodeURIComponent(teamId)}?key=${encodeURIComponent(getTeamEditKey(teamId, teamCode, editKey))}`
 }
 
-function getTeamEditKey(teamId: string, teamCode = '') {
+function getTeamEditKey(teamId: string, teamCode = '', editKey = '') {
+  const explicitKey = sanitizeClientSlug(editKey)
+  if (explicitKey) return explicitKey
+
   let hash = 2166136261
   const value = `${teamId}|${teamCode}|vibe-team-edit`
 
@@ -2074,13 +2088,22 @@ function VoteView({
 
     if (!response) return
 
+    const submission = (response as QuizSubmissionResponse).quizSubmission
+    if (submission && !submission.accepted) {
+      setQuizFeedbackDraft({
+        quizId: state.quiz.id,
+        text: submission.reason || '답변을 접수하지 못했습니다.',
+      })
+      return
+    }
+
     const submittedAnswer = response.quiz.answers.find(
       (answer) => answer.participantId === currentParticipantId && answer.text === text,
     )
     setQuizAnswerDraft({ quizId: state.quiz.id, text: '' })
     setQuizFeedbackDraft({
       quizId: state.quiz.id,
-      text: submittedAnswer?.correct ? '정답 후보로 접수되었습니다.' : '정답이 아닙니다.',
+      text: (submission?.correct ?? submittedAnswer?.correct) ? '정답 후보로 접수되었습니다.' : '정답이 아닙니다.',
     })
   }
 
@@ -4748,7 +4771,7 @@ function TeamConfigDetail({
           </div>
         </div>
         {draftTeams.map((team, index) => (
-          <article className="team-editor-card" key={team.id || index}>
+          <article className="team-editor-card" key={`team-editor-${team.sortOrder}-${index}`}>
             <div className="team-editor-head">
               <LogoMark team={teamEditorPreview(team)} />
               <div>
@@ -4757,7 +4780,7 @@ function TeamConfigDetail({
               </div>
               <a
                 className="team-self-link"
-                href={getTeamEditPath(team.id || `team-${index + 1}`, team.code)}
+                href={getTeamEditPath(team.id || `team-${index + 1}`, team.code, team.editKey)}
                 target="_blank"
                 rel="noreferrer"
               >
@@ -4768,8 +4791,12 @@ function TeamConfigDetail({
 
             <div className="team-editor-grid">
               <label>
-                <span>ID</span>
-                <input value={team.id} onChange={(event) => updateTeam(index, 'id', event.target.value)} />
+                <span>내부 ID</span>
+                <input value={team.id} readOnly title="투표/응원 기록 연결에 쓰이는 내부 ID입니다. 행사 중에는 수정하지 않습니다." />
+              </label>
+              <label>
+                <span>팀 편집 키</span>
+                <input value={team.editKey} onChange={(event) => updateTeam(index, 'editKey', event.target.value)} />
               </label>
               <label>
                 <span>코드</span>
@@ -4827,7 +4854,7 @@ function TeamConfigDetail({
           <span className="config-count">{draftQuizzes.length}/15</span>
         </div>
         {draftQuizzes.map((quiz, index) => (
-          <article className="quiz-editor-card" key={quiz.id || index}>
+          <article className="quiz-editor-card" key={`quiz-editor-${index}`}>
             <div className="quiz-editor-head">
               <strong>{index + 1}. {quiz.title || '제목 없음'}</strong>
               <label className="quiz-enabled-toggle">
@@ -4908,7 +4935,10 @@ function TeamSelfEditView({
   const routeTeamKey = getTeamEditRouteKey()
   const teamIndex = state.teams.findIndex((team) => team.id === routeTeamId || team.code.toLowerCase() === routeTeamId.toLowerCase())
   const matchedTeam = teamIndex >= 0 ? state.teams[teamIndex] : null
-  const team = matchedTeam && routeTeamKey === getTeamEditKey(matchedTeam.id, matchedTeam.code) ? matchedTeam : null
+  const team =
+    matchedTeam && routeTeamKey === getTeamEditKey(matchedTeam.id, matchedTeam.code, matchedTeam.editKey)
+      ? matchedTeam
+      : null
   const [draftTeam, setDraftTeam] = useState<TeamConfigDraft | null>(() => (team ? createTeamDraft(team, getConfigOrder(team)) : null))
   const [statusText, setStatusText] = useState('')
 
@@ -4937,7 +4967,7 @@ function TeamSelfEditView({
 
     const response = await post('/api/team-self-config', {
       teamId: team.id,
-      teamKey: getTeamEditKey(team.id, team.code),
+      teamKey: getTeamEditKey(team.id, team.code, team.editKey),
       team: teamDraftToSelfConfig(draftTeam),
     })
 
@@ -7088,6 +7118,7 @@ function normalizeStoredThemeMode(value: string): ThemeMode | '' {
 type TeamConfigDraft = {
   id: string
   code: string
+  editKey: string
   name: string
   title: string
   membersText: string
@@ -7283,6 +7314,7 @@ function createTeamDraft(team: Team, sortOrder = 0): TeamConfigDraft {
   return {
     id: team.id,
     code: team.code,
+    editKey: team.editKey || getTeamEditKey(team.id, team.code),
     name: team.name,
     title: team.title,
     membersText: team.members.join('\n'),
@@ -7321,6 +7353,7 @@ function teamDraftToConfig(team: TeamConfigDraft, index: number) {
   return {
     id: team.id,
     code: team.code,
+    editKey: sanitizeClientSlug(team.editKey) || getTeamEditKey(team.id, team.code),
     name: team.name,
     title: team.title,
     members: team.membersText
@@ -8217,6 +8250,7 @@ function getEditableConfigSignature(state: EventState) {
     teams: state.teams.map((team) => ({
       id: team.id,
       code: team.code,
+      editKey: team.editKey,
       name: team.name,
       title: team.title,
       members: team.members,
