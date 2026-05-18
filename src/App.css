@@ -209,6 +209,16 @@
   color: rgba(255, 255, 255, 0.88);
 }
 
+.role-nav-link.auth-action {
+  font: inherit;
+  cursor: pointer;
+}
+
+.role-nav-link.auth-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .role-nav-link.active {
   color: #fff;
   border-color: rgba(253, 49, 46, 0.7);
@@ -737,6 +747,35 @@
   font-size: 14px;
 }
 
+.participant-reset-action,
+.participant-session-action,
+.participant-chip button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(165, 0, 52, 0.2);
+  border-radius: 999px;
+  color: var(--lg-red);
+  background: rgba(165, 0, 52, 0.045);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.participant-reset-action {
+  width: fit-content;
+  margin-top: 12px;
+  padding: 0 11px;
+}
+
+.participant-session-action,
+.participant-chip button {
+  padding: 0 9px;
+}
+
 select,
 input,
 textarea {
@@ -857,6 +896,10 @@ a:focus-visible {
   color: var(--muted);
   font-size: 12px;
   font-weight: 760;
+}
+
+.participant-chip button {
+  margin-top: 5px;
 }
 
 .raffle-status {
@@ -8910,6 +8953,10 @@ body.is-wall-resizing * {
   color: var(--ink);
   font-size: 14px;
   font-weight: 900;
+}
+
+.quiz-participant-banner .participant-session-action {
+  margin-left: auto;
 }
 
 .quiz-start-screen.standby p,

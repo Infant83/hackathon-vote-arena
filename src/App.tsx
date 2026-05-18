@@ -22,6 +22,7 @@ import {
   Link2,
   LockKeyhole,
   LogIn,
+  LogOut,
   Maximize2,
   Megaphone,
   MessageCircle,
@@ -363,6 +364,8 @@ type AdminSessionState = {
   loading: boolean
   error: string
   login: (passcode: string) => Promise<boolean>
+  logout: () => Promise<void>
+  refresh: () => Promise<void>
 }
 type AppMode = 'admin' | 'vote' | 'wall' | 'team'
 type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams' | 'quiz' | 'export'
@@ -1151,7 +1154,7 @@ const messageTimeFormatter = new Intl.DateTimeFormat('ko-KR', {
 
 function App() {
   const mode = getAppMode()
-  const [participantId] = useState(getOrCreateParticipantId)
+  const [participantId, setParticipantId] = useState(getOrCreateParticipantId)
   const adminSession = useAdminSession(mode === 'admin')
   const allowProtectedRealtime = mode !== 'admin' || adminSession.authenticated
   const { state, connection, post } = useEventState(mode, participantId, true, allowProtectedRealtime)
@@ -1195,6 +1198,37 @@ function App() {
     storeValue(departmentKey, nextDepartment)
   }
 
+  const switchVoteParticipant = () => {
+    const hasCurrentActivity = participant
+      ? sumStars(participant.allocations) > 0 ||
+        state.cheers.some((message) => message.participantId === participant.id) ||
+        buildParticipantAwardHistory(state, participant.id).length > 0
+      : false
+
+    if (
+      hasCurrentActivity &&
+      !window.confirm('현재 참여자 화면에서 로그아웃하고 다른 참여자로 등록할까요? 기존 투표 기록은 서버에 남아 있습니다.')
+    ) {
+      return
+    }
+
+    clearStoredValue(storageKey)
+    clearStoredValue(nameKey)
+    clearStoredValue(groupKey)
+    clearStoredValue(departmentKey)
+    clearStoredValue(registeredKey)
+    clearStoredValue(registeredSessionKey)
+    clearStoredValue(raffleDismissedKey)
+    clearStoredValue(quizWinnerDismissedKey)
+
+    const nextParticipantId = createParticipantId()
+    storeValue(storageKey, nextParticipantId)
+    setParticipantId(nextParticipantId)
+    setName('')
+    setGroup('')
+    setDepartment('')
+  }
+
   if (mode === 'admin' && (!adminSession.ready || (adminSession.required && !adminSession.authenticated))) {
     return (
       <main className={`app-shell theme-${themeMode}`}>
@@ -1220,6 +1254,7 @@ function App() {
           if (mode === 'admin' || mode === 'wall') return post('/api/quiz/clear', {})
           return null
         }}
+        adminSession={mode === 'admin' ? adminSession : undefined}
       />
       {mode === 'admin' ? (
         <AdminView state={state} connection={connection} post={post} />
@@ -1250,6 +1285,7 @@ function App() {
           remainingStars={remainingStars}
           starBudget={starBudget}
           post={post}
+          onSwitchParticipant={switchVoteParticipant}
         />
       )}
     </main>
@@ -1386,6 +1422,7 @@ function Header({
   onOpenCheerConstellation,
   onPrepareQuiz,
   onEndQuiz,
+  adminSession,
 }: {
   mode: AppMode
   connection: ConnectionState
@@ -1395,6 +1432,7 @@ function Header({
   onOpenCheerConstellation: () => void
   onPrepareQuiz?: () => Promise<EventState | null> | EventState | null | void
   onEndQuiz?: () => Promise<EventState | null> | EventState | null | void
+  adminSession?: AdminSessionState
 }) {
   const [now, setNow] = useState(() => Date.now())
 
@@ -1472,6 +1510,33 @@ function Header({
               <Megaphone size={15} />
               관객 화면 미리보기
             </a>
+            {adminSession ? (
+              <>
+                <button
+                  type="button"
+                  className="role-nav-link auth-action"
+                  onClick={() => {
+                    void adminSession.refresh()
+                  }}
+                  disabled={adminSession.loading}
+                >
+                  <RefreshCcw size={15} />
+                  인증 확인
+                </button>
+                <button
+                  type="button"
+                  className="role-nav-link auth-action"
+                  onClick={() => {
+                    void adminSession.logout()
+                  }}
+                  disabled={adminSession.loading || !adminSession.required}
+                  title={adminSession.required ? '관리자 세션에서 로그아웃' : '현재 배포는 관리자 passcode가 필요하지 않습니다'}
+                >
+                  <LogOut size={15} />
+                  {adminSession.required ? '로그아웃' : '인증 불필요'}
+                </button>
+              </>
+            ) : null}
             <div className="short-url" aria-label="모바일 접속 주소">
               <Radio size={16} />
               <span>{voteUrl}</span>
@@ -1762,6 +1827,7 @@ function VoteView({
   remainingStars,
   starBudget,
   post,
+  onSwitchParticipant,
 }: {
   state: EventState
   participantId: string
@@ -1777,6 +1843,7 @@ function VoteView({
   remainingStars: number
   starBudget: number
   post: (path: string, body: unknown) => Promise<EventState | null>
+  onSwitchParticipant: () => void
 }) {
   const [cheerTexts, setCheerTexts] = useState<Record<string, string>>({})
   const [quizAnswerDraft, setQuizAnswerDraft] = useState({ quizId: 0, text: '' })
@@ -2066,6 +2133,10 @@ function VoteView({
               <strong>{departmentDisplay}</strong>
             </div>
           ) : null}
+          <button type="button" className="participant-session-action" onClick={onSwitchParticipant}>
+            <LogOut size={14} />
+            다른 참여자
+          </button>
         </section>
       ) : null}
 
@@ -2113,6 +2184,12 @@ function VoteView({
           <p className="registration-note">
             {sessionReady ? `${state.copy.registrationReady} 팀명/부서/소속도 함께 입력해야 입장할 수 있습니다.` : state.copy.registrationConnecting}
           </p>
+          {name || group || department ? (
+            <button type="button" className="participant-reset-action" onClick={onSwitchParticipant}>
+              <LogOut size={14} />
+              저장된 정보 지우고 다시 입력
+            </button>
+          ) : null}
         </section>
       ) : quizActive ? (
         <QuizParticipationView
@@ -2141,6 +2218,10 @@ function VoteView({
               <div className="participant-chip">
                 <strong>{name}</strong>
                 <span>{[normalizeLetsIdDisplay(group), departmentDisplay].filter(Boolean).join(' · ')}</span>
+                <button type="button" onClick={onSwitchParticipant}>
+                  <LogOut size={13} />
+                  다른 참여자
+                </button>
               </div>
             </div>
 
@@ -6687,12 +6768,35 @@ function useAdminSession(enabled: boolean): AdminSessionState {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  const refresh = useCallback(async () => {
+    if (!enabled) return
+
+    setLoading(true)
+
+    try {
+      const response = await fetch('/api/admin/status', { credentials: 'same-origin' })
+      if (!response.ok) throw new Error('status failed')
+      const next = (await response.json()) as { required?: boolean; authenticated?: boolean }
+      setRequired(Boolean(next.required))
+      setAuthenticated(Boolean(next.authenticated))
+      setError('')
+    } catch {
+      setRequired(true)
+      setAuthenticated(false)
+      setError('관리자 인증 상태를 확인하지 못했습니다.')
+    } finally {
+      setReady(true)
+      setLoading(false)
+    }
+  }, [enabled])
+
   useEffect(() => {
     if (!enabled) return
 
     let active = true
 
     const checkSession = async () => {
+      setLoading(true)
       try {
         const response = await fetch('/api/admin/status', { credentials: 'same-origin' })
         if (!response.ok) throw new Error('status failed')
@@ -6707,7 +6811,10 @@ function useAdminSession(enabled: boolean): AdminSessionState {
         setAuthenticated(false)
         setError('관리자 인증 상태를 확인하지 못했습니다.')
       } finally {
-        if (active) setReady(true)
+        if (active) {
+          setReady(true)
+          setLoading(false)
+        }
       }
     }
 
@@ -6752,6 +6859,30 @@ function useAdminSession(enabled: boolean): AdminSessionState {
     }
   }, [enabled])
 
+  const logout = useCallback(async () => {
+    if (!enabled) return
+
+    setLoading(true)
+    setError('')
+
+    try {
+      const response = await fetch('/api/admin/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+      if (!response.ok) throw new Error('logout failed')
+      const next = (await response.json()) as { required?: boolean; authenticated?: boolean }
+      setRequired(Boolean(next.required))
+      setAuthenticated(Boolean(next.authenticated))
+    } catch {
+      setAuthenticated(false)
+      setError('관리자 로그아웃 요청에 실패했습니다.')
+    } finally {
+      setReady(true)
+      setLoading(false)
+    }
+  }, [enabled])
+
   return {
     ready: enabled ? ready : true,
     required: enabled ? required : false,
@@ -6759,6 +6890,8 @@ function useAdminSession(enabled: boolean): AdminSessionState {
     loading: enabled ? loading : false,
     error: enabled ? error : '',
     login,
+    logout,
+    refresh,
   }
 }
 
@@ -7650,12 +7783,17 @@ function getOrCreateParticipantId() {
     return existing
   }
 
+  const next = createParticipantId()
+  storeValue(storageKey, next)
+  return next
+}
+
+function createParticipantId() {
   const next =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
       : `participant-${Date.now()}-${Math.random().toString(16).slice(2)}`
 
-  storeValue(storageKey, next)
   return next
 }
 
@@ -7696,6 +7834,11 @@ function storeValue(key: string, value: string) {
   setCookie(key, value)
 }
 
+function clearStoredValue(key: string) {
+  localStorage.removeItem(key)
+  clearCookie(key)
+}
+
 function getCookie(name: string) {
   const prefix = `${name}=`
   const item = document.cookie
@@ -7708,6 +7851,10 @@ function getCookie(name: string) {
 
 function setCookie(name: string, value: string) {
   document.cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${cookieMaxAge}; Path=/; SameSite=Lax`
+}
+
+function clearCookie(name: string) {
+  document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax`
 }
 
 function sumStars(allocations: Record<string, number>) {
