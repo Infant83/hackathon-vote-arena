@@ -29,6 +29,7 @@
 - 운영 콘텐츠 저장 화면에 현재 저장 대상이 로컬 Node 서버인지 Cloudflare 운영 저장소인지 표시하고, Cloudflare 저장 실패 시 관리자 인증/네트워크/대용량 원인을 구분해 안내하도록 했습니다.
 - 특정 사내망에서 Cloudflare 저장 POST가 403으로 막히는 경우를 별도 안내해, 모바일/외부망 저장 또는 JSON 백업 경로를 바로 선택할 수 있게 했습니다.
 - Cloudflare 저장 POST가 403으로 거절될 때 관리자 인증이 유지된 압축 GET 저장 경로를 자동으로 재시도해, POST만 막는 사내망에서도 즉시 반영될 수 있게 했습니다.
+- Cloudflare 운영 본체 Worker를 Durable Object가 붙어 있는 `hack`으로 고정하고, 기존 `lgdhack` 주소는 같은 운영 상태로 프록시하는 호환 Worker로 분리했습니다.
 
 ## 2026-05-15
 
@@ -71,8 +72,8 @@
 
 ### Cloudflare 배포 체계
 
-- Cloudflare Worker 이름을 `lgdhack`으로 정리했습니다.
-- 현재 라이브 주소를 `https://lgdhack.aigov.workers.dev`로 맞췄습니다.
+- Cloudflare Worker 이름을 `hack`으로 정리했습니다.
+- 현재 라이브 주소를 `https://hack.aigov.workers.dev`로 맞췄습니다.
 - React 정적 파일은 Workers Static Assets로 제공하고, 실시간 상태는 Durable Object `ArenaRoom`이 담당하도록 구성했습니다.
 - GitHub repository `Infant83/hackathon-vote-arena`와 Cloudflare Git Build를 연결했습니다.
 - production branch를 `cloudflare-migration`으로 설정했습니다.

@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "lgdhack",
+  "main": "worker/lgdhack-proxy.ts",
+  "compatibility_date": "2026-05-09",
+  "workers_dev": true,
+  "preview_urls": false,
+  "services": [
+    {
+      "binding": "HACK_WORKER",
+      "service": "hack"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

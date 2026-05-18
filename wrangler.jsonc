@@ -1,8 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "lgdhack",
+  "name": "hack",
   "main": "worker/index.ts",
   "compatibility_date": "2026-05-09",
+  "workers_dev": true,
+  "preview_urls": false,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
