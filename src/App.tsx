@@ -2627,15 +2627,19 @@ function QuizParticipationView({
   const canSubmit = phase === 'open' || phase === 'settling'
   const hasWon = Boolean(winningAnswer)
   const reachedAttemptLimit = attemptCount >= attemptLimit
+  const stalePendingFeedback = phase !== 'settling' && /정답 후보|확인 중/.test(feedback)
+  const visibleFeedback = hasWon || stalePendingFeedback ? '' : feedback
   const statusText = hasWon
     ? `${winningAnswer?.rank ?? 1}번째 정답자로 선정되었습니다.`
     : phase === 'settling' && latestAnswer?.correct
-      ? '정답 후보입니다. 최종 정답 확인 중...'
+      ? '정답 후보입니다. 최종 확인 전까지 다른 답변도 계속 접수됩니다.'
+      : phase === 'closed' && latestAnswer?.correct
+        ? '정답은 맞았지만 최종 선착순 정답자로 선정되지는 않았습니다.'
       : canSubmit
       ? reachedAttemptLimit
         ? '이 문제의 답변 기회를 모두 사용했습니다.'
         : phase === 'settling'
-          ? '정답 확인 중입니다. 마감 전 도착한 답변을 비교하고 있습니다.'
+          ? '정답 확인 중입니다. 이 시간에도 답변 제출은 계속 열려 있습니다.'
           : '정답을 입력해 전송하세요.'
       : phase === 'closed'
         ? '이 문제는 마감되었습니다.'
@@ -2675,7 +2679,7 @@ function QuizParticipationView({
         <div className="quiz-settlement-banner" aria-live="assertive">
           <Sparkles size={20} />
           <strong>정답 확인 중...</strong>
-          <span>{settlementValue}초 후 최종 정답자를 확정합니다.</span>
+          <span>{settlementValue}초 후 확정합니다. 그동안 답변 제출은 계속 가능합니다.</span>
         </div>
       ) : null}
       <div className="quiz-question-card">
@@ -2718,7 +2722,7 @@ function QuizParticipationView({
               isOpen
                 ? '정답 입력'
                 : phase === 'settling'
-                  ? '정답 확인 중에도 제출할 수 있습니다'
+                  ? '정답 확인 중에도 계속 제출할 수 있습니다'
                 : phase === 'closed'
                   ? '퀴즈가 마감되었습니다'
                   : phase === 'standby'
@@ -2731,7 +2735,7 @@ function QuizParticipationView({
             {attemptCount}/{attemptLimit} 전송
           </button>
         </div>
-        {feedback ? <p className="quiz-feedback">{feedback}</p> : null}
+        {visibleFeedback ? <p className="quiz-feedback">{visibleFeedback}</p> : null}
       </div>
 
       {quiz.winners.length ? (
@@ -3416,7 +3420,7 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
           <Sparkles size={36} />
           <p>정답 확인 중...</p>
           <strong>{settlementValue}초 후 최종 정답자를 확정합니다</strong>
-          <span>먼저 제출된 정답 후보를 비교하고 있습니다.</span>
+          <span>먼저 제출된 정답 후보를 비교하는 동안에도 참가자 답변은 계속 접수됩니다.</span>
         </div>
       ) : null}
 
@@ -3633,7 +3637,7 @@ function QuizAdminPanel({
       {phase === 'settling' ? (
         <div className="quiz-admin-settlement" role="status" aria-live="assertive">
           <strong>정답 확인 중...</strong>
-          <span>{settlementValue}초 후 보정 제출시각 기준으로 최종 정답자를 확정합니다.</span>
+          <span>{settlementValue}초 후 보정 제출시각 기준으로 확정합니다. 확인 중에도 답변은 계속 접수됩니다.</span>
         </div>
       ) : null}
 
