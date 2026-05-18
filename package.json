@@ -9,14 +9,20 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "start": "node server.mjs",
-    "realtime": "npm run build && node server.mjs"
+    "realtime": "npm run build && node server.mjs",
+    "cf:types": "wrangler types",
+    "cf:dev": "npm run build && wrangler dev",
+    "cf:deploy:dry-run": "npm run build && wrangler deploy --dry-run",
+    "cf:deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
+    "fflate": "^0.8.2",
     "lucide-react": "^1.14.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260509.1",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
@@ -28,6 +34,7 @@
     "globals": "^17.5.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "wrangler": "^4.90.0"
   }
 }
