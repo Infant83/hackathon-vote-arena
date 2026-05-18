@@ -291,6 +291,8 @@ const appConfig = loadConfig()
 let teams = appConfig.teams
 let copy = appConfig.copy
 let quizBank = appConfig.quizBank
+let configRevision = 1
+let configUpdatedAt = Date.now()
 let validTeamIds = new Set(teams.map((team) => team.id))
 const participants = new Map()
 const cheers = []
@@ -542,7 +544,7 @@ async function applyTeamConfig(body) {
   }
   validTeamIds = new Set(teams.map((team) => team.id))
   cleanupInvalidTeamReferences()
-  lastRaffle = null
+  touchConfig()
   await persistTeamConfig()
 }
 
@@ -570,8 +572,13 @@ async function applyTeamSelfConfig(body) {
 
   teams = teams.map((team, teamIndex) => (teamIndex === index ? normalizeTeam(prepared, current, index) : team))
   validTeamIds = new Set(teams.map((team) => team.id))
-  lastRaffle = null
+  touchConfig()
   await persistTeamConfig()
+}
+
+function touchConfig() {
+  configRevision += 1
+  configUpdatedAt = Date.now()
 }
 
 function getTeamEditKey(team) {
@@ -752,6 +759,8 @@ function getState() {
     testMode,
     settings,
     copy,
+    configRevision,
+    configUpdatedAt,
   }
 }
 

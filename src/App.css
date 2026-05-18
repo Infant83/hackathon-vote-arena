@@ -4285,6 +4285,12 @@ body.is-wall-resizing * {
   cursor: pointer;
 }
 
+.config-toolbar button:disabled,
+.file-import-button.is-disabled {
+  cursor: progress;
+  opacity: 0.68;
+}
+
 .config-toolbar .primary-action {
   margin-left: auto;
   color: #fff;
@@ -4321,6 +4327,16 @@ body.is-wall-resizing * {
   border-radius: var(--radius);
   background: rgba(165, 0, 52, 0.045);
   font-weight: 800;
+}
+
+.config-status.is-pending {
+  border-color: rgba(80, 163, 255, 0.36);
+  background: rgba(80, 163, 255, 0.08);
+  color: var(--heading);
+}
+
+.theme-stage .config-status.is-pending {
+  color: #dcecff;
 }
 
 .copy-config-grid,

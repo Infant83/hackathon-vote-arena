@@ -232,6 +232,8 @@ type EventState = {
   serverTime: number
   receivedAt?: number
   sessionId: number
+  configRevision: number
+  configUpdatedAt: number
   settings: {
     showScoresToAudience: boolean
     starBudget: number
@@ -1126,6 +1128,8 @@ const fallbackState: EventState = {
   serverTime: Date.now(),
   receivedAt: Date.now(),
   sessionId: 0,
+  configRevision: 1,
+  configUpdatedAt: Date.now(),
   settings: {
     showScoresToAudience: true,
     starBudget: DEFAULT_STAR_BUDGET,
@@ -4336,6 +4340,7 @@ function TeamConfigDetail({
   const [draftTeams, setDraftTeams] = useState(() => createTeamDrafts(state.teams))
   const [draftQuizzes, setDraftQuizzes] = useState(() => createQuizDrafts(state.quizBank))
   const [statusText, setStatusText] = useState('')
+  const [savingConfig, setSavingConfig] = useState(false)
 
   const updateCopy = (key: keyof EventCopy, value: string) => {
     setDraftCopy((current) => ({ ...current, [key]: value }))
@@ -4402,21 +4407,30 @@ function TeamConfigDetail({
   }
 
   const saveConfig = async () => {
-    const response = await post('/api/team-config', {
-      copy: draftCopy,
-      teams: draftTeams.map((team, index) => teamDraftToConfig(team, index)),
-      quizzes: draftQuizzes.map((quiz, index) => quizDraftToConfig(quiz, index)),
-    })
+    if (savingConfig) return
 
-    if (response) {
-      setDraftCopy({ ...fallbackCopy, ...response.copy })
-      setDraftTeams(createTeamDrafts(response.teams))
-      setDraftQuizzes(createQuizDrafts(response.quizBank))
-      setStatusText('팀 정보가 저장되고 화면에 반영되었습니다.')
-      return
+    setSavingConfig(true)
+    setStatusText('Cloudflare 운영 상태에 저장하고 열린 화면에 반영하는 중입니다...')
+
+    try {
+      const response = await post('/api/team-config', {
+        copy: normalizeCopyForSave(draftCopy),
+        teams: draftTeams.map((team, index) => teamDraftToConfig(team, index)),
+        quizzes: draftQuizzes.map((quiz, index) => quizDraftToConfig(quiz, index)),
+      })
+
+      if (response) {
+        setDraftCopy({ ...fallbackCopy, ...response.copy })
+        setDraftTeams(createTeamDrafts(response.teams))
+        setDraftQuizzes(createQuizDrafts(response.quizBank))
+        setStatusText(getConfigSavedStatus(response))
+        return
+      }
+
+      setStatusText('팀 정보 저장에 실패했습니다. 관리자 인증 또는 네트워크 상태를 확인해주세요.')
+    } finally {
+      setSavingConfig(false)
     }
-
-    setStatusText('팀 정보 저장에 실패했습니다.')
   }
 
   const importConfig = async (file: File | undefined) => {
@@ -4424,30 +4438,35 @@ function TeamConfigDetail({
 
     try {
       const parsed = await parseTeamInfoFile(file)
+      setSavingConfig(true)
+      setStatusText(`${file.name}을 Cloudflare 운영 상태에 적용하는 중입니다...`)
       const response = await post('/api/team-config', parsed)
 
       if (response) {
         setDraftCopy({ ...fallbackCopy, ...response.copy })
         setDraftTeams(createTeamDrafts(response.teams))
         setDraftQuizzes(createQuizDrafts(response.quizBank))
-        setStatusText(`${file.name}을 적용했습니다.`)
+        setStatusText(`${file.name}을 적용했습니다. ${getConfigSavedStatus(response)}`)
       } else {
         setStatusText('업로드한 팀 정보를 적용하지 못했습니다.')
       }
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : '업로드한 파일을 읽지 못했습니다.')
+    } finally {
+      setSavingConfig(false)
     }
   }
 
   return (
     <div className="team-config-detail">
       <div className="config-toolbar">
-        <label className="file-import-button">
+        <label className={`file-import-button ${savingConfig ? 'is-disabled' : ''}`} aria-disabled={savingConfig}>
           <Upload size={16} />
           team_infos.zip / JSON 업로드
           <input
             type="file"
             accept=".zip,.json,application/json,application/zip"
+            disabled={savingConfig}
             onChange={(event) => {
               importConfig(event.currentTarget.files?.[0])
               event.currentTarget.value = ''
@@ -4458,9 +4477,9 @@ function TeamConfigDetail({
           <Download size={16} />
           team_info.json 저장
         </button>
-        <button type="button" className="primary-action" onClick={saveConfig}>
+        <button type="button" className="primary-action" onClick={saveConfig} disabled={savingConfig}>
           <Save size={16} />
-          저장 및 반영
+          {savingConfig ? '저장 중...' : '저장 및 반영'}
         </button>
       </div>
 
@@ -4468,7 +4487,7 @@ function TeamConfigDetail({
         ZIP 구조는 <code>team_infos/team_info.json</code>과 <code>team_infos/logos/T1-logo.png</code> 형식을 권장합니다.
         로고는 png, jpg, webp, svg, ico를 받을 수 있습니다.
       </p>
-      {statusText ? <p className="config-status">{statusText}</p> : null}
+      {statusText ? <p className={`config-status ${savingConfig ? 'is-pending' : ''}`}>{statusText}</p> : null}
 
       <section className="visual-config-grid" aria-label="브랜드와 상품 이미지 관리">
         <div className="section-heading compact">
@@ -6758,6 +6777,8 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
       settings: { ...fallbackState.settings, ...(nextState.settings ?? {}) },
       quiz: { ...fallbackState.quiz, ...(nextState.quiz ?? {}) },
       quizBank: Array.isArray(nextState.quizBank) && nextState.quizBank.length ? nextState.quizBank : fallbackQuizBank,
+      configRevision: nextState.configRevision || fallbackState.configRevision,
+      configUpdatedAt: nextState.configUpdatedAt || fallbackState.configUpdatedAt,
       serverTime: nextState.serverTime || Date.now(),
       receivedAt: Date.now(),
       teams: nextState.teams.map((team) => {
@@ -6858,12 +6879,22 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
         body: JSON.stringify(body),
       })
 
-      if (!response.ok) throw new Error(`${path} failed`)
+      if (!response.ok) {
+        let detail = `${path} failed`
+        try {
+          const payload = await response.json() as { error?: string }
+          if (payload.error) detail = payload.error
+        } catch {
+          // Keep the generic message when the response is not JSON.
+        }
+        throw new Error(detail)
+      }
       const nextState = (await response.json()) as EventState
       applyState(nextState)
       setConnection('live')
       return nextState
-    } catch {
+    } catch (error) {
+      console.warn(`POST ${path} failed`, error)
       setConnection('offline')
       return null
     }
@@ -7132,7 +7163,7 @@ function teamDraftToConfig(team: TeamConfigDraft, index: number) {
       .map((member) => member.trim())
       .filter(Boolean)
       .slice(0, 3),
-    logoFile: team.logoFile,
+    logoFile: normalizeLogoSourceValue(team.logoFile),
     logoShape: normalizeImageShape(team.logoShape, 'rounded'),
     logoFrame: normalizeImageFrame(team.logoFrame, 'line'),
     logoFit: normalizeImageFit(team.logoFit, 'cover'),
@@ -7206,12 +7237,41 @@ function quizDraftToConfig(quiz: QuizConfigDraft, index: number): QuizConfig {
   }
 }
 
+const copyImageKeys: EventCopyImageKey[] = [
+  'appLogoFile',
+  'rafflePrizeImageFile',
+  'rafflePrizeImageAll',
+  'rafflePrizeImageLeader',
+  'rafflePrizeImageTop3',
+  'rafflePrizeImageRank456',
+  'rafflePrizeImageLowerPack',
+  'rafflePrizeImageMulti',
+  'rafflePrizeImageBig',
+  'rafflePrizeImageLongestCheer',
+]
+
+function normalizeCopyForSave(copy: EventCopy): EventCopy {
+  const next = { ...copy }
+
+  for (const key of copyImageKeys) {
+    next[key] = normalizeLogoSourceValue(next[key])
+  }
+
+  return next
+}
+
+function getConfigSavedStatus(state: EventState) {
+  const savedAt = state.configUpdatedAt || Date.now()
+  const revision = Math.max(1, Math.floor(Number(state.configRevision) || 1))
+  return `팀 정보가 저장되고 화면에 반영되었습니다. 저장 시각 ${formatMessageTime(savedAt)} · 반영 버전 ${revision}`
+}
+
 function teamEditorPreview(team: TeamConfigDraft): TeamVisual {
   return {
     name: team.name,
     logo: logoKinds.includes(team.logo as LogoKind) ? (team.logo as LogoKind) : 'orbit',
     color: /^#[0-9a-fA-F]{6}$/.test(team.color) ? team.color : '#A50034',
-    logoFile: team.logoFile,
+    logoFile: normalizeLogoSourceValue(team.logoFile),
     logoShape: normalizeImageShape(team.logoShape, 'rounded'),
     logoFrame: normalizeImageFrame(team.logoFrame, 'line'),
     logoFit: normalizeImageFit(team.logoFit, 'cover'),
@@ -7330,7 +7390,7 @@ function bytesToDataUrl(bytes: Uint8Array, mimeType: string) {
 
 function downloadTeamInfoJson({ copy, teams, quizzes }: { copy: EventCopy; teams: TeamConfigDraft[]; quizzes: QuizConfigDraft[] }) {
   const payload = {
-    copy,
+    copy: normalizeCopyForSave(copy),
     teams: teams.map((team, index) => teamDraftToConfig(team, index)),
     quizzes: quizzes.map((quiz, index) => quizDraftToConfig(quiz, index)),
   }

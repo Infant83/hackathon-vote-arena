@@ -236,6 +236,8 @@ type Snapshot = {
   settings: Settings
   teams?: TeamConfig[]
   copy?: EventCopy
+  configRevision?: number
+  configUpdatedAt?: number
   settingsVersion?: number
 }
 
@@ -519,6 +521,8 @@ export class ArenaRoom {
   private teams: TeamConfig[] = initialConfig.teams
   private copy: EventCopy = initialConfig.copy
   private quizBank: QuizConfig[] = initialConfig.quizBank
+  private configRevision = 1
+  private configUpdatedAt = Date.now()
   private validTeamIds = new Set(initialConfig.teams.map((team) => team.id))
   private state: DurableObjectState
   private loaded: Promise<void>
@@ -564,6 +568,8 @@ export class ArenaRoom {
     this.quiz = normalizeQuizState(snapshot.quiz)
     this.quizAnswerKeys = Array.isArray(snapshot.quizAnswerKeys) ? snapshot.quizAnswerKeys.filter(Boolean) : []
     this.quizBank = normalizeQuizBank(snapshot.quizBank, initialConfig.quizBank)
+    this.configRevision = Math.max(1, Math.floor(Number(snapshot.configRevision || 1)))
+    this.configUpdatedAt = Number(snapshot.configUpdatedAt || Date.now())
     this.cheerId = Math.max(1, Number(snapshot.cheerId || 1))
     this.voteEventId = Math.max(1, Number(snapshot.voteEventId || 1))
     this.quizAnswerId = Math.max(1, Number(snapshot.quizAnswerId || 1))
@@ -611,6 +617,8 @@ export class ArenaRoom {
       settings: this.settings,
       teams: this.teams,
       copy: this.copy,
+      configRevision: this.configRevision,
+      configUpdatedAt: this.configUpdatedAt,
       settingsVersion,
     }
 
@@ -936,6 +944,8 @@ export class ArenaRoom {
       testMode: this.testMode,
       settings: this.settings,
       copy: this.copy,
+      configRevision: this.configRevision,
+      configUpdatedAt: this.configUpdatedAt,
     }
   }
 
@@ -960,7 +970,7 @@ export class ArenaRoom {
     }
     this.validTeamIds = new Set(this.teams.map((team) => team.id))
     this.cleanupInvalidTeamReferences()
-    this.lastRaffle = null
+    this.touchConfig()
     return true
   }
 
@@ -984,7 +994,7 @@ export class ArenaRoom {
 
     this.teams = this.teams.map((team, teamIndex) => (teamIndex === index ? normalizeTeam(prepared, current, index) : team))
     this.validTeamIds = new Set(this.teams.map((team) => team.id))
-    this.lastRaffle = null
+    this.touchConfig()
     return true
   }
 
@@ -1025,6 +1035,11 @@ export class ArenaRoom {
   private async commit(options: { audience?: boolean } = {}) {
     await this.persist()
     this.broadcast(options)
+  }
+
+  private touchConfig() {
+    this.configRevision += 1
+    this.configUpdatedAt = Date.now()
   }
 
   private broadcast({ audience = false }: { audience?: boolean } = {}) {
@@ -1706,6 +1721,7 @@ function json(data: unknown, status = 200, headers: HeadersInit = {}) {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
       ...headers,
     },
   })
