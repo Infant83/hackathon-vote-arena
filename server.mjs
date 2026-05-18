@@ -16,6 +16,7 @@ const defaultMaxStarsPerTeam = 5
 const maxConfigurableStarsPerTeam = 10
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
+const defaultRaffleCheerWeight = 0.2
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
 const maxStoredCheerMessages = 5000
@@ -121,6 +122,7 @@ const defaultCopy = {
   rafflePrizeNameLongestCheer: '',
   raffleStartButtonLabel: '추첨 시작',
   raffleStopButtonLabel: '정지',
+  awardHistoryNotice: '당첨 선물은 행사 종료 후 운영진 확인을 거쳐 현장에서 순차적으로 전달됩니다.',
 }
 
 const defaultTeams = [
@@ -342,6 +344,7 @@ let settings = {
   timerMode: 'duration',
   targetTime: '',
   minScore: defaultMinScore,
+  raffleCheerWeight: defaultRaffleCheerWeight,
   cheerNameMode: 'masked',
   themeMode: 'stage',
 }
@@ -387,7 +390,7 @@ function normalizeTeam(team, fallback = defaultTeams[0], index = 0) {
   const validLogos = new Set(['orbit', 'beam', 'grid', 'wave', 'core'])
   const hasLogoFile = Object.prototype.hasOwnProperty.call(team || {}, 'logoFile')
   const members = Array.isArray(team?.members)
-    ? team.members.map((member) => sanitizeText(member, 18)).filter(Boolean).slice(0, 3)
+    ? team.members.map((member) => sanitizeText(member, 80)).filter(Boolean).slice(0, 3)
     : fallback.members || []
   const logo = validLogos.has(team?.logo) ? team.logo : fallback.logo || 'orbit'
 
@@ -723,6 +726,7 @@ function getRuntimeSettings(source = settings) {
     timerMode: normalizeTimerMode(source.timerMode, 'duration'),
     targetTime: normalizeTargetTime(source.targetTime),
     minScore: clamp(Number(source.minScore ?? defaultMinScore), 0, 9.9),
+    raffleCheerWeight: clamp(Number(source.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
     cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
     themeMode: normalizeThemeMode(source.themeMode, 'stage'),
   }
@@ -936,6 +940,12 @@ function deleteParticipant(participantId) {
 
 function getRaffleCandidates(rule) {
   const state = getState()
+  const raffleAwardedParticipantIds = new Set(
+    awardHistory
+      .filter((record) => record.kind === 'raffle')
+      .map((record) => record.participantId)
+      .filter(Boolean),
+  )
   const leaderId = state.teams[0]?.id
   const topThreeIds = state.teams.slice(0, 3).map((team) => team.id)
   const rank456Ids = state.teams.slice(3, 6).map((team) => team.id)
@@ -955,6 +965,7 @@ function getRaffleCandidates(rule) {
   const longestCheerLength = rule === 'longestCheer' ? Math.max(0, ...longestCheerByParticipant.values()) : 0
 
   return state.participants.filter((person) => {
+    if (raffleAwardedParticipantIds.has(person.id)) return false
     const spent = sumStars(person.allocations)
     if (spent <= 0) return false
     if (!person.cheered) return false
@@ -1027,6 +1038,54 @@ function getRafflePrizeName(rule) {
 
 function shuffle(items) {
   return [...items].sort(() => Math.random() - 0.5)
+}
+
+function pickWeightedRaffleWinners(candidates, winnerCount) {
+  const pool = shuffle(candidates)
+  const weights = buildRaffleCandidateWeights(pool)
+  const winners = []
+
+  while (pool.length && winners.length < winnerCount) {
+    const totalWeight = pool.reduce((sum, person) => sum + (weights.get(person.id) ?? 1), 0)
+    let cursor = Math.random() * Math.max(totalWeight, 1)
+    let selectedIndex = 0
+
+    for (let index = 0; index < pool.length; index += 1) {
+      cursor -= weights.get(pool[index].id) ?? 1
+      if (cursor <= 0) {
+        selectedIndex = index
+        break
+      }
+    }
+
+    winners.push(...pool.splice(selectedIndex, 1))
+  }
+
+  return winners
+}
+
+function buildRaffleCandidateWeights(candidates) {
+  const cheerWeight = clamp(Number(settings.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1)
+  if (cheerWeight <= 0) return new Map(candidates.map((person) => [person.id, 1]))
+
+  const cheerStats = new Map()
+  cheers.forEach((message) => {
+    if (message.hidden) return
+    const current = cheerStats.get(message.participantId) ?? { count: 0, chars: 0 }
+    current.count += 1
+    current.chars += Array.from(String(message.text ?? '')).length
+    cheerStats.set(message.participantId, current)
+  })
+
+  return new Map(
+    candidates.map((person) => {
+      const stats = cheerStats.get(person.id) ?? { count: 0, chars: 0 }
+      const countBoost = Math.sqrt(stats.count)
+      const textBoost = Math.sqrt(Math.min(stats.chars, 3000) / 100)
+      const combinedBoost = Math.min(4, (countBoost + textBoost) / 2)
+      return [person.id, 1 + combinedBoost * cheerWeight]
+    }),
+  )
 }
 
 function sumStars(allocations) {
@@ -1938,7 +1997,7 @@ async function handleApi(request, response, url) {
     const createdAt = Date.now()
     const prizeImageFile = getRafflePrizeImage(rule)
     const prizeName = getRafflePrizeName(rule)
-    const winners = shuffle(candidates)
+    const winners = pickWeightedRaffleWinners(candidates, winnerCount)
       .slice(0, Math.min(winnerCount, candidates.length))
       .map((person, index) => ({
         id: person.id,
@@ -2121,6 +2180,7 @@ async function handleApi(request, response, url) {
       maxConfigurableStarsPerTeam,
     )
     const nextMinScore = clamp(Number(body.minScore ?? settings.minScore), 0, 9.9)
+    const nextRaffleCheerWeight = clamp(Number(body.raffleCheerWeight ?? settings.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1)
     const nextTimerMode = normalizeTimerMode(body.timerMode, settings.timerMode)
     const rawDurationMinutes = normalizeDurationMinutes(body.durationMinutes, settings.durationMinutes)
     const rawTargetTime = normalizeTargetTime(body.targetTime, settings.targetTime)
@@ -2141,6 +2201,7 @@ async function handleApi(request, response, url) {
       timerMode: nextTimerMode,
       targetTime: nextTargetTime,
       minScore: nextMinScore,
+      raffleCheerWeight: nextRaffleCheerWeight,
       cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, settings.cheerNameMode),
       themeMode: normalizeThemeMode(body.themeMode, settings.themeMode),
     }

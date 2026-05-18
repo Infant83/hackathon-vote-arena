@@ -6,6 +6,7 @@ const defaultMaxStarsPerTeam = 5
 const maxConfigurableStarsPerTeam = 10
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
+const defaultRaffleCheerWeight = 0.2
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
 const maxStoredCheerMessages = 5000
@@ -227,6 +228,7 @@ type Settings = {
   timerMode: 'duration' | 'targetTime'
   targetTime: string
   minScore: number
+  raffleCheerWeight: number
   cheerNameMode: 'masked' | 'real'
   themeMode: 'light' | 'stage'
 }
@@ -360,6 +362,7 @@ const defaultCopy = {
   rafflePrizeNameLongestCheer: '',
   raffleStartButtonLabel: '추첨 시작',
   raffleStopButtonLabel: '정지',
+  awardHistoryNotice: '당첨 선물은 행사 종료 후 운영진 확인을 거쳐 현장에서 순차적으로 전달됩니다.',
 }
 
 const defaultTeams: TeamConfig[] = [
@@ -532,6 +535,7 @@ export class ArenaRoom {
     timerMode: 'duration',
     targetTime: '',
     minScore: defaultMinScore,
+    raffleCheerWeight: defaultRaffleCheerWeight,
     cheerNameMode: 'masked',
     themeMode: 'stage',
   }
@@ -634,6 +638,7 @@ export class ArenaRoom {
       timerMode: normalizeTimerMode(snapshot.settings?.timerMode),
       targetTime: normalizeTargetTime(snapshot.settings?.targetTime),
       minScore: clamp(Number(snapshot.settings?.minScore ?? defaultMinScore), 0, 9.9),
+      raffleCheerWeight: clamp(Number(snapshot.settings?.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
       cheerNameMode: normalizeCheerNameMode(snapshot.settings?.cheerNameMode),
       themeMode: normalizeThemeMode(snapshot.settings?.themeMode),
     }
@@ -759,7 +764,7 @@ export class ArenaRoom {
       const createdAt = Date.now()
       const prizeImageFile = this.getRafflePrizeImage(rule)
       const prizeName = this.getRafflePrizeName(rule)
-      const winners = shuffle(candidates)
+      const winners = this.pickWeightedRaffleWinners(candidates, winnerCount)
         .slice(0, Math.min(winnerCount, candidates.length))
         .map((person, index) => ({
           id: person.id,
@@ -919,6 +924,7 @@ export class ArenaRoom {
         timerMode: timerSettings.timerMode,
         targetTime: timerSettings.targetTime,
         minScore: clamp(Number(body.minScore ?? this.settings.minScore), 0, 9.9),
+        raffleCheerWeight: clamp(Number(body.raffleCheerWeight ?? this.settings.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
         cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, this.settings.cheerNameMode),
         themeMode: normalizeThemeMode(body.themeMode, this.settings.themeMode),
       }
@@ -1058,6 +1064,7 @@ export class ArenaRoom {
       timerMode: normalizeTimerMode(source.timerMode, 'duration'),
       targetTime: normalizeTargetTime(source.targetTime),
       minScore: clamp(Number(source.minScore ?? defaultMinScore), 0, 9.9),
+      raffleCheerWeight: clamp(Number(source.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
       cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
       themeMode: normalizeThemeMode(source.themeMode, 'stage'),
     }
@@ -1307,6 +1314,12 @@ export class ArenaRoom {
 
   private getRaffleCandidates(rule: RaffleRule) {
     const state = this.getState()
+    const raffleAwardedParticipantIds = new Set(
+      this.awardHistory
+        .filter((record) => record.kind === 'raffle')
+        .map((record) => record.participantId)
+        .filter(Boolean),
+    )
     const leaderId = state.teams[0]?.id
     const topThreeIds = state.teams.slice(0, 3).map((team) => team.id)
     const rank456Ids = state.teams.slice(3, 6).map((team) => team.id)
@@ -1326,6 +1339,7 @@ export class ArenaRoom {
     const longestCheerLength = rule === 'longestCheer' ? Math.max(0, ...longestCheerByParticipant.values()) : 0
 
     return state.participants.filter((person: ParticipantState) => {
+      if (raffleAwardedParticipantIds.has(person.id)) return false
       const spent = sumStars(person.allocations)
       if (spent <= 0) return false
       if (!person.cheered) return false
@@ -1379,6 +1393,54 @@ export class ArenaRoom {
         }
       })
       .sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  private pickWeightedRaffleWinners(candidates: ParticipantState[], winnerCount: number) {
+    const pool = shuffle(candidates)
+    const weights = this.buildRaffleCandidateWeights(pool)
+    const winners: ParticipantState[] = []
+
+    while (pool.length && winners.length < winnerCount) {
+      const totalWeight = pool.reduce((sum, person) => sum + (weights.get(person.id) ?? 1), 0)
+      let cursor = Math.random() * Math.max(totalWeight, 1)
+      let selectedIndex = 0
+
+      for (let index = 0; index < pool.length; index += 1) {
+        cursor -= weights.get(pool[index].id) ?? 1
+        if (cursor <= 0) {
+          selectedIndex = index
+          break
+        }
+      }
+
+      winners.push(...pool.splice(selectedIndex, 1))
+    }
+
+    return winners
+  }
+
+  private buildRaffleCandidateWeights(candidates: ParticipantState[]) {
+    const cheerWeight = clamp(Number(this.settings.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1)
+    if (cheerWeight <= 0) return new Map(candidates.map((person) => [person.id, 1]))
+
+    const cheerStats = new Map<string, { count: number; chars: number }>()
+    this.cheers.forEach((message) => {
+      if (message.hidden) return
+      const current = cheerStats.get(message.participantId) ?? { count: 0, chars: 0 }
+      current.count += 1
+      current.chars += Array.from(String(message.text ?? '')).length
+      cheerStats.set(message.participantId, current)
+    })
+
+    return new Map(
+      candidates.map((person) => {
+        const stats = cheerStats.get(person.id) ?? { count: 0, chars: 0 }
+        const countBoost = Math.sqrt(stats.count)
+        const textBoost = Math.sqrt(Math.min(stats.chars, 3000) / 100)
+        const combinedBoost = Math.min(4, (countBoost + textBoost) / 2)
+        return [person.id, 1 + combinedBoost * cheerWeight]
+      }),
+    )
   }
 
   private addAwardRecord(record: AwardRecord) {
@@ -1812,7 +1874,7 @@ function normalizeTeam(teamValue: unknown, fallback: TeamConfig, index: number):
   const team = teamValue && typeof teamValue === 'object' ? (teamValue as Record<string, unknown>) : {}
   const hasLogoFile = Object.prototype.hasOwnProperty.call(team, 'logoFile')
   const members = Array.isArray(team.members)
-    ? team.members.map((member) => sanitizeText(member, 18)).filter(Boolean).slice(0, 3)
+    ? team.members.map((member) => sanitizeText(member, 80)).filter(Boolean).slice(0, 3)
     : fallback.members
   const logo = validLogos.has(team.logo as LogoKind) ? (team.logo as LogoKind) : fallback.logo
 

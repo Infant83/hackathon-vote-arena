@@ -259,6 +259,7 @@ type EventState = {
     timerMode: TimerMode
     targetTime: string
     minScore: number
+    raffleCheerWeight: number
     cheerNameMode: CheerNameMode
     themeMode: ThemeMode
   }
@@ -353,6 +354,7 @@ type EventCopy = {
   rafflePrizeNameLongestCheer: string
   raffleStartButtonLabel: string
   raffleStopButtonLabel: string
+  awardHistoryNotice: string
 }
 
 type EventCopyImageKey =
@@ -554,6 +556,10 @@ type ParticipantSummary = Participant & {
     total: number
     visible: number
   }
+  awardCounts: {
+    raffle: number
+    quiz: number
+  }
   allocationsList: Array<[string, number]>
   allocationSummary: string
   status: string
@@ -592,6 +598,7 @@ const DEFAULT_MAX_STARS_PER_TEAM = 5
 const MAX_CONFIGURABLE_STARS_PER_TEAM = 10
 const DEFAULT_DURATION_MINUTES = 10
 const DEFAULT_MIN_SCORE = 5
+const DEFAULT_RAFFLE_CHEER_WEIGHT = 0.2
 const KST_OFFSET_MINUTES = 9 * 60
 const DEFAULT_TEAM_PHOTO_RADIUS = 18
 const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
@@ -693,6 +700,7 @@ const copyLabels: Record<keyof EventCopy, string> = {
   rafflePrizeNameLongestCheer: '가장 긴 응원 메시지 참여자 상품 이름',
   raffleStartButtonLabel: '행운권 시작 버튼 문구',
   raffleStopButtonLabel: '행운권 정지 버튼 문구',
+  awardHistoryNotice: '당첨 안내 문구',
 }
 
 const copyHelp: Partial<Record<keyof EventCopy, string>> = {
@@ -731,6 +739,7 @@ const copyHelp: Partial<Record<keyof EventCopy, string>> = {
   rafflePrizeNameLongestCheer: '가장 긴 응원 메시지 추첨 룰에서 보여줄 상품명입니다.',
   raffleStartButtonLabel: '행운권 패널과 송출 화면의 시작 버튼 문구입니다.',
   raffleStopButtonLabel: '행운권 패널과 송출 화면의 정지 버튼 문구입니다.',
+  awardHistoryNotice: '/vote 내 당첨 이력 아래에 표시할 선물 수령 안내입니다.',
 }
 
 const copyGroups: Array<{
@@ -767,6 +776,7 @@ const copyGroups: Array<{
       'raffleHiddenDisqualified',
       'raffleRemovedDisqualified',
       'voteClosedAlert',
+      'awardHistoryNotice',
     ],
   },
   {
@@ -927,6 +937,7 @@ const fallbackCopy: EventCopy = {
   rafflePrizeNameLongestCheer: '',
   raffleStartButtonLabel: '추첨 시작',
   raffleStopButtonLabel: '정지',
+  awardHistoryNotice: '당첨 선물은 행사 종료 후 운영진 확인을 거쳐 현장에서 순차적으로 전달됩니다.',
 }
 
 const fallbackTeams: Team[] = [
@@ -1170,6 +1181,7 @@ const fallbackState: EventState = {
     timerMode: 'duration',
     targetTime: '',
     minScore: DEFAULT_MIN_SCORE,
+    raffleCheerWeight: DEFAULT_RAFFLE_CHEER_WEIGHT,
     cheerNameMode: 'masked',
     themeMode: 'stage',
   },
@@ -2368,6 +2380,12 @@ function VoteView({
 
                     {expanded ? (
                       <div className="inline-cheer">
+                        <div className="inline-cheer-context">
+                          <span>응원 대상</span>
+                          <strong>{team.name}</strong>
+                          <p>{team.title}</p>
+                          <em>{team.members.length ? formatTeamMemberDetails(team.members) : '팀원 미등록'}</em>
+                        </div>
                         <div
                           className="cheer-thread"
                           aria-live="polite"
@@ -2487,11 +2505,11 @@ function ParticipantAwardHistory({ awards, state }: { awards: AwardRecord[]; sta
   if (!awards.length) return null
 
   return (
-    <section className="award-history-panel" aria-label="내 수상 이력">
+    <section className="award-history-panel" aria-label="내 당첨 이력">
       <div className="award-history-heading">
         <Trophy size={17} />
         <div>
-          <strong>내 수상 이력</strong>
+          <strong>내 당첨 이력</strong>
           <span>행운권 당첨과 퀴즈 정답 기록을 확인할 수 있습니다.</span>
         </div>
       </div>
@@ -2502,7 +2520,7 @@ function ParticipantAwardHistory({ awards, state }: { awards: AwardRecord[]; sta
           const prizeInfo = isRaffle && award.rule ? getRafflePrizeInfo(state.copy, award.rule) : null
           const prizeLabel = award.prizeName || prizeInfo?.name || (isRaffle ? getRafflePrizeLabel(award.rule) : '퀴즈 상품')
           const prizeImage = award.prizeImageFile || prizeInfo?.image || ''
-          const title = isRaffle ? `행운권 ${award.rank ? `${award.rank}등 ` : ''}당첨` : `퀴즈 ${award.rank ? `${award.rank}번째 ` : ''}정답`
+          const title = isRaffle ? '행운권 당첨' : `퀴즈 ${award.rank ? `${award.rank}번째 ` : ''}정답`
           const detail = isRaffle ? ruleLabel || '행운권 추첨' : award.question || '퀴즈 정답'
 
           return (
@@ -2526,6 +2544,7 @@ function ParticipantAwardHistory({ awards, state }: { awards: AwardRecord[]; sta
           )
         })}
       </div>
+      {state.copy.awardHistoryNotice ? <p className="award-history-note">{state.copy.awardHistoryNotice}</p> : null}
     </section>
   )
 }
@@ -2778,6 +2797,7 @@ function AdminView({
   const timerMode = getTimerMode(state)
   const targetTime = getTargetTime(state)
   const minScore = getMinScore(state)
+  const raffleCheerWeight = getRaffleCheerWeight(state)
   const cheerNameMode = getCheerNameMode(state)
   const themeMode = getThemeMode(state)
   const [draftTimerMode, setDraftTimerMode] = useState<TimerMode>(timerMode)
@@ -2857,6 +2877,7 @@ function AdminView({
       timerMode: nextTimerMode,
       targetTime: derivedTargetTime,
       minScore: data.get('minScore'),
+      raffleCheerWeight: data.get('raffleCheerWeight'),
       cheerNameMode: data.get('cheerNameMode'),
       themeMode: data.get('themeMode'),
     })
@@ -2870,6 +2891,7 @@ function AdminView({
       timerMode,
       targetTime,
       minScore,
+      raffleCheerWeight,
       cheerNameMode,
       themeMode: nextThemeMode,
     })
@@ -2955,7 +2977,7 @@ function AdminView({
         </div>
         <form
           className="control-grid"
-          key={`${starBudget}:${maxStarsPerTeam}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${cheerNameMode}:${themeMode}`}
+          key={`${starBudget}:${maxStarsPerTeam}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${raffleCheerWeight}:${cheerNameMode}:${themeMode}`}
           onSubmit={(event) => {
             event.preventDefault()
             applySettings(event.currentTarget)
@@ -2994,6 +3016,21 @@ function AdminView({
               />
               <em>점</em>
             </div>
+          </label>
+          <label>
+            <span>응원 메시지 추첨 가중치</span>
+            <div className="inline-input">
+              <input
+                name="raffleCheerWeight"
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                defaultValue={raffleCheerWeight}
+              />
+              <em>x</em>
+            </div>
+            <small className="control-hint">0은 동일 확률, 기본 0.2입니다. 값이 클수록 공개 응원 메시지 개수와 총 글자수가 많은 참여자의 당첨 확률이 완만하게 올라갑니다.</small>
           </label>
           <label>
             <span>타이머 방식</span>
@@ -3848,7 +3885,7 @@ function PublicCheerBoard({
           <div className="selected-team-copy">
             <strong>{selectedTeam.name}</strong>
             <p>{selectedTeam.title}</p>
-            <span>{selectedTeam.members.length ? selectedTeam.members.join(' · ') : '팀원 미등록'}</span>
+            <span>{selectedTeam.members.length ? formatTeamMemberDetails(selectedTeam.members) : '팀원 미등록'}</span>
           </div>
         </button>
       ) : null}
@@ -3997,7 +4034,7 @@ function TeamRow({
         <div>
           <h3>
             {team.name}
-            {showMembersInline && team.members.length ? <span className="team-members-inline">{team.members.join(' · ')}</span> : null}
+            {showMembersInline && team.members.length ? <span className="team-members-inline">{formatTeamMemberNames(team.members)}</span> : null}
           </h3>
           <p>{team.title}</p>
         </div>
@@ -4041,7 +4078,7 @@ function TeamRow({
         {showScore ? <span>환산점수 {normalizedScore}점</span> : null}
         <div className="popover-members">
           <em>팀원</em>
-          <span>{team.members.length ? team.members.join(' · ') : '팀원 미등록'}</span>
+          <span>{team.members.length ? formatTeamMemberDetails(team.members) : '팀원 미등록'}</span>
         </div>
       </div>
     </div>
@@ -4179,6 +4216,31 @@ function ParticipantDetailPanel({
   post: PostEventState
 }) {
   const participants = useMemo(() => getParticipantSummaries(state), [state])
+  const [keyword, setKeyword] = useState('')
+  const [teamFilter, setTeamFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'eligible' | 'raffle' | 'quiz'>('all')
+  const normalizedKeyword = keyword.trim().toLocaleLowerCase()
+  const filteredParticipants = participants.filter((person) => {
+    if (teamFilter !== 'all' && !person.allocationsList.some(([teamId]) => teamId === teamFilter)) return false
+    if (statusFilter === 'active' && person.spent <= 0 && person.cheers.total <= 0) return false
+    if (statusFilter === 'eligible' && person.statusClass !== 'eligible') return false
+    if (statusFilter === 'raffle' && person.awardCounts.raffle <= 0) return false
+    if (statusFilter === 'quiz' && person.awardCounts.quiz <= 0) return false
+    if (!normalizedKeyword) return true
+
+    const searchable = [
+      person.name,
+      person.group,
+      person.department || '',
+      person.id,
+      person.status,
+      person.allocationSummary,
+    ]
+      .join(' ')
+      .toLocaleLowerCase()
+
+    return searchable.includes(normalizedKeyword)
+  })
   const resetParticipant = (person: ParticipantSummary) => {
     if (!window.confirm(`${person.name}님의 투표와 응원 메시지를 초기화할까요? 등록 정보는 유지됩니다.`)) return
     void post('/api/participant/reset', { participantId: person.id })
@@ -4189,9 +4251,41 @@ function ParticipantDetailPanel({
   }
 
   return (
-    <div className="detail-list participant-detail-list">
-      {participants.length ? (
-        participants.map((person) => (
+    <div className="participant-detail-shell">
+      <div className="participant-filter-bar" aria-label="참여자 리스트 필터">
+        <label className="participant-search-field">
+          <Search size={15} />
+          <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="이름, ID, 소속, 팀명 검색" />
+        </label>
+        <label>
+          <span>팀</span>
+          <select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)}>
+            <option value="all">전체 팀</option>
+            {state.teams.map((team) => (
+              <option key={team.id} value={team.id}>
+                {team.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>상태</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
+            <option value="all">전체</option>
+            <option value="active">실참여</option>
+            <option value="eligible">응모 완료</option>
+            <option value="raffle">행운권 당첨자</option>
+            <option value="quiz">퀴즈 정답자</option>
+          </select>
+        </label>
+        <span className="participant-filter-count">
+          {filteredParticipants.length}/{participants.length}명
+        </span>
+      </div>
+
+      <div className="detail-list participant-detail-list">
+      {filteredParticipants.length ? (
+        filteredParticipants.map((person) => (
           <article className={`participant-row detail ${person.statusClass}`} key={person.id}>
             <div className="participant-identity">
               <strong>{person.name}</strong>
@@ -4206,6 +4300,8 @@ function ParticipantDetailPanel({
                 <Megaphone size={13} />
                 {person.cheers.visible}/{person.cheers.total}
               </span>
+              {person.awardCounts.raffle > 0 ? <span>행운권 {person.awardCounts.raffle}</span> : null}
+              {person.awardCounts.quiz > 0 ? <span>퀴즈 {person.awardCounts.quiz}</span> : null}
             </div>
             <p>{person.allocationSummary}</p>
             <div className="participant-allocation-bars">
@@ -4241,8 +4337,9 @@ function ParticipantDetailPanel({
           </article>
         ))
       ) : (
-        <p className="empty-state">아직 등록된 참여자가 없습니다.</p>
+        <p className="empty-state">{participants.length ? '현재 필터에 맞는 참여자가 없습니다.' : '아직 등록된 참여자가 없습니다.'}</p>
       )}
+      </div>
     </div>
   )
 }
@@ -4528,6 +4625,7 @@ function TeamConfigDetail({
   const [draftQuizzes, setDraftQuizzes] = useState(() => createQuizDrafts(state.quizBank))
   const [statusText, setStatusText] = useState('')
   const [savingConfig, setSavingConfig] = useState(false)
+  const teamEditorRefs = useRef<Record<number, HTMLElement | null>>({})
   const saveTarget = getConfigSaveTarget()
 
   const updateCopy = (key: keyof EventCopy, value: string) => {
@@ -4538,10 +4636,31 @@ function TeamConfigDetail({
     updateCopy(key, normalizeLogoSourceValue(value))
   }
 
+  const preserveTeamEditorPosition = (index: number, mutate: () => void) => {
+    const node = teamEditorRefs.current[index]
+    const scroller = node?.closest('.detail-scroll') as HTMLElement | null
+    const beforeTop = node?.getBoundingClientRect().top
+
+    mutate()
+
+    if (!node || beforeTop === undefined) return
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const afterTop = node.getBoundingClientRect().top
+        const delta = afterTop - beforeTop
+        if (Math.abs(delta) < 1) return
+        if (scroller) scroller.scrollTop += delta
+        else window.scrollBy(0, delta)
+      })
+    })
+  }
+
   const updateTeam = (index: number, field: string, value: string) => {
-    setDraftTeams((current) =>
-      current.map((team, teamIndex) => (teamIndex === index ? { ...team, [field]: value } : team)),
-    )
+    preserveTeamEditorPosition(index, () => {
+      setDraftTeams((current) =>
+        current.map((team, teamIndex) => (teamIndex === index ? { ...team, [field]: value } : team)),
+      )
+    })
   }
 
   const updateTeamLogo = (index: number, value: string) => {
@@ -4837,7 +4956,13 @@ function TeamConfigDetail({
           </div>
         </div>
         {draftTeams.map((team, index) => (
-          <article className="team-editor-card" key={`team-editor-${team.sortOrder}-${index}`}>
+          <article
+            className="team-editor-card"
+            key={`team-editor-${team.sortOrder}-${index}`}
+            ref={(node) => {
+              teamEditorRefs.current[index] = node
+            }}
+          >
             <div className="team-editor-head">
               <LogoMark team={teamEditorPreview(team)} />
               <div>
@@ -4858,7 +4983,11 @@ function TeamConfigDetail({
             <div className="team-editor-grid">
               <label>
                 <span>내부 ID</span>
-                <input value={team.id} readOnly title="투표/응원 기록 연결에 쓰이는 내부 ID입니다. 행사 중에는 수정하지 않습니다." />
+                <input
+                  value={team.id}
+                  onChange={(event) => updateTeam(index, 'id', event.target.value)}
+                  title="투표/응원 기록 연결에 쓰이는 내부 ID입니다. 행사 시작 전 수정만 권장합니다."
+                />
               </label>
               <label>
                 <span>팀 편집 키</span>
@@ -5207,7 +5336,9 @@ function LogoSourceField({
               <span>{team.title || '프로젝트명 미정'}</span>
             </div>
           </div>
-          <TeamPhotoFrameEditor team={preview} onChange={onTuningChange} onUpload={onUpload} />
+          <div className="photo-frame-editor-stage">
+            <TeamPhotoFrameEditor team={preview} onChange={onTuningChange} onUpload={onUpload} />
+          </div>
           <TeamWallPhotoPreview team={preview} title={team.title} membersText={team.membersText} />
         </div>
         <p>
@@ -5278,7 +5409,7 @@ function TeamWallPhotoPreview({ team, title, membersText }: { team: TeamVisual; 
         <div className="selected-team-copy">
           <strong>{team.name}</strong>
           <p>{title || '프로젝트명 미정'}</p>
-          {members.length ? <span>{members.join(' · ')}</span> : null}
+          {members.length ? <span>{formatTeamMemberDetails(members)}</span> : null}
         </div>
       </div>
     </div>
@@ -6267,7 +6398,6 @@ function RaffleDetailPanel({
   onStop: () => void
   publicMode?: boolean
 }) {
-  const [showPrizeImage, setShowPrizeImage] = useState(false)
   const previewCandidates = getRaffleCandidatesForRule(state, raffleRule)
   const reelNames = previewCandidates.slice(0, 12)
   const rollingNames = reelNames.length
@@ -6277,15 +6407,14 @@ function RaffleDetailPanel({
   const hasWinners = winners.length > 0
   const visualBallCount = rollingNames.length > 1 ? clamp(previewCandidates.length, 14, publicMode ? 30 : 22) : 14
   const candidateBalls = Array.from({ length: visualBallCount }, (_, index) => rollingNames[index % rollingNames.length])
-  const prizeInfo = getRafflePrizeInfo(state.copy, raffleRule)
-  const prizeImage = prizeInfo.image
+  const displayRaffleRule = state.lastRaffle && !isDrawing ? state.lastRaffle.rule : raffleRule
+  const prizeInfo = getRafflePrizeInfo(state.copy, displayRaffleRule)
+  const prizeImage = prizeInfo.image || defaultBrandLogoFile
   const ruleOptions = raffleRuleOptions.map((option, index) => ({
     ...option,
     displayLabel: publicMode ? getRaffleRulePublicLabel(option.value, index) : option.label,
   }))
   const revealRule = isDrawing || hasWinners
-  const listedCandidates = previewCandidates.slice(0, publicMode ? 7 : 12)
-  const hiddenCandidateCount = Math.max(0, previewCandidates.length - listedCandidates.length)
 
   return (
     <div className={`raffle-detail ${publicMode ? 'public-mode' : ''}`}>
@@ -6298,29 +6427,6 @@ function RaffleDetailPanel({
           aria-hidden="true"
           loading="lazy"
         />
-        {prizeImage || prizeInfo.name ? (
-          <>
-            <button
-              type="button"
-              className="prize-image-trigger"
-              onClick={() => setShowPrizeImage(true)}
-              aria-label={`${prizeInfo.name} 상품 보기`}
-            >
-              <Gift size={22} />
-            </button>
-            {showPrizeImage ? (
-              <div className="prize-image-overlay" role="dialog" aria-modal="true" aria-label={`${prizeInfo.name} 상품`}>
-                <div>
-                  <button type="button" onClick={() => setShowPrizeImage(false)} aria-label="상품 이미지 닫기">
-                    <X size={18} />
-                  </button>
-                  <strong>{prizeInfo.name}</strong>
-                  {prizeImage ? <img src={prizeImage} alt={prizeInfo.name} /> : <p>등록된 상품 이미지는 없습니다.</p>}
-                </div>
-              </div>
-            ) : null}
-          </>
-        ) : null}
         <div className="lotto-machine" aria-hidden="true">
           <span className="lotto-stand left" />
           <span className="lotto-stand right" />
@@ -6364,44 +6470,63 @@ function RaffleDetailPanel({
           <div className="raffle-winner-showcase">
             {winners.map((winner, index) => {
               const details = getRaffleWinnerDetails(state, winner)
+              const visibleSupports = details.supports.slice(0, 3)
+              const hiddenSupportCount = Math.max(0, details.supports.length - visibleSupports.length)
+              const visibleCheers = details.cheers.slice(0, 1)
+              const hiddenCheerCount = Math.max(0, details.cheers.length - visibleCheers.length)
+              const styleVariant = Math.floor(hashToUnit(`${winner.id}:${state.lastRaffle?.createdAt ?? 0}`) * 3)
+              const winnerNameCharacters = Array.from(winner.name)
               return (
-                <article key={winner.id} style={{ '--i': index } as CSSProperties}>
-                  <div>
-                    <strong>{winner.name}</strong>
+                <article
+                  className={`winner-spotlight-card variant-${styleVariant}`}
+                  key={winner.id}
+                  style={{ '--i': index } as CSSProperties}
+                >
+                  <div className="winner-crown" aria-hidden="true">
+                    <Trophy size={26} />
+                  </div>
+                  <div className="winner-hero-copy">
+                    <span>Lucky Draw Winner</span>
+                    <strong className="winner-name-slam" aria-label={winner.name}>
+                      {winnerNameCharacters.map((letter, letterIndex) => (
+                        <span
+                          key={`${winner.id}-letter-${letterIndex}`}
+                          style={{ '--char-index': letterIndex } as CSSProperties}
+                          aria-hidden="true"
+                        >
+                          {letter}
+                        </span>
+                      ))}
+                    </strong>
                     <small>
-                      {[winner.group ? `ID ${winner.group}` : '', winner.department ? `소속 ${winner.department}` : '', winner.cheered ? '응원 메시지 참여' : '투표 참여']
+                      {[winner.group ? `ID ${winner.group}` : '', winner.department ? winner.department : '', winner.cheered ? '응원 메시지 참여' : '투표 참여']
                         .filter(Boolean)
                         .join(' · ')}
                     </small>
                     <em className="winner-prize-name">{prizeInfo.name}</em>
                   </div>
-                  <div className="winner-detail-scroll">
-                    <div className="winner-support-list">
-                      <b>응원한 팀</b>
-                      {details.supports.length ? (
-                        details.supports.map((item) => (
+                  <div className="winner-story">
+                    {visibleSupports.length ? (
+                      <div className="winner-support-ribbon" aria-label="응원한 팀">
+                        {visibleSupports.map((item) => (
                           <em key={item.teamId}>
-                            {item.rank ? `${item.rank}위 ` : ''}{item.teamName} · {item.stars}★
+                            {item.teamName} <b>{item.stars}★</b>
                           </em>
-                        ))
-                      ) : (
-                        <em>별 배분 기록이 없습니다.</em>
-                      )}
-                    </div>
-                    <div className="winner-cheer-log">
-                      <b>응원 메시지</b>
-                      {details.cheers.length ? (
-                        details.cheers.map((message, messageIndex) => (
+                        ))}
+                        {hiddenSupportCount > 0 ? <em>+{hiddenSupportCount}</em> : null}
+                      </div>
+                    ) : null}
+                    {visibleCheers.length ? (
+                      <div className="winner-message-quotes" aria-label="응원 메시지">
+                        {visibleCheers.map((message, messageIndex) => (
                           <p key={`${message.teamId}-${message.createdAt}-${messageIndex}`}>
                             <span>{message.teamName}</span>
-                            {' '}
-                            {message.text}
+                            <q>{message.text}</q>
                           </p>
-                        ))
-                      ) : (
-                        <p>표시할 공개 응원 메시지가 없습니다.</p>
-                      )}
-                    </div>
+                        ))}
+                        {hiddenCheerCount > 0 ? <small>외 {hiddenCheerCount}개 메시지</small> : null}
+                      </div>
+                    ) : null}
                   </div>
                 </article>
               )
@@ -6410,20 +6535,6 @@ function RaffleDetailPanel({
         ) : (
           <p>{isDrawing ? '후보 이름을 섞는 중입니다.' : '룰과 인원을 정한 뒤 추첨을 시작하세요.'}</p>
         )}
-
-        {hasWinners ? (
-          <button
-            type="button"
-            className="gift-agent"
-            onClick={() => setShowPrizeImage(true)}
-            aria-label={`${prizeInfo.name} 상품 정보 보기`}
-          >
-            <span className="agent-gift">
-              <Gift size={34} />
-            </span>
-            <strong>{prizeInfo.name}</strong>
-          </button>
-        ) : null}
       </section>
 
       <aside className="raffle-detail-desk">
@@ -6452,7 +6563,15 @@ function RaffleDetailPanel({
 
         <div className={`raffle-rule-reveal ${revealRule ? 'is-revealed' : ''}`}>
           <span>{revealRule ? '이번 추첨 조건' : '추첨 조건'}</span>
-          <strong>{revealRule ? getRaffleRuleLabel(raffleRule) : publicMode ? '시작하면 공개됩니다' : getRaffleRuleLabel(raffleRule)}</strong>
+          <strong>{revealRule ? getRaffleRuleLabel(displayRaffleRule) : publicMode ? '시작하면 공개됩니다' : getRaffleRuleLabel(raffleRule)}</strong>
+        </div>
+
+        <div className="raffle-prize-summary">
+          <div className="raffle-prize-media">
+            <img src={prizeImage} alt={prizeInfo.name} />
+          </div>
+          <span>상품</span>
+          <strong>{prizeInfo.name}</strong>
         </div>
 
         <div className={`draw-stage compact ${isDrawing ? 'drawing' : ''}`}>
@@ -6461,26 +6580,6 @@ function RaffleDetailPanel({
             <strong>{previewCandidates.length}명</strong>
           </div>
         </div>
-
-        <div className="candidate-strip">
-          <strong>후보 {previewCandidates.length}명</strong>
-          <div>
-            {previewCandidates.length ? (
-              listedCandidates.map((person) => (
-                <span key={person.id}>{person.group ? `${person.name} · ${person.group}` : person.name}</span>
-              ))
-            ) : (
-              <span>후보가 없습니다</span>
-            )}
-            {hiddenCandidateCount > 0 ? <span className="candidate-more">... 외 {hiddenCandidateCount}명</span> : null}
-          </div>
-        </div>
-
-        <button type="button" className="raffle-prize-summary" onClick={() => setShowPrizeImage(true)}>
-          {prizeImage ? <img src={prizeImage} alt="" /> : <Gift size={28} />}
-          <span>상품</span>
-          <strong>{prizeInfo.name}</strong>
-        </button>
       </aside>
     </div>
   )
@@ -6601,6 +6700,12 @@ function CelebrationConfetti({ active, seedKey }: { active: boolean; seedKey: nu
 }
 
 function getRaffleCandidatesForRule(state: EventState, rule: RaffleRule) {
+  const raffleAwardedParticipantIds = new Set(
+    state.awardHistory
+      .filter((record) => record.kind === 'raffle')
+      .map((record) => record.participantId)
+      .filter(Boolean),
+  )
   const leaderId = state.teams[0]?.id
   const topThreeIds = state.teams.slice(0, 3).map((team) => team.id)
   const rank456Ids = state.teams.slice(3, 6).map((team) => team.id)
@@ -6620,6 +6725,7 @@ function getRaffleCandidatesForRule(state: EventState, rule: RaffleRule) {
   const longestCheerLength = rule === 'longestCheer' ? Math.max(0, ...longestCheerByParticipant.values()) : 0
 
   return state.participants.filter((person) => {
+    if (raffleAwardedParticipantIds.has(person.id)) return false
     const spent = sumStars(person.allocations)
     if (spent <= 0) return false
     if (!person.cheered) return false
@@ -6771,6 +6877,7 @@ function getParticipantSummaries(state: EventState): ParticipantSummary[] {
     .map((person) => {
       const spent = sumStars(person.allocations)
       const cheers = cheerCounts.get(person.id) ?? { total: 0, visible: 0 }
+      const awards = buildParticipantAwardHistory(state, person.id)
       const allocationsList = Object.entries(person.allocations)
         .filter(([, value]) => value > 0)
         .sort(([, a], [, b]) => b - a)
@@ -6787,6 +6894,10 @@ function getParticipantSummaries(state: EventState): ParticipantSummary[] {
         ...person,
         spent,
         cheers,
+        awardCounts: {
+          raffle: awards.filter((award) => award.kind === 'raffle').length,
+          quiz: awards.filter((award) => award.kind === 'quiz').length,
+        },
         allocationsList,
         allocationSummary,
         status,
@@ -7423,10 +7534,11 @@ function getConfigOrder(team: Team) {
 }
 
 function teamDraftToConfig(team: TeamConfigDraft, index: number) {
+  const id = sanitizeClientSlug(team.id) || `team-${index + 1}`
   return {
-    id: team.id,
+    id,
     code: team.code,
-    editKey: sanitizeClientSlug(team.editKey) || getTeamEditKey(team.id, team.code),
+    editKey: sanitizeClientSlug(team.editKey) || getTeamEditKey(id, team.code),
     name: team.name,
     title: team.title,
     members: team.membersText
@@ -8178,6 +8290,10 @@ function getMinScore(state: EventState) {
   return clamp(Number(state.settings.minScore ?? DEFAULT_MIN_SCORE), 0, 9.9)
 }
 
+function getRaffleCheerWeight(state: EventState) {
+  return Number(clamp(Number(state.settings.raffleCheerWeight ?? DEFAULT_RAFFLE_CHEER_WEIGHT), 0, 1).toFixed(2))
+}
+
 function getCheerNameMode(state: EventState): CheerNameMode {
   return state.settings.cheerNameMode === 'real' ? 'real' : 'masked'
 }
@@ -8354,6 +8470,34 @@ function getEditableConfigSignature(state: EventState) {
     })),
     quizzes: state.quizBank,
   })
+}
+
+function parseTeamMemberLabel(member: string) {
+  const text = member.trim()
+  const match = text.match(/^(.+?)\s*[（(]\s*(.+?)\s*[）)]\s*$/)
+  if (!match) return { name: text, affiliation: '' }
+
+  return {
+    name: match[1].trim(),
+    affiliation: match[2].trim(),
+  }
+}
+
+function formatTeamMemberNames(members: string[]) {
+  return members
+    .map((member) => parseTeamMemberLabel(member).name)
+    .filter(Boolean)
+    .join('·')
+}
+
+function formatTeamMemberDetails(members: string[]) {
+  return members
+    .map((member) => {
+      const parsed = parseTeamMemberLabel(member)
+      return parsed.affiliation ? `${parsed.name}(${parsed.affiliation})` : parsed.name
+    })
+    .filter(Boolean)
+    .join('·')
 }
 
 function formatCheerAuthor(name: string, mode: CheerNameMode) {
