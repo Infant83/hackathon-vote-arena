@@ -14,6 +14,9 @@ const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
 const quizIntroMs = 2400
 const quizCountdownMs = 3600
+const quizSettlementMs = 3000
+const quizClientSubmitSkewLimitMs = quizSettlementMs
+const maxStoredQuizAnswers = 1000
 const imageShapes = new Set(['circle', 'rounded', 'square', 'wide'])
 const imageFrames = new Set(['soft', 'line', 'glow', 'clean'])
 const imageFits = new Set(['cover', 'contain'])
@@ -168,7 +171,7 @@ type AwardRecord = {
   createdAt: number
 }
 
-type QuizMode = 'idle' | 'standby' | 'countdown' | 'open' | 'closed'
+type QuizMode = 'idle' | 'standby' | 'countdown' | 'open' | 'settling' | 'closed'
 
 type QuizAnswer = {
   id: number
@@ -180,6 +183,10 @@ type QuizAnswer = {
   text: string
   correct: boolean
   rank?: number
+  clientSubmittedAt?: number
+  clientServerOffsetMs?: number
+  estimatedSubmittedAt?: number
+  serverReceivedAt?: number
   createdAt: number
 }
 
@@ -195,6 +202,8 @@ type QuizState = {
   winners: QuizAnswer[]
   introEndsAt: number
   opensAt: number
+  settlementStartedAt: number
+  settlementDeadlineAt: number
   createdAt: number
   updatedAt: number
 }
@@ -260,6 +269,8 @@ const emptyQuizState: QuizState = {
   winners: [],
   introEndsAt: 0,
   opensAt: 0,
+  settlementStartedAt: 0,
+  settlementDeadlineAt: 0,
   createdAt: 0,
   updatedAt: 0,
 }
@@ -572,6 +583,13 @@ export class ArenaRoom {
     return this.handleMutation(request, url.pathname, body)
   }
 
+  async alarm() {
+    await this.loaded
+    if (!this.finalizeQuizSettlement(Date.now())) return
+
+    await this.commit({ audience: true })
+  }
+
   private async load() {
     const snapshot = await this.state.storage.get<Snapshot>(snapshotKey)
 
@@ -618,6 +636,9 @@ export class ArenaRoom {
       minScore: clamp(Number(snapshot.settings?.minScore ?? defaultMinScore), 0, 9.9),
       cheerNameMode: normalizeCheerNameMode(snapshot.settings?.cheerNameMode),
       themeMode: normalizeThemeMode(snapshot.settings?.themeMode),
+    }
+    if (this.quiz.mode === 'settling') {
+      await this.scheduleQuizSettlementAlarm()
     }
   }
 
@@ -799,7 +820,7 @@ export class ArenaRoom {
 
       const deviceId = this.getRequestDeviceId(request, body)
       const person = this.upsertParticipant(deviceId, body.name, body.group, body.department)
-      const answer = this.submitQuizAnswer(person, body.text)
+      const answer = this.submitQuizAnswer(person, body.text, body)
 
       if (!answer) {
         return json(
@@ -807,7 +828,7 @@ export class ArenaRoom {
             ...this.getState(),
             quizSubmission: {
               accepted: false,
-              reason: this.getQuizAnswerRejectionReason(person, body.text),
+              reason: this.getQuizAnswerRejectionReason(person, body.text, body),
             },
           },
           200,
@@ -815,6 +836,7 @@ export class ArenaRoom {
         )
       }
 
+      await this.scheduleQuizSettlementAlarm()
       await this.commit({ audience: true })
       return json(
         {
@@ -940,26 +962,46 @@ export class ArenaRoom {
       this.closed = true
     }
 
+    const cheerCountsByParticipant = new Map<string, { visible: number; hidden: number; total: number }>()
+    for (const message of this.cheers) {
+      if (!message.participantId) continue
+
+      const current = cheerCountsByParticipant.get(message.participantId) || { visible: 0, hidden: 0, total: 0 }
+      if (message.hidden) current.hidden += 1
+      else current.visible += 1
+      current.total += 1
+      cheerCountsByParticipant.set(message.participantId, current)
+    }
+
     const participantList = [...this.participants.values()].map((person) => {
-      const messages = this.cheers.filter((message) => message.participantId === person.id)
-      const visibleCheerCount = messages.filter((message) => !message.hidden).length
-      const hiddenCheerCount = messages.length - visibleCheerCount
+      const counts = cheerCountsByParticipant.get(person.id) || { visible: 0, hidden: 0, total: 0 }
 
       return {
         ...person,
-        cheered: visibleCheerCount > 0,
-        cheerSubmitted: Boolean(person.cheerSubmitted || messages.length),
-        visibleCheerCount,
-        hiddenCheerCount,
+        cheered: counts.visible > 0,
+        cheerSubmitted: Boolean(person.cheerSubmitted || counts.total),
+        visibleCheerCount: counts.visible,
+        hiddenCheerCount: counts.hidden,
       }
     })
+    const dynamicStarsByTeam = new Map<string, number>()
+    const dynamicVotersByTeam = new Map<string, number>()
+    for (const person of participantList) {
+      for (const [teamId, stars] of Object.entries(person.allocations || {})) {
+        const value = Number(stars) || 0
+        if (value <= 0) continue
+
+        dynamicStarsByTeam.set(teamId, (dynamicStarsByTeam.get(teamId) || 0) + value)
+        dynamicVotersByTeam.set(teamId, (dynamicVotersByTeam.get(teamId) || 0) + 1)
+      }
+    }
 
     const teamStats = this.teams
       .map((team) => {
         const baselineStars = this.testMode ? team.baseStars : 0
         const baselineVoters = this.testMode ? team.baseVoters : 0
-        const dynamicStars = participantList.reduce((sum, person) => sum + (person.allocations[team.id] || 0), 0)
-        const dynamicVoters = participantList.filter((person) => (person.allocations[team.id] || 0) > 0).length
+        const dynamicStars = dynamicStarsByTeam.get(team.id) || 0
+        const dynamicVoters = dynamicVotersByTeam.get(team.id) || 0
 
         return {
           ...team,
@@ -1105,6 +1147,7 @@ export class ArenaRoom {
   }
 
   private async commit(options: { audience?: boolean } = {}) {
+    this.advanceQuizPhase()
     await this.persist()
     this.broadcast(options)
   }
@@ -1115,15 +1158,16 @@ export class ArenaRoom {
   }
 
   private broadcast({ audience = false }: { audience?: boolean } = {}) {
+    const payload = `event: state\ndata: ${JSON.stringify(this.getState())}\n\n`
     for (const [client, role] of this.clients.entries()) {
       if (role === 'vote' && !audience) continue
-      this.sendState(client)
+      this.sendState(client, payload)
     }
   }
 
-  private sendState(controller: ReadableStreamDefaultController<Uint8Array>) {
+  private sendState(controller: ReadableStreamDefaultController<Uint8Array>, payload?: string) {
     try {
-      controller.enqueue(encoder.encode(`event: state\ndata: ${JSON.stringify(this.getState())}\n\n`))
+      controller.enqueue(encoder.encode(payload || `event: state\ndata: ${JSON.stringify(this.getState())}\n\n`))
     } catch {
       this.clients.delete(controller)
     }
@@ -1370,6 +1414,59 @@ export class ArenaRoom {
         updatedAt: now,
       }
     }
+    if (this.quiz.mode === 'settling' && this.quiz.settlementDeadlineAt > 0 && now >= this.quiz.settlementDeadlineAt) {
+      this.finalizeQuizSettlement(now)
+    }
+  }
+
+  private async scheduleQuizSettlementAlarm() {
+    if (this.quiz.mode !== 'settling' || !this.quiz.settlementDeadlineAt) {
+      await this.state.storage.deleteAlarm()
+      return
+    }
+
+    await this.state.storage.setAlarm(this.quiz.settlementDeadlineAt)
+  }
+
+  private finalizeQuizSettlement(now = Date.now()) {
+    if (this.quiz.mode !== 'settling') return false
+
+    const rankedWinners = this.quiz.answers
+      .filter((answer) => answer.correct)
+      .sort(compareQuizAnswerPriority)
+      .slice(0, this.quiz.winnerCount)
+      .map((answer, index) => ({ ...answer, rank: index + 1 }))
+    const winnerRankById = new Map(rankedWinners.map((answer) => [answer.id, answer.rank]))
+
+    this.quiz = {
+      ...this.quiz,
+      mode: 'closed',
+      answers: this.quiz.answers.map((answer) => ({
+        ...answer,
+        rank: winnerRankById.get(answer.id),
+      })),
+      winners: rankedWinners,
+      updatedAt: now,
+    }
+
+    for (const winner of rankedWinners) {
+      this.addAwardRecord({
+        id: `quiz-${winner.quizId}-${winner.id}-${winner.participantId}`,
+        participantId: winner.participantId,
+        participantName: winner.author,
+        participantGroup: winner.group,
+        participantDepartment: winner.department || '',
+        kind: 'quiz',
+        rank: winner.rank,
+        quizId: winner.quizId,
+        question: this.quiz.question,
+        prizeImageFile: this.quiz.prizeImageFile,
+        prizeName: '퀴즈 상품',
+        createdAt: this.quiz.updatedAt,
+      })
+    }
+
+    return true
   }
 
   private prepareQuiz() {
@@ -1428,6 +1525,8 @@ export class ArenaRoom {
       winners: [],
       introEndsAt: now + quizIntroMs,
       opensAt: now + quizIntroMs + quizCountdownMs,
+      settlementStartedAt: 0,
+      settlementDeadlineAt: 0,
       createdAt: now,
       updatedAt: now,
     }
@@ -1446,16 +1545,17 @@ export class ArenaRoom {
     this.resetQuizTo('idle')
   }
 
-  private submitQuizAnswer(person: Participant | null, textValue: unknown) {
+  private submitQuizAnswer(person: Participant | null, textValue: unknown, body: RequestBody = {}) {
     const text = sanitizeText(textValue, quizAnswerMaxLength)
-    this.advanceQuizPhase()
-    if (!person || this.quiz.mode !== 'open' || !this.quiz.id || !text) return null
+    const serverReceivedAt = Date.now()
+    this.advanceQuizPhase(serverReceivedAt)
+    if (!person || (this.quiz.mode !== 'open' && this.quiz.mode !== 'settling') || !this.quiz.id || !text) return null
+    if (Number(body.quizId) && Number(body.quizId) !== this.quiz.id) return null
     if (this.quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) return null
 
     const normalized = normalizeQuizAnswer(text)
-    const alreadyWon = this.quiz.winners.some((winner) => winner.participantId === person.id)
     const correct = this.quizAnswerKeys.includes(normalized)
-    const rank = correct && !alreadyWon && this.quiz.winners.length < this.quiz.winnerCount ? this.quiz.winners.length + 1 : undefined
+    const estimatedSubmittedAt = this.estimateQuizSubmittedAt(body, serverReceivedAt)
     const answer: QuizAnswer = {
       id: this.quizAnswerId++,
       quizId: this.quiz.id,
@@ -1465,31 +1565,23 @@ export class ArenaRoom {
       department: person.department || '',
       text,
       correct,
-      rank,
-      createdAt: Date.now(),
+      rank: undefined,
+      clientSubmittedAt: Number(body.clientSubmittedAt) || 0,
+      clientServerOffsetMs: Number(body.clientServerOffsetMs) || 0,
+      estimatedSubmittedAt,
+      serverReceivedAt,
+      createdAt: serverReceivedAt,
     }
 
     this.quiz.answers.unshift(answer)
-    this.quiz.answers.splice(80)
+    this.quiz.answers.splice(maxStoredQuizAnswers)
 
-    if (rank) {
-      this.quiz.winners.push(answer)
-      this.addAwardRecord({
-        id: `quiz-${answer.quizId}-${answer.id}-${answer.participantId}`,
-        participantId: answer.participantId,
-        participantName: answer.author,
-        participantGroup: answer.group,
-        participantDepartment: answer.department || '',
-        kind: 'quiz',
-        rank,
-        quizId: answer.quizId,
-        question: this.quiz.question,
-        prizeImageFile: this.quiz.prizeImageFile,
-        prizeName: '퀴즈 상품',
-        createdAt: answer.createdAt,
-      })
-      if (this.quiz.winners.length >= this.quiz.winnerCount) {
-        this.quiz = { ...this.quiz, mode: 'closed' }
+    if (correct && this.quiz.mode === 'open') {
+      this.quiz = {
+        ...this.quiz,
+        mode: 'settling',
+        settlementStartedAt: serverReceivedAt,
+        settlementDeadlineAt: serverReceivedAt + quizSettlementMs,
       }
     }
 
@@ -1501,7 +1593,18 @@ export class ArenaRoom {
     return answer
   }
 
-  private getQuizAnswerRejectionReason(person: Participant | null, textValue: unknown) {
+  private estimateQuizSubmittedAt(body: RequestBody, serverReceivedAt: number) {
+    const clientSubmittedAt = Number(body.clientSubmittedAt)
+    const clientServerOffsetMs = Number(body.clientServerOffsetMs)
+    const rawEstimate =
+      Number.isFinite(clientSubmittedAt) && clientSubmittedAt > 0 && Number.isFinite(clientServerOffsetMs)
+        ? clientSubmittedAt + clientServerOffsetMs
+        : serverReceivedAt
+    const minSubmittedAt = Math.max(this.quiz.opensAt || this.quiz.createdAt || serverReceivedAt, serverReceivedAt - quizClientSubmitSkewLimitMs)
+    return clamp(rawEstimate, minSubmittedAt, serverReceivedAt)
+  }
+
+  private getQuizAnswerRejectionReason(person: Participant | null, textValue: unknown, body: RequestBody = {}) {
     const text = sanitizeText(textValue, quizAnswerMaxLength)
     this.advanceQuizPhase()
 
@@ -1509,7 +1612,8 @@ export class ArenaRoom {
     if (!text) return '답변을 입력해주세요.'
     if (!this.quiz.id || this.quiz.mode === 'idle' || this.quiz.mode === 'standby') return '퀴즈가 아직 출제되지 않았습니다.'
     if (this.quiz.mode === 'countdown') return '문제가 공개되면 답변을 제출해주세요.'
-    if (this.quiz.mode !== 'open') return '정답자 선정이 마감되었습니다.'
+    if (Number(body.quizId) && Number(body.quizId) !== this.quiz.id) return '이미 다른 문제가 진행 중입니다.'
+    if (this.quiz.mode !== 'open' && this.quiz.mode !== 'settling') return '정답자 선정이 마감되었습니다.'
     if (this.quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) {
       return '이 문제는 최대 5번까지만 제출할 수 있습니다.'
     }
@@ -2182,7 +2286,11 @@ function calculateClosesAt(settings: Settings, now = Date.now()) {
 function normalizeQuizState(value: unknown): QuizState {
   const source = normalizeObject(value)
   const mode: QuizMode =
-    source.mode === 'standby' || source.mode === 'countdown' || source.mode === 'open' || source.mode === 'closed'
+    source.mode === 'standby' ||
+    source.mode === 'countdown' ||
+    source.mode === 'open' ||
+    source.mode === 'settling' ||
+    source.mode === 'closed'
       ? source.mode
       : 'idle'
   const winnerCount = clamp(Math.floor(Number(source.winnerCount) || 2), 1, 10)
@@ -2197,10 +2305,12 @@ function normalizeQuizState(value: unknown): QuizState {
     question: sanitizeText(source.question, quizQuestionMaxLength),
     prizeImageFile: sanitizeLogoPath(String(source.prizeImageFile || '')),
     winnerCount,
-    answers: answers.slice(0, 80),
+    answers: answers.slice(0, maxStoredQuizAnswers),
     winners: winners.slice(0, winnerCount),
     introEndsAt: Math.max(0, Number(source.introEndsAt) || 0),
     opensAt: Math.max(0, Number(source.opensAt) || 0),
+    settlementStartedAt: Math.max(0, Number(source.settlementStartedAt) || 0),
+    settlementDeadlineAt: Math.max(0, Number(source.settlementDeadlineAt) || 0),
     createdAt: Math.max(0, Number(source.createdAt) || 0),
     updatedAt: Math.max(0, Number(source.updatedAt) || 0),
   }
@@ -2227,8 +2337,21 @@ function normalizeQuizAnswerRecord(value: unknown): QuizAnswer | null {
     text,
     correct: Boolean(source.correct),
     rank: rankValue > 0 ? rankValue : undefined,
+    clientSubmittedAt: Math.max(0, Number(source.clientSubmittedAt) || 0),
+    clientServerOffsetMs: Number(source.clientServerOffsetMs) || 0,
+    estimatedSubmittedAt: Math.max(0, Number(source.estimatedSubmittedAt) || 0),
+    serverReceivedAt: Math.max(0, Number(source.serverReceivedAt) || 0),
     createdAt: Math.max(0, Number(source.createdAt) || 0),
   }
+}
+
+function compareQuizAnswerPriority(left: QuizAnswer, right: QuizAnswer) {
+  return (
+    (left.estimatedSubmittedAt || left.serverReceivedAt || left.createdAt) -
+      (right.estimatedSubmittedAt || right.serverReceivedAt || right.createdAt) ||
+    (left.serverReceivedAt || left.createdAt) - (right.serverReceivedAt || right.createdAt) ||
+    left.id - right.id
+  )
 }
 
 function normalizeQuizAnswerKeys(value: unknown) {

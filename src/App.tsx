@@ -175,7 +175,7 @@ type LastRaffle = {
   createdAt: number
 }
 
-type QuizMode = 'idle' | 'standby' | 'countdown' | 'open' | 'closed'
+type QuizMode = 'idle' | 'standby' | 'countdown' | 'open' | 'settling' | 'closed'
 
 type QuizAnswer = {
   id: number
@@ -187,6 +187,10 @@ type QuizAnswer = {
   text: string
   correct: boolean
   rank?: number
+  clientSubmittedAt?: number
+  clientServerOffsetMs?: number
+  estimatedSubmittedAt?: number
+  serverReceivedAt?: number
   createdAt: number
 }
 
@@ -202,6 +206,8 @@ type QuizState = {
   winners: QuizAnswer[]
   introEndsAt: number
   opensAt: number
+  settlementStartedAt: number
+  settlementDeadlineAt: number
   createdAt: number
   updatedAt: number
 }
@@ -1143,6 +1149,8 @@ const fallbackState: EventState = {
     winners: [],
     introEndsAt: 0,
     opensAt: 0,
+    settlementStartedAt: 0,
+    settlementDeadlineAt: 0,
     createdAt: 0,
     updatedAt: 0,
   },
@@ -1792,7 +1800,7 @@ function BrandLogoFrameEditor({
   )
 }
 
-type QuizDisplayPhase = 'idle' | 'standby' | 'intro' | 'countdown' | 'open' | 'closed'
+type QuizDisplayPhase = 'idle' | 'standby' | 'intro' | 'countdown' | 'open' | 'settling' | 'closed'
 
 function useQuizClock(quiz: QuizState, serverTime?: number, receivedAt?: number) {
   const serverOffset =
@@ -1800,7 +1808,7 @@ function useQuizClock(quiz: QuizState, serverTime?: number, receivedAt?: number)
   const [now, setNow] = useState(() => Date.now() + serverOffset)
 
   useEffect(() => {
-    if (quiz.mode !== 'countdown' && quiz.mode !== 'open') {
+    if (quiz.mode !== 'countdown' && quiz.mode !== 'open' && quiz.mode !== 'settling') {
       return
     }
 
@@ -1827,9 +1835,13 @@ function getQuizCountdownValue(quiz: QuizState, now: number) {
   return clamp(Math.ceil(Math.max(0, quiz.opensAt - now) / 1000), 1, 3)
 }
 
+function getQuizSettlementValue(quiz: QuizState, now: number) {
+  return clamp(Math.ceil(Math.max(0, quiz.settlementDeadlineAt - now) / 1000), 1, 3)
+}
+
 function isQuizParticipationActive(quiz: QuizState, now = Date.now()) {
   const phase = getQuizDisplayPhase(quiz, now)
-  return phase === 'standby' || phase === 'intro' || phase === 'countdown' || phase === 'open' || phase === 'closed'
+  return phase === 'standby' || phase === 'intro' || phase === 'countdown' || phase === 'open' || phase === 'settling' || phase === 'closed'
 }
 
 function VoteView({
@@ -1892,6 +1904,8 @@ function VoteView({
   const currentParticipantId = participant?.id ?? participantId
   const participantMessages = state.cheers.filter((message) => message.participantId === currentParticipantId)
   const quizNow = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
+  const quizServerOffset =
+    typeof state.serverTime === 'number' && typeof state.receivedAt === 'number' ? state.serverTime - state.receivedAt : 0
   const quizPhase = getQuizDisplayPhase(state.quiz, quizNow)
   const quizActive = isQuizParticipationActive(state.quiz, quizNow)
   const quizAnswerText = quizAnswerDraft.quizId === state.quiz.id ? quizAnswerDraft.text : ''
@@ -2084,6 +2098,9 @@ function VoteView({
       group: normalizeLetsIdDisplay(group),
       department: departmentDisplay,
       text,
+      quizId: state.quiz.id,
+      clientSubmittedAt: Date.now(),
+      clientServerOffsetMs: quizServerOffset,
     })
 
     if (!response) return
@@ -2103,7 +2120,11 @@ function VoteView({
     setQuizAnswerDraft({ quizId: state.quiz.id, text: '' })
     setQuizFeedbackDraft({
       quizId: state.quiz.id,
-      text: (submission?.correct ?? submittedAnswer?.correct) ? '정답 후보로 접수되었습니다.' : '정답이 아닙니다.',
+      text: (submission?.correct ?? submittedAnswer?.correct)
+        ? response.quiz.mode === 'settling'
+          ? '정답 후보입니다. 최종 정답 확인 중...'
+          : '정답 후보로 접수되었습니다.'
+        : '정답이 아닙니다.',
     })
   }
 
@@ -2601,15 +2622,21 @@ function QuizParticipationView({
   const now = useQuizClock(quiz, serverTime, receivedAt)
   const phase = getQuizDisplayPhase(quiz, now)
   const countdownValue = getQuizCountdownValue(quiz, now)
+  const settlementValue = getQuizSettlementValue(quiz, now)
   const isOpen = phase === 'open'
+  const canSubmit = phase === 'open' || phase === 'settling'
   const hasWon = Boolean(winningAnswer)
   const reachedAttemptLimit = attemptCount >= attemptLimit
   const statusText = hasWon
     ? `${winningAnswer?.rank ?? 1}번째 정답자로 선정되었습니다.`
-    : isOpen
+    : phase === 'settling' && latestAnswer?.correct
+      ? '정답 후보입니다. 최종 정답 확인 중...'
+      : canSubmit
       ? reachedAttemptLimit
         ? '이 문제의 답변 기회를 모두 사용했습니다.'
-        : '정답을 입력해 전송하세요.'
+        : phase === 'settling'
+          ? '정답 확인 중입니다. 마감 전 도착한 답변을 비교하고 있습니다.'
+          : '정답을 입력해 전송하세요.'
       : phase === 'closed'
         ? '이 문제는 마감되었습니다.'
         : phase === 'standby'
@@ -2642,6 +2669,13 @@ function QuizParticipationView({
         <div className="quiz-countdown-screen" aria-live="assertive">
           <span>{countdownValue}</span>
           <strong>준비하세요</strong>
+        </div>
+      ) : null}
+      {phase === 'settling' ? (
+        <div className="quiz-settlement-banner" aria-live="assertive">
+          <Sparkles size={20} />
+          <strong>정답 확인 중...</strong>
+          <span>{settlementValue}초 후 최종 정답자를 확정합니다.</span>
         </div>
       ) : null}
       <div className="quiz-question-card">
@@ -2683,15 +2717,17 @@ function QuizParticipationView({
             placeholder={
               isOpen
                 ? '정답 입력'
+                : phase === 'settling'
+                  ? '정답 확인 중에도 제출할 수 있습니다'
                 : phase === 'closed'
                   ? '퀴즈가 마감되었습니다'
                   : phase === 'standby'
                     ? '퀴즈 준비 중입니다'
                     : '카운트다운이 끝나면 입력할 수 있습니다'
             }
-            disabled={!isOpen || hasWon || reachedAttemptLimit}
+            disabled={!canSubmit || hasWon || reachedAttemptLimit}
           />
-          <button type="button" onClick={onSubmit} disabled={!isOpen || hasWon || reachedAttemptLimit || !answerText.trim()}>
+          <button type="button" onClick={onSubmit} disabled={!canSubmit || hasWon || reachedAttemptLimit || !answerText.trim()}>
             {attemptCount}/{attemptLimit} 전송
           </button>
         </div>
@@ -3303,6 +3339,7 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
   const now = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
   const phase = getQuizDisplayPhase(state.quiz, now)
   const countdownValue = getQuizCountdownValue(state.quiz, now)
+  const settlementValue = getQuizSettlementValue(state.quiz, now)
   const latestWinner = state.quiz.winners.at(-1) ?? null
   const spotlightWinner =
     latestWinner && now - latestWinner.createdAt <= 4300 && state.quiz.mode !== 'idle' ? latestWinner : null
@@ -3332,6 +3369,8 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
           <span className={`quiz-mode-pill ${phase}`}>
             {phase === 'open'
               ? '진행 중'
+              : phase === 'settling'
+                ? '정답 확인 중'
               : phase === 'intro' || phase === 'countdown'
                 ? '곧 시작'
                 : phase === 'closed'
@@ -3372,6 +3411,15 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
         </div>
       ) : null}
 
+      {phase === 'settling' ? (
+        <div className="quiz-wall-settlement" aria-live="assertive">
+          <Sparkles size={36} />
+          <p>정답 확인 중...</p>
+          <strong>{settlementValue}초 후 최종 정답자를 확정합니다</strong>
+          <span>먼저 제출된 정답 후보를 비교하고 있습니다.</span>
+        </div>
+      ) : null}
+
       <div className="quiz-current-panel">
         <div className="quiz-question-layout wall">
           <div className="quiz-question-copy">
@@ -3389,7 +3437,7 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
             <div className="quiz-stats">
               <span>답변 {answerCount}</span>
               <span>정답 {correctCount}</span>
-              <span>정답자 {state.quiz.winners.length}/{state.quiz.winnerCount}</span>
+              <span>{phase === 'settling' ? '정답 후보' : '정답자'} {phase === 'settling' ? correctCount : state.quiz.winners.length}/{state.quiz.winnerCount}</span>
             </div>
           </div>
           <QuizPrizeCard image={state.quiz.prizeImageFile} label="퀴즈 상품" />
@@ -3494,6 +3542,7 @@ function QuizAdminPanel({
   const [prizeStatus, setPrizeStatus] = useState('')
   const now = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
   const phase = getQuizDisplayPhase(state.quiz, now)
+  const settlementValue = getQuizSettlementValue(state.quiz, now)
   const answerCount = state.quiz.answers.length
   const correctCount = state.quiz.answers.filter((item) => item.correct).length
   const quizWinnerHistory = buildQuizWinnerHistory(state)
@@ -3566,6 +3615,8 @@ function QuizAdminPanel({
         <span className={`quiz-mode-pill ${phase}`}>
           {phase === 'open'
             ? '진행 중'
+            : phase === 'settling'
+              ? '정답 확인 중'
             : phase === 'countdown' || phase === 'intro'
               ? '카운트다운'
               : phase === 'closed'
@@ -3576,8 +3627,15 @@ function QuizAdminPanel({
         </span>
         <strong>답변 {answerCount}</strong>
         <strong>정답 {correctCount}</strong>
-        <strong>정답자 {state.quiz.winners.length}/{state.quiz.winnerCount}</strong>
+        <strong>{phase === 'settling' ? '정답 후보' : '정답자'} {phase === 'settling' ? correctCount : state.quiz.winners.length}/{state.quiz.winnerCount}</strong>
       </div>
+
+      {phase === 'settling' ? (
+        <div className="quiz-admin-settlement" role="status" aria-live="assertive">
+          <strong>정답 확인 중...</strong>
+          <span>{settlementValue}초 후 보정 제출시각 기준으로 최종 정답자를 확정합니다.</span>
+        </div>
+      ) : null}
 
       <div className="quiz-control-panel admin">
         <label>

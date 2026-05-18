@@ -24,6 +24,9 @@ const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
 const quizIntroMs = 2400
 const quizCountdownMs = 3600
+const quizSettlementMs = 3000
+const quizClientSubmitSkewLimitMs = quizSettlementMs
+const maxStoredQuizAnswers = 1000
 const imageShapes = new Set(['circle', 'rounded', 'square', 'wide'])
 const imageFrames = new Set(['soft', 'line', 'glow', 'clean'])
 const imageFits = new Set(['cover', 'contain'])
@@ -314,6 +317,8 @@ const emptyQuizState = {
   winners: [],
   introEndsAt: 0,
   opensAt: 0,
+  settlementStartedAt: 0,
+  settlementDeadlineAt: 0,
   createdAt: 0,
   updatedAt: 0,
 }
@@ -328,6 +333,7 @@ let sessionId = 1
 let testMode = false
 let quiz = { ...emptyQuizState }
 let quizAnswerKeys = []
+let quizSettlementTimer = null
 let settings = {
   showScoresToAudience: true,
   starBudget: defaultStarBudget,
@@ -729,25 +735,45 @@ function getState() {
     closed = true
   }
 
+  const cheerCountsByParticipant = new Map()
+  for (const message of cheers) {
+    if (!message.participantId) continue
+
+    const current = cheerCountsByParticipant.get(message.participantId) || { visible: 0, hidden: 0, total: 0 }
+    if (message.hidden) current.hidden += 1
+    else current.visible += 1
+    current.total += 1
+    cheerCountsByParticipant.set(message.participantId, current)
+  }
+
   const participantList = [...participants.values()].map((person) => {
-    const messages = cheers.filter((message) => message.participantId === person.id)
-    const visibleCheerCount = messages.filter((message) => !message.hidden).length
-    const hiddenCheerCount = messages.length - visibleCheerCount
+    const counts = cheerCountsByParticipant.get(person.id) || { visible: 0, hidden: 0, total: 0 }
 
     return {
       ...person,
-      cheered: visibleCheerCount > 0,
-      cheerSubmitted: Boolean(person.cheerSubmitted || messages.length),
-      visibleCheerCount,
-      hiddenCheerCount,
+      cheered: counts.visible > 0,
+      cheerSubmitted: Boolean(person.cheerSubmitted || counts.total),
+      visibleCheerCount: counts.visible,
+      hiddenCheerCount: counts.hidden,
     }
   })
+  const dynamicStarsByTeam = new Map()
+  const dynamicVotersByTeam = new Map()
+  for (const person of participantList) {
+    for (const [teamId, stars] of Object.entries(person.allocations || {})) {
+      const value = Number(stars) || 0
+      if (value <= 0) continue
+
+      dynamicStarsByTeam.set(teamId, (dynamicStarsByTeam.get(teamId) || 0) + value)
+      dynamicVotersByTeam.set(teamId, (dynamicVotersByTeam.get(teamId) || 0) + 1)
+    }
+  }
   const teamStats = teams
     .map((team) => {
       const baselineStars = testMode ? team.baseStars : 0
       const baselineVoters = testMode ? team.baseVoters : 0
-      const dynamicStars = participantList.reduce((sum, person) => sum + (person.allocations[team.id] || 0), 0)
-      const dynamicVoters = participantList.filter((person) => (person.allocations[team.id] || 0) > 0).length
+      const dynamicStars = dynamicStarsByTeam.get(team.id) || 0
+      const dynamicVoters = dynamicVotersByTeam.get(team.id) || 0
       return {
         ...team,
         totalStars: baselineStars + dynamicStars,
@@ -1025,12 +1051,85 @@ function advanceQuizPhase(now = Date.now()) {
       updatedAt: now,
     }
   }
+  if (quiz.mode === 'settling' && quiz.settlementDeadlineAt > 0 && now >= quiz.settlementDeadlineAt) {
+    finalizeQuizSettlement(now)
+  }
+}
+
+function clearQuizSettlementTimer() {
+  if (!quizSettlementTimer) return
+
+  clearTimeout(quizSettlementTimer)
+  quizSettlementTimer = null
+}
+
+function scheduleQuizSettlement() {
+  clearQuizSettlementTimer()
+  if (quiz.mode !== 'settling' || !quiz.settlementDeadlineAt) return
+
+  const delay = Math.max(0, quiz.settlementDeadlineAt - Date.now())
+  quizSettlementTimer = setTimeout(() => {
+    quizSettlementTimer = null
+    if (!finalizeQuizSettlement(Date.now())) return
+    broadcast({ audience: true })
+  }, delay)
+}
+
+function finalizeQuizSettlement(now = Date.now()) {
+  if (quiz.mode !== 'settling') return false
+
+  const rankedWinners = quiz.answers
+    .filter((answer) => answer.correct)
+    .sort(compareQuizAnswerPriority)
+    .slice(0, quiz.winnerCount)
+    .map((answer, index) => ({ ...answer, rank: index + 1 }))
+  const winnerRankById = new Map(rankedWinners.map((answer) => [answer.id, answer.rank]))
+
+  quiz = {
+    ...quiz,
+    mode: 'closed',
+    answers: quiz.answers.map((answer) => ({
+      ...answer,
+      rank: winnerRankById.get(answer.id),
+    })),
+    winners: rankedWinners,
+    updatedAt: now,
+  }
+
+  for (const winner of rankedWinners) {
+    addAwardRecord({
+      id: `quiz-${winner.quizId}-${winner.id}-${winner.participantId}`,
+      participantId: winner.participantId,
+      participantName: winner.author,
+      participantGroup: winner.group,
+      participantDepartment: winner.department || '',
+      kind: 'quiz',
+      rank: winner.rank,
+      quizId: winner.quizId,
+      question: quiz.question,
+      prizeImageFile: quiz.prizeImageFile,
+      prizeName: '퀴즈 상품',
+      createdAt: quiz.updatedAt,
+    })
+  }
+
+  return true
+}
+
+function compareQuizAnswerPriority(left, right) {
+  return (
+    (left.estimatedSubmittedAt || left.serverReceivedAt || left.createdAt) -
+      (right.estimatedSubmittedAt || right.serverReceivedAt || right.createdAt) ||
+    (left.serverReceivedAt || left.createdAt) - (right.serverReceivedAt || right.createdAt) ||
+    left.id - right.id
+  )
 }
 
 function prepareQuiz() {
   advanceQuizPhase()
   if (quiz.mode !== 'idle') return
 
+  clearQuizSettlementTimer()
   const now = Date.now()
   quiz = {
     ...emptyQuizState,
@@ -1043,6 +1142,7 @@ function prepareQuiz() {
 }
 
 function resetQuizTo(mode) {
+  clearQuizSettlementTimer()
   const now = Date.now()
   quiz = {
     ...emptyQuizState,
@@ -1057,6 +1157,7 @@ function resetQuizTo(mode) {
 }
 
 function openQuiz(body) {
+  clearQuizSettlementTimer()
   const selectedQuizId = sanitizeSlug(body.quizId)
   const selectedQuiz = selectedQuizId ? quizBank.find((item) => item.id === selectedQuizId && item.enabled !== false) : null
   const question = sanitizeText(body.question ?? selectedQuiz?.question, quizQuestionMaxLength)
@@ -1083,6 +1184,8 @@ function openQuiz(body) {
     winners: [],
     introEndsAt: now + quizIntroMs,
     opensAt: now + quizIntroMs + quizCountdownMs,
+    settlementStartedAt: 0,
+    settlementDeadlineAt: 0,
     createdAt: now,
     updatedAt: now,
   }
@@ -1100,16 +1203,17 @@ function clearQuiz() {
   resetQuizTo('idle')
 }
 
-function submitQuizAnswer(person, textValue) {
+function submitQuizAnswer(person, textValue, body = {}) {
   const text = sanitizeText(textValue, quizAnswerMaxLength)
-  advanceQuizPhase()
-  if (!person || quiz.mode !== 'open' || !quiz.id || !text) return null
+  const serverReceivedAt = Date.now()
+  advanceQuizPhase(serverReceivedAt)
+  if (!person || (quiz.mode !== 'open' && quiz.mode !== 'settling') || !quiz.id || !text) return null
+  if (Number(body.quizId) && Number(body.quizId) !== quiz.id) return null
   if (quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) return null
 
   const normalized = normalizeQuizAnswer(text)
-  const alreadyWon = quiz.winners.some((winner) => winner.participantId === person.id)
   const correct = quizAnswerKeys.includes(normalized)
-  const rank = correct && !alreadyWon && quiz.winners.length < quiz.winnerCount ? quiz.winners.length + 1 : undefined
+  const estimatedSubmittedAt = estimateQuizSubmittedAt(body, serverReceivedAt)
   const answer = {
     id: quizAnswerId++,
     quizId: quiz.id,
@@ -1119,32 +1223,25 @@ function submitQuizAnswer(person, textValue) {
     department: person.department || '',
     text,
     correct,
-    rank,
-    createdAt: Date.now(),
+    rank: undefined,
+    clientSubmittedAt: Number(body.clientSubmittedAt) || 0,
+    clientServerOffsetMs: Number(body.clientServerOffsetMs) || 0,
+    estimatedSubmittedAt,
+    serverReceivedAt,
+    createdAt: serverReceivedAt,
   }
 
   quiz.answers.unshift(answer)
-  quiz.answers.splice(80)
+  quiz.answers.splice(maxStoredQuizAnswers)
 
-  if (rank) {
-    quiz.winners.push(answer)
-    addAwardRecord({
-      id: `quiz-${answer.quizId}-${answer.id}-${answer.participantId}`,
-      participantId: answer.participantId,
-      participantName: answer.author,
-      participantGroup: answer.group,
-      participantDepartment: answer.department || '',
-      kind: 'quiz',
-      rank,
-      quizId: answer.quizId,
-      question: quiz.question,
-      prizeImageFile: quiz.prizeImageFile,
-      prizeName: '퀴즈 상품',
-      createdAt: answer.createdAt,
-    })
-    if (quiz.winners.length >= quiz.winnerCount) {
-      quiz = { ...quiz, mode: 'closed' }
+  if (correct && quiz.mode === 'open') {
+    quiz = {
+      ...quiz,
+      mode: 'settling',
+      settlementStartedAt: serverReceivedAt,
+      settlementDeadlineAt: serverReceivedAt + quizSettlementMs,
     }
+    scheduleQuizSettlement()
   }
 
   quiz = {
@@ -1155,7 +1252,18 @@ function submitQuizAnswer(person, textValue) {
   return answer
 }
 
-function getQuizAnswerRejectionReason(person, textValue) {
+function estimateQuizSubmittedAt(body, serverReceivedAt) {
+  const clientSubmittedAt = Number(body.clientSubmittedAt)
+  const clientServerOffsetMs = Number(body.clientServerOffsetMs)
+  const rawEstimate =
+    Number.isFinite(clientSubmittedAt) && clientSubmittedAt > 0 && Number.isFinite(clientServerOffsetMs)
+      ? clientSubmittedAt + clientServerOffsetMs
+      : serverReceivedAt
+  const minSubmittedAt = Math.max(quiz.opensAt || quiz.createdAt || serverReceivedAt, serverReceivedAt - quizClientSubmitSkewLimitMs)
+  return clamp(rawEstimate, minSubmittedAt, serverReceivedAt)
+}
+
+function getQuizAnswerRejectionReason(person, textValue, body = {}) {
   const text = sanitizeText(textValue, quizAnswerMaxLength)
   advanceQuizPhase()
 
@@ -1163,7 +1271,8 @@ function getQuizAnswerRejectionReason(person, textValue) {
   if (!text) return '답변을 입력해주세요.'
   if (!quiz.id || quiz.mode === 'idle' || quiz.mode === 'standby') return '퀴즈가 아직 출제되지 않았습니다.'
   if (quiz.mode === 'countdown') return '문제가 공개되면 답변을 제출해주세요.'
-  if (quiz.mode !== 'open') return '정답자 선정이 마감되었습니다.'
+  if (Number(body.quizId) && Number(body.quizId) !== quiz.id) return '이미 다른 문제가 진행 중입니다.'
+  if (quiz.mode !== 'open' && quiz.mode !== 'settling') return '정답자 선정이 마감되었습니다.'
   if (quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) {
     return '이 문제는 최대 5번까지만 제출할 수 있습니다.'
   }
@@ -1899,7 +2008,7 @@ async function handleApi(request, response, url) {
 
     const deviceId = getRequestDeviceId(request, body)
     const person = upsertParticipant(deviceId, body.name, body.group, body.department)
-    const answer = submitQuizAnswer(person, body.text)
+    const answer = submitQuizAnswer(person, body.text, body)
 
     if (!answer) {
       sendJson(
@@ -1909,7 +2018,7 @@ async function handleApi(request, response, url) {
           ...getState(),
           quizSubmission: {
             accepted: false,
-            reason: getQuizAnswerRejectionReason(person, body.text),
+            reason: getQuizAnswerRejectionReason(person, body.text, body),
           },
         },
         { 'Set-Cookie': participantCookieHeader(deviceId) },
