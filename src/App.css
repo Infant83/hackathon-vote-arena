@@ -176,6 +176,7 @@
 .mode-link,
 .role-nav-link,
 .audience-status-pill,
+.session-logout-button,
 .short-url,
 .timer,
 .connection,
@@ -207,6 +208,27 @@
 
 .admin-topbar .short-url {
   color: rgba(255, 255, 255, 0.88);
+}
+
+.session-logout-button {
+  color: var(--lg-red);
+  border-color: rgba(165, 0, 52, 0.22);
+  background: rgba(165, 0, 52, 0.055);
+  font: inherit;
+  cursor: pointer;
+}
+
+.theme-stage .session-logout-button {
+  color: var(--stage-guide-strong);
+  border-color: rgba(255, 183, 202, 0.3);
+  background:
+    linear-gradient(135deg, rgba(255, 122, 160, 0.14), rgba(143, 214, 255, 0.06)),
+    rgba(7, 13, 31, 0.62);
+}
+
+.session-logout-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(253, 49, 46, 0.44);
 }
 
 .role-nav-link.auth-action {
@@ -449,6 +471,7 @@
 
 .theme-stage .role-nav-link,
 .theme-stage .audience-status-pill,
+.theme-stage .session-logout-button,
 .theme-stage .short-url,
 .theme-stage .timer,
 .theme-stage .connection,
@@ -747,35 +770,6 @@
   font-size: 14px;
 }
 
-.participant-reset-action,
-.participant-session-action,
-.participant-chip button {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid rgba(165, 0, 52, 0.2);
-  border-radius: 999px;
-  color: var(--lg-red);
-  background: rgba(165, 0, 52, 0.045);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 850;
-  cursor: pointer;
-}
-
-.participant-reset-action {
-  width: fit-content;
-  margin-top: 12px;
-  padding: 0 11px;
-}
-
-.participant-session-action,
-.participant-chip button {
-  padding: 0 9px;
-}
-
 select,
 input,
 textarea {
@@ -896,10 +890,6 @@ a:focus-visible {
   color: var(--muted);
   font-size: 12px;
   font-weight: 760;
-}
-
-.participant-chip button {
-  margin-top: 5px;
 }
 
 .raffle-status {
@@ -4355,6 +4345,43 @@ body.is-wall-resizing * {
   color: var(--body);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.config-save-mode {
+  display: grid;
+  gap: 4px;
+  padding: 11px 13px;
+  border: 1px solid rgba(80, 163, 255, 0.22);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(80, 163, 255, 0.08), rgba(165, 0, 52, 0.035)),
+    rgba(255, 255, 255, 0.78);
+}
+
+.config-save-mode strong {
+  color: var(--heading);
+  font-size: 13px;
+}
+
+.config-save-mode span {
+  color: var(--body);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.theme-stage .config-save-mode {
+  border-color: rgba(143, 214, 255, 0.22);
+  background:
+    linear-gradient(135deg, rgba(143, 214, 255, 0.1), rgba(255, 122, 160, 0.05)),
+    rgba(7, 13, 31, 0.68);
+}
+
+.theme-stage .config-save-mode strong {
+  color: var(--stage-ink);
+}
+
+.theme-stage .config-save-mode span {
+  color: var(--stage-body);
 }
 
 .config-help code {
@@ -8467,6 +8494,7 @@ body.is-wall-resizing * {
   .mode-link,
   .role-nav-link,
   .audience-status-pill,
+  .session-logout-button,
   .short-url,
   .timer,
   .connection {
@@ -8953,10 +8981,6 @@ body.is-wall-resizing * {
   color: var(--ink);
   font-size: 14px;
   font-weight: 900;
-}
-
-.quiz-participant-banner .participant-session-action {
-  margin-left: auto;
 }
 
 .quiz-start-screen.standby p,

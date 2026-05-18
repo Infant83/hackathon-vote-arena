@@ -99,10 +99,11 @@
       "id": "quiz-2",
       "title": "투표 규칙",
       "question": "한 참가자가 한 팀에 줄 수 있는 별의 최대 개수는 몇 개일까요?",
-      "answer": "10",
+      "answer": "5",
       "acceptedAnswers": [
-        "10개",
-        "열개"
+        "5개",
+        "다섯개",
+        "다섯 개"
       ],
       "prizeImageFile": "",
       "winnerCount": 2,

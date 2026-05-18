@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { inflateSync, strFromU8 } from 'fflate'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const distDir = path.join(__dirname, 'dist')
@@ -11,9 +12,10 @@ const port = Number(process.env.PORT || 5173)
 const host = process.env.HOST || '0.0.0.0'
 const adminPasscode = String(process.env.ADMIN_PASSCODE || '').trim()
 const defaultStarBudget = 10
+const defaultMaxStarsPerTeam = 5
+const maxConfigurableStarsPerTeam = 10
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
-const maxStarsPerTeam = 10
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
 const defaultTeamPhotoRadius = 18
@@ -255,8 +257,8 @@ const defaultQuizBank = [
     id: 'quiz-2',
     title: '투표 규칙',
     question: '한 참가자가 한 팀에 줄 수 있는 별의 최대 개수는 몇 개일까요?',
-    answer: '10',
-    acceptedAnswers: ['10개', '열개'],
+    answer: '5',
+    acceptedAnswers: ['5개', '다섯개', '다섯 개'],
     prizeImageFile: '',
     winnerCount: 2,
     enabled: true,
@@ -328,6 +330,7 @@ let quizAnswerKeys = []
 let settings = {
   showScoresToAudience: true,
   starBudget: defaultStarBudget,
+  maxStarsPerTeam: defaultMaxStarsPerTeam,
   durationMinutes: defaultDurationMinutes,
   timerMode: 'duration',
   targetTime: '',
@@ -697,6 +700,24 @@ async function persistTeamConfig() {
   await writeFile(teamsConfigPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
 }
 
+function getRuntimeSettings(source = settings) {
+  return {
+    ...source,
+    starBudget: clamp(Math.floor(Number(source.starBudget) || defaultStarBudget), 1, 20),
+    maxStarsPerTeam: clamp(
+      Math.floor(Number(source.maxStarsPerTeam) || defaultMaxStarsPerTeam),
+      1,
+      maxConfigurableStarsPerTeam,
+    ),
+    durationMinutes: normalizeDurationMinutes(source.durationMinutes, defaultDurationMinutes),
+    timerMode: normalizeTimerMode(source.timerMode, 'duration'),
+    targetTime: normalizeTargetTime(source.targetTime),
+    minScore: clamp(Number(source.minScore ?? defaultMinScore), 0, 9.9),
+    cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
+    themeMode: normalizeThemeMode(source.themeMode, 'stage'),
+  }
+}
+
 function getState() {
   const serverTime = Date.now()
 
@@ -757,7 +778,7 @@ function getState() {
     serverTime,
     sessionId,
     testMode,
-    settings,
+    settings: getRuntimeSettings(),
     copy,
     configRevision,
     configUpdatedAt,
@@ -766,13 +787,15 @@ function getState() {
 
 function normalizeAllocations(input) {
   const normalized = {}
-  let remaining = settings.starBudget
+  const runtimeSettings = getRuntimeSettings()
+  const perTeamLimit = Math.min(runtimeSettings.starBudget, runtimeSettings.maxStarsPerTeam)
+  let remaining = runtimeSettings.starBudget
 
   for (const [teamId, rawValue] of Object.entries(input || {})) {
     if (!validTeamIds.has(teamId)) continue
 
     const value = Math.max(0, Math.floor(Number(rawValue) || 0))
-    const next = Math.min(value, remaining, maxStarsPerTeam)
+    const next = Math.min(value, remaining, perTeamLimit)
 
     if (next > 0) {
       normalized[teamId] = next
@@ -1547,6 +1570,17 @@ async function readJson(request) {
   return body ? JSON.parse(body) : {}
 }
 
+function decodeTeamConfigPayload(value) {
+  const text = String(value || '').trim()
+  if (!text) throw new Error('payload required')
+
+  const base64 = text.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(text.length / 4) * 4, '=')
+  const compressed = Buffer.from(base64, 'base64')
+  if (compressed.length > 1_000_000) throw new Error('payload too large')
+
+  return JSON.parse(strFromU8(inflateSync(new Uint8Array(compressed))))
+}
+
 function broadcast({ audience = false } = {}) {
   const payload = `event: state\ndata: ${JSON.stringify(getState())}\n\n`
 
@@ -1615,6 +1649,22 @@ async function handleApi(request, response, url) {
     response.write(`event: state\ndata: ${JSON.stringify(getState())}\n\n`)
     clients.set(response, getEventRole(url))
     request.on('close', () => clients.delete(response))
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/team-config/apply') {
+    if (!isAdminAuthenticated(request)) {
+      sendJson(response, 401, { error: 'admin authentication required' })
+      return
+    }
+
+    try {
+      await applyTeamConfig(decodeTeamConfigPayload(url.searchParams.get('payload')))
+      broadcast({ audience: true })
+      sendJson(response, 200, getState())
+    } catch (error) {
+      sendJson(response, 400, { error: error.message || 'invalid team config payload' })
+    }
     return
   }
 
@@ -1911,6 +1961,11 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/settings') {
     const nextStarBudget = Math.max(1, Math.min(20, Math.floor(Number(body.starBudget) || settings.starBudget)))
+    const nextMaxStarsPerTeam = clamp(
+      Math.floor(Number(body.maxStarsPerTeam) || settings.maxStarsPerTeam || defaultMaxStarsPerTeam),
+      1,
+      maxConfigurableStarsPerTeam,
+    )
     const nextMinScore = clamp(Number(body.minScore ?? settings.minScore), 0, 9.9)
     const nextTimerMode = normalizeTimerMode(body.timerMode, settings.timerMode)
     const rawDurationMinutes = normalizeDurationMinutes(body.durationMinutes, settings.durationMinutes)
@@ -1927,6 +1982,7 @@ async function handleApi(request, response, url) {
       showScoresToAudience:
         typeof body.showScoresToAudience === 'boolean' ? Boolean(body.showScoresToAudience) : settings.showScoresToAudience,
       starBudget: nextStarBudget,
+      maxStarsPerTeam: nextMaxStarsPerTeam,
       durationMinutes: nextDurationMinutes,
       timerMode: nextTimerMode,
       targetTime: nextTargetTime,

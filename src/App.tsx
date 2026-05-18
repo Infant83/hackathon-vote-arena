@@ -7,7 +7,7 @@ import type {
   WheelEvent as ReactWheelEvent,
   ReactNode,
 } from 'react'
-import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
+import { deflateSync, strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import {
   ArrowRight,
   Check,
@@ -238,6 +238,7 @@ type EventState = {
   settings: {
     showScoresToAudience: boolean
     starBudget: number
+    maxStarsPerTeam: number
     durationMinutes: number
     timerMode: TimerMode
     targetTime: string
@@ -247,6 +248,12 @@ type EventState = {
   }
   copy: EventCopy
 }
+
+type PostOptions = {
+  throwOnError?: boolean
+}
+
+type PostEventState = (path: string, body: unknown, options?: PostOptions) => Promise<EventState | null>
 
 type EventCopy = {
   appTitle: string
@@ -564,9 +571,10 @@ type ImageTuningField = 'shape' | 'frame' | 'fit' | 'width' | 'height' | 'zoom' 
 type ImageTuningValues = Record<ImageTuningField, string> & { size?: string }
 
 const DEFAULT_STAR_BUDGET = 10
+const DEFAULT_MAX_STARS_PER_TEAM = 5
+const MAX_CONFIGURABLE_STARS_PER_TEAM = 10
 const DEFAULT_DURATION_MINUTES = 10
 const DEFAULT_MIN_SCORE = 5
-const MAX_STARS_PER_TEAM = 10
 const KST_OFFSET_MINUTES = 9 * 60
 const DEFAULT_TEAM_PHOTO_RADIUS = 18
 const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
@@ -1080,8 +1088,8 @@ const fallbackQuizBank: QuizConfig[] = [
     id: 'quiz-2',
     title: '투표 규칙',
     question: '한 참가자가 한 팀에 줄 수 있는 별의 최대 개수는 몇 개일까요?',
-    answer: '10',
-    acceptedAnswers: ['10개', '열개'],
+    answer: '5',
+    acceptedAnswers: ['5개', '다섯개', '다섯 개'],
     prizeImageFile: '',
     winnerCount: 2,
     enabled: true,
@@ -1136,6 +1144,7 @@ const fallbackState: EventState = {
   settings: {
     showScoresToAudience: true,
     starBudget: DEFAULT_STAR_BUDGET,
+    maxStarsPerTeam: DEFAULT_MAX_STARS_PER_TEAM,
     durationMinutes: DEFAULT_DURATION_MINUTES,
     timerMode: 'duration',
     targetTime: '',
@@ -1171,6 +1180,7 @@ function App() {
   const participant = state.participants.find((person) => isSameParticipantDevice(person, participantId))
   const allocations = participant?.allocations ?? {}
   const starBudget = getStarBudget(state)
+  const maxStarsPerTeam = getMaxStarsPerTeam(state)
   const spentStars = sumStars(allocations)
   const remainingStars = Math.max(0, starBudget - spentStars)
 
@@ -1199,19 +1209,6 @@ function App() {
   }
 
   const switchVoteParticipant = () => {
-    const hasCurrentActivity = participant
-      ? sumStars(participant.allocations) > 0 ||
-        state.cheers.some((message) => message.participantId === participant.id) ||
-        buildParticipantAwardHistory(state, participant.id).length > 0
-      : false
-
-    if (
-      hasCurrentActivity &&
-      !window.confirm('현재 참여자 화면에서 로그아웃하고 다른 참여자로 등록할까요? 기존 투표 기록은 서버에 남아 있습니다.')
-    ) {
-      return
-    }
-
     clearStoredValue(storageKey)
     clearStoredValue(nameKey)
     clearStoredValue(groupKey)
@@ -1255,6 +1252,7 @@ function App() {
           return null
         }}
         adminSession={mode === 'admin' ? adminSession : undefined}
+        onVoteLogout={mode === 'vote' ? switchVoteParticipant : undefined}
       />
       {mode === 'admin' ? (
         <AdminView state={state} connection={connection} post={post} />
@@ -1284,8 +1282,8 @@ function App() {
           spentStars={spentStars}
           remainingStars={remainingStars}
           starBudget={starBudget}
+          maxStarsPerTeam={maxStarsPerTeam}
           post={post}
-          onSwitchParticipant={switchVoteParticipant}
         />
       )}
     </main>
@@ -1423,6 +1421,7 @@ function Header({
   onPrepareQuiz,
   onEndQuiz,
   adminSession,
+  onVoteLogout,
 }: {
   mode: AppMode
   connection: ConnectionState
@@ -1433,6 +1432,7 @@ function Header({
   onPrepareQuiz?: () => Promise<EventState | null> | EventState | null | void
   onEndQuiz?: () => Promise<EventState | null> | EventState | null | void
   adminSession?: AdminSessionState
+  onVoteLogout?: () => void
 }) {
   const [now, setNow] = useState(() => Date.now())
 
@@ -1605,6 +1605,12 @@ function Header({
           <span className="live-dot" />
           <span>{connectionLabel}</span>
         </div>
+        {mode === 'vote' && onVoteLogout ? (
+          <button type="button" className="session-logout-button" onClick={onVoteLogout}>
+            <LogOut size={15} />
+            Logout
+          </button>
+        ) : null}
       </div>
     </header>
   )
@@ -1826,8 +1832,8 @@ function VoteView({
   spentStars,
   remainingStars,
   starBudget,
+  maxStarsPerTeam,
   post,
-  onSwitchParticipant,
 }: {
   state: EventState
   participantId: string
@@ -1842,8 +1848,8 @@ function VoteView({
   spentStars: number
   remainingStars: number
   starBudget: number
-  post: (path: string, body: unknown) => Promise<EventState | null>
-  onSwitchParticipant: () => void
+  maxStarsPerTeam: number
+  post: PostEventState
 }) {
   const [cheerTexts, setCheerTexts] = useState<Record<string, string>>({})
   const [quizAnswerDraft, setQuizAnswerDraft] = useState({ quizId: 0, text: '' })
@@ -1868,7 +1874,7 @@ function VoteView({
   const sessionReady = state.sessionId > 0
   const isRegistered = Boolean(participant)
   const canVote = sessionReady && isRegistered && !state.closed
-  const perTeamStarLimit = Math.min(starBudget, MAX_STARS_PER_TEAM)
+  const perTeamStarLimit = Math.min(starBudget, maxStarsPerTeam)
   const currentParticipantId = participant?.id ?? participantId
   const participantMessages = state.cheers.filter((message) => message.participantId === currentParticipantId)
   const quizNow = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
@@ -2102,8 +2108,8 @@ function VoteView({
       {!quizActive ? (
         <section className="hero-band audience">
           <div>
-            <h2>{renderStarAccent(formatCopy(state.copy.audienceHeroTitle, { starBudget, maxStarsPerTeam: MAX_STARS_PER_TEAM }))}</h2>
-            <p>{formatCopy(state.copy.audienceHeroSubtitle, { starBudget, maxStarsPerTeam: MAX_STARS_PER_TEAM })}</p>
+            <h2>{renderStarAccent(formatCopy(state.copy.audienceHeroTitle, { starBudget, maxStarsPerTeam }))}</h2>
+            <p>{formatCopy(state.copy.audienceHeroSubtitle, { starBudget, maxStarsPerTeam })}</p>
           </div>
           <StarWallet remainingStars={remainingStars} spentStars={spentStars} starBudget={starBudget} />
         </section>
@@ -2133,10 +2139,6 @@ function VoteView({
               <strong>{departmentDisplay}</strong>
             </div>
           ) : null}
-          <button type="button" className="participant-session-action" onClick={onSwitchParticipant}>
-            <LogOut size={14} />
-            다른 참여자
-          </button>
         </section>
       ) : null}
 
@@ -2184,12 +2186,6 @@ function VoteView({
           <p className="registration-note">
             {sessionReady ? `${state.copy.registrationReady} 팀명/부서/소속도 함께 입력해야 입장할 수 있습니다.` : state.copy.registrationConnecting}
           </p>
-          {name || group || department ? (
-            <button type="button" className="participant-reset-action" onClick={onSwitchParticipant}>
-              <LogOut size={14} />
-              저장된 정보 지우고 다시 입력
-            </button>
-          ) : null}
         </section>
       ) : quizActive ? (
         <QuizParticipationView
@@ -2218,10 +2214,6 @@ function VoteView({
               <div className="participant-chip">
                 <strong>{name}</strong>
                 <span>{[normalizeLetsIdDisplay(group), departmentDisplay].filter(Boolean).join(' · ')}</span>
-                <button type="button" onClick={onSwitchParticipant}>
-                  <LogOut size={13} />
-                  다른 참여자
-                </button>
               </div>
             </div>
 
@@ -2704,7 +2696,7 @@ function AdminView({
 }: {
   state: EventState
   connection: ConnectionState
-  post: (path: string, body: unknown) => Promise<EventState | null>
+  post: PostEventState
 }) {
   const [raffleRule, setRaffleRule] = useState<RaffleRule>('all')
   const [isDrawing, setIsDrawing] = useState(false)
@@ -2714,6 +2706,7 @@ function AdminView({
   const [activePanel, setActivePanel] = useState<AdminPanel | null>(getInitialAdminPanel)
   const visiblePanel: AdminPanel | null = state.quiz.mode !== 'idle' ? 'quiz' : activePanel
   const starBudget = getStarBudget(state)
+  const maxStarsPerTeam = getMaxStarsPerTeam(state)
   const durationMinutes = getDurationMinutes(state)
   const timerMode = getTimerMode(state)
   const targetTime = getTargetTime(state)
@@ -2792,6 +2785,7 @@ function AdminView({
 
     post('/api/settings', {
       starBudget: data.get('starBudget'),
+      maxStarsPerTeam: data.get('maxStarsPerTeam'),
       durationMinutes: derivedDuration,
       timerMode: nextTimerMode,
       targetTime: derivedTargetTime,
@@ -2804,6 +2798,7 @@ function AdminView({
   const applyThemeMode = (nextThemeMode: ThemeMode) => {
     post('/api/settings', {
       starBudget,
+      maxStarsPerTeam,
       durationMinutes,
       timerMode,
       targetTime,
@@ -2829,11 +2824,11 @@ function AdminView({
   return (
     <>
       {showCheerConstellation ? (
-        <CheerConstellation state={state} starBudget={starBudget} onClose={() => setShowCheerConstellation(false)} />
+        <CheerConstellation state={state} starBudget={starBudget} maxStarsPerTeam={maxStarsPerTeam} onClose={() => setShowCheerConstellation(false)} />
       ) : null}
       {visiblePanel ? (
         <AdminDetailPanel title={getAdminPanelTitle(visiblePanel)} onClose={closeDetailPanel}>
-          {visiblePanel === 'arena' ? <ArenaDetailPanel state={state} starBudget={starBudget} /> : null}
+          {visiblePanel === 'arena' ? <ArenaDetailPanel state={state} starBudget={starBudget} maxStarsPerTeam={maxStarsPerTeam} /> : null}
           {visiblePanel === 'participants' ? <ParticipantDetailPanel state={state} post={post} /> : null}
           {visiblePanel === 'messages' ? <MessageManagerDetail state={state} post={post} /> : null}
           {visiblePanel === 'teams' ? <TeamConfigDetail key={getEditableConfigSignature(state)} state={state} post={post} /> : null}
@@ -2893,7 +2888,7 @@ function AdminView({
         </div>
         <form
           className="control-grid"
-          key={`${starBudget}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${cheerNameMode}:${themeMode}`}
+          key={`${starBudget}:${maxStarsPerTeam}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${cheerNameMode}:${themeMode}`}
           onSubmit={(event) => {
             event.preventDefault()
             applySettings(event.currentTarget)
@@ -2907,6 +2902,16 @@ function AdminView({
               min={1}
               max={20}
               defaultValue={starBudget}
+            />
+          </label>
+          <label>
+            <span>한 팀당 최대 별</span>
+            <input
+              name="maxStarsPerTeam"
+              type="number"
+              min={1}
+              max={MAX_CONFIGURABLE_STARS_PER_TEAM}
+              defaultValue={maxStarsPerTeam}
             />
           </label>
           <label>
@@ -3055,7 +3060,7 @@ function AdminView({
             <div className="ranking-list">
               {state.teams.map((team) => {
                 const recentEvent = state.voteEvents.find((event) => event.teamId === team.id)
-                return <TeamRow key={team.id} team={team} recentEvent={recentEvent} starBudget={starBudget} />
+                return <TeamRow key={team.id} team={team} recentEvent={recentEvent} starBudget={starBudget} maxStarsPerTeam={maxStarsPerTeam} />
               })}
             </div>
           </div>
@@ -3093,7 +3098,7 @@ function PublicWallView({
   onShowCheerConstellationChange,
 }: {
   state: EventState
-  post: (path: string, body: unknown) => Promise<EventState | null>
+  post: PostEventState
   wallPanel: WallPanel
   onWallPanelChange: (panel: WallPanel) => void
   showCheerConstellation: boolean
@@ -3107,6 +3112,7 @@ function PublicWallView({
   const setWallPanel = onWallPanelChange
   const setShowCheerConstellation = onShowCheerConstellationChange
   const starBudget = getStarBudget(state)
+  const maxStarsPerTeam = getMaxStarsPerTeam(state)
   const cheerNameMode = getCheerNameMode(state)
   const selectedTeam = selectedTeamId === 'all' ? null : state.teams.find((team) => team.id === selectedTeamId) ?? null
   const wallSplitMin = 54
@@ -3164,7 +3170,7 @@ function PublicWallView({
   return (
     <>
       {showCheerConstellation ? (
-        <CheerConstellation state={state} starBudget={starBudget} onClose={() => setShowCheerConstellation(false)} />
+        <CheerConstellation state={state} starBudget={starBudget} maxStarsPerTeam={maxStarsPerTeam} onClose={() => setShowCheerConstellation(false)} />
       ) : null}
 
       <section className="public-wall-shell" aria-label="관객 송출 보드">
@@ -3224,6 +3230,7 @@ function PublicWallView({
                         team={team}
                         recentEvent={recentEvent}
                         starBudget={starBudget}
+                        maxStarsPerTeam={maxStarsPerTeam}
                         showScore={false}
                         showVoteAuthor={false}
                         showScoreStack={false}
@@ -3447,7 +3454,7 @@ function QuizAdminPanel({
   detail = false,
 }: {
   state: EventState
-  post: (path: string, body: unknown) => Promise<EventState | null>
+  post: PostEventState
   onOpen?: () => void
   onEndQuiz?: () => void | Promise<void>
   detail?: boolean
@@ -3798,7 +3805,15 @@ function AdminDetailPanel({
   )
 }
 
-function ArenaDetailPanel({ state, starBudget }: { state: EventState; starBudget: number }) {
+function ArenaDetailPanel({
+  state,
+  starBudget,
+  maxStarsPerTeam,
+}: {
+  state: EventState
+  starBudget: number
+  maxStarsPerTeam: number
+}) {
   const totalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
   const totalVoters = state.teams.reduce((sum, team) => sum + team.voters, 0)
 
@@ -3822,7 +3837,7 @@ function ArenaDetailPanel({ state, starBudget }: { state: EventState; starBudget
       <div className="arena-detail-list">
         {state.teams.map((team) => {
           const recentEvent = state.voteEvents.find((event) => event.teamId === team.id)
-          return <TeamRow key={team.id} team={team} recentEvent={recentEvent} starBudget={starBudget} compact />
+          return <TeamRow key={team.id} team={team} recentEvent={recentEvent} starBudget={starBudget} maxStarsPerTeam={maxStarsPerTeam} compact />
         })}
       </div>
     </section>
@@ -3833,6 +3848,7 @@ function TeamRow({
   team,
   recentEvent,
   starBudget,
+  maxStarsPerTeam,
   compact = false,
   showScore = true,
   showVoteAuthor = true,
@@ -3845,6 +3861,7 @@ function TeamRow({
   team: Team
   recentEvent?: VoteEvent
   starBudget: number
+  maxStarsPerTeam: number
   compact?: boolean
   showScore?: boolean
   showVoteAuthor?: boolean
@@ -3854,7 +3871,7 @@ function TeamRow({
   selected?: boolean
   onSelect?: () => void
 }) {
-  const burstCount = recentEvent ? Math.min(starBudget, MAX_STARS_PER_TEAM, Math.abs(recentEvent.delta)) : 0
+  const burstCount = recentEvent ? Math.min(starBudget, maxStarsPerTeam, Math.abs(recentEvent.delta)) : 0
   const rankDelta = team.rankDelta ?? 0
   const rankMoveClass = rankDelta > 0 ? 'up' : rankDelta < 0 ? 'down' : 'same'
   const normalizedScore = formatPointScore(team.score ?? team.share / 10)
@@ -4070,7 +4087,7 @@ function ParticipantDetailPanel({
   post,
 }: {
   state: EventState
-  post: (path: string, body: unknown) => Promise<EventState | null>
+  post: PostEventState
 }) {
   const participants = useMemo(() => getParticipantSummaries(state), [state])
   const resetParticipant = (person: ParticipantSummary) => {
@@ -4147,7 +4164,7 @@ function CheerModerationPanel({
   onOpen,
 }: {
   state: EventState
-  post: (path: string, body: unknown) => Promise<EventState | null>
+  post: PostEventState
   onOpen: () => void
 }) {
   const teamMap = new Map(state.teams.map((team) => [team.id, team]))
@@ -4214,7 +4231,7 @@ function MessageManagerDetail({
   post,
 }: {
   state: EventState
-  post: (path: string, body: unknown) => Promise<EventState | null>
+  post: PostEventState
 }) {
   const [keyword, setKeyword] = useState('')
   const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams])
@@ -4415,13 +4432,14 @@ function TeamConfigDetail({
   post,
 }: {
   state: EventState
-  post: (path: string, body: unknown) => Promise<EventState | null>
+  post: PostEventState
 }) {
   const [draftCopy, setDraftCopy] = useState<EventCopy>(() => ({ ...fallbackCopy, ...state.copy }))
   const [draftTeams, setDraftTeams] = useState(() => createTeamDrafts(state.teams))
   const [draftQuizzes, setDraftQuizzes] = useState(() => createQuizDrafts(state.quizBank))
   const [statusText, setStatusText] = useState('')
   const [savingConfig, setSavingConfig] = useState(false)
+  const saveTarget = getConfigSaveTarget()
 
   const updateCopy = (key: keyof EventCopy, value: string) => {
     setDraftCopy((current) => ({ ...current, [key]: value }))
@@ -4491,10 +4509,10 @@ function TeamConfigDetail({
     if (savingConfig) return
 
     setSavingConfig(true)
-    setStatusText('Cloudflare 운영 상태에 저장하고 열린 화면에 반영하는 중입니다...')
+    setStatusText(`${saveTarget.label}에 저장하고 열린 화면에 반영하는 중입니다...`)
 
     try {
-      const response = await post('/api/team-config', {
+      const response = await saveTeamConfigPayload(post, {
         copy: normalizeCopyForSave(draftCopy),
         teams: draftTeams.map((team, index) => teamDraftToConfig(team, index)),
         quizzes: draftQuizzes.map((quiz, index) => quizDraftToConfig(quiz, index)),
@@ -4508,7 +4526,9 @@ function TeamConfigDetail({
         return
       }
 
-      setStatusText('팀 정보 저장에 실패했습니다. 관리자 인증 또는 네트워크 상태를 확인해주세요.')
+      setStatusText(getConfigSaveFailureMessage(new Error('no response'), saveTarget))
+    } catch (error) {
+      setStatusText(getConfigSaveFailureMessage(error, saveTarget))
     } finally {
       setSavingConfig(false)
     }
@@ -4520,8 +4540,8 @@ function TeamConfigDetail({
     try {
       const parsed = await parseTeamInfoFile(file)
       setSavingConfig(true)
-      setStatusText(`${file.name}을 Cloudflare 운영 상태에 적용하는 중입니다...`)
-      const response = await post('/api/team-config', parsed)
+      setStatusText(`${file.name}을 ${saveTarget.label}에 적용하는 중입니다...`)
+      const response = await saveTeamConfigPayload(post, parsed)
 
       if (response) {
         setDraftCopy({ ...fallbackCopy, ...response.copy })
@@ -4529,10 +4549,14 @@ function TeamConfigDetail({
         setDraftQuizzes(createQuizDrafts(response.quizBank))
         setStatusText(`${file.name}을 적용했습니다. ${getConfigSavedStatus(response)}`)
       } else {
-        setStatusText('업로드한 팀 정보를 적용하지 못했습니다.')
+        setStatusText(getConfigSaveFailureMessage(new Error('no response'), saveTarget))
       }
     } catch (error) {
-      setStatusText(error instanceof Error ? error.message : '업로드한 파일을 읽지 못했습니다.')
+      setStatusText(
+        error instanceof SyntaxError
+          ? '업로드한 JSON 파일을 읽지 못했습니다. 파일 형식을 확인해주세요.'
+          : getConfigSaveFailureMessage(error, saveTarget),
+      )
     } finally {
       setSavingConfig(false)
     }
@@ -4556,17 +4580,22 @@ function TeamConfigDetail({
         </label>
         <button type="button" onClick={() => downloadTeamInfoJson({ copy: draftCopy, teams: draftTeams, quizzes: draftQuizzes })}>
           <Download size={16} />
-          team_info.json 저장
+          로컬 JSON 저장
         </button>
         <button type="button" className="primary-action" onClick={saveConfig} disabled={savingConfig}>
           <Save size={16} />
-          {savingConfig ? '저장 중...' : '저장 및 반영'}
+          {savingConfig ? '저장 중...' : saveTarget.primaryLabel}
         </button>
       </div>
 
+      <div className="config-save-mode" data-mode={saveTarget.kind}>
+        <strong>현재 저장 대상: {saveTarget.label}</strong>
+        <span>{saveTarget.description}</span>
+      </div>
       <p className="config-help">
         ZIP 구조는 <code>team_infos/team_info.json</code>과 <code>team_infos/logos/T1-logo.png</code> 형식을 권장합니다.
-        로고는 png, jpg, webp, svg, ico를 받을 수 있습니다.
+        로고는 png, jpg, webp, svg, ico를 받을 수 있습니다. 사내망에서 outbound 요청이 막히면 먼저 <strong>로컬 JSON 저장</strong>으로 백업한 뒤,
+        인터넷 연결이 가능한 관리자 PC에서 다시 업로드하세요.
       </p>
       {statusText ? <p className={`config-status ${savingConfig ? 'is-pending' : ''}`}>{statusText}</p> : null}
 
@@ -4873,7 +4902,7 @@ function TeamSelfEditView({
   post,
 }: {
   state: EventState
-  post: (path: string, body: unknown) => Promise<EventState | null>
+  post: PostEventState
 }) {
   const routeTeamId = getTeamEditRouteId()
   const routeTeamKey = getTeamEditRouteKey()
@@ -5684,10 +5713,12 @@ function ColorField({ value, onChange }: { value: string; onChange: (value: stri
 function CheerConstellation({
   state,
   starBudget,
+  maxStarsPerTeam,
   onClose,
 }: {
   state: EventState
   starBudget: number
+  maxStarsPerTeam: number
   onClose: () => void
 }) {
   const [openMessageId, setOpenMessageId] = useState<number | null>(null)
@@ -5784,7 +5815,7 @@ function CheerConstellation({
     const items = [...groupMap.values()].map((group) => {
       const team = teamMap.get(group.teamId) ?? state.teams[0]
       const participant = group.participantId ? participantMap.get(group.participantId) : undefined
-      const starRange = Math.min(starBudget, MAX_STARS_PER_TEAM)
+      const starRange = Math.min(starBudget, maxStarsPerTeam)
       const starCount = Math.max(0, Math.min(starRange, participant?.allocations[group.teamId] ?? 0))
       const messageBonus = Math.min(Math.max(group.messages.length - 1, 0), 3) * 6
       const size = 72 + starCount * Math.max(18, 150 / starRange) + messageBonus
@@ -5800,7 +5831,7 @@ function CheerConstellation({
     })
 
     return layoutBubbleGroups(items, teamCenters, territoryCells)
-  }, [participantMap, starBudget, state.cheers, state.teams, teamCenters, teamMap, territoryCells])
+  }, [maxStarsPerTeam, participantMap, starBudget, state.cheers, state.teams, teamCenters, teamMap, territoryCells])
 
   const getPointerPosition = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const rect = stageRef.current?.getBoundingClientRect()
@@ -7001,7 +7032,7 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
     }
   }, [allowProtectedRealtime, applyState, enabled, mode, voteRealtime])
 
-  const post = useCallback(async (path: string, body: unknown) => {
+  const post = useCallback(async (path: string, body: unknown, options: PostOptions = {}) => {
     if (!enabled || !allowProtectedRealtime) return null
 
     try {
@@ -7013,10 +7044,10 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
       })
 
       if (!response.ok) {
-        let detail = `${path} failed`
+        let detail = `${path} failed (${response.status})`
         try {
           const payload = await response.json() as { error?: string }
-          if (payload.error) detail = payload.error
+          if (payload.error) detail = `${payload.error} (${response.status})`
         } catch {
           // Keep the generic message when the response is not JSON.
         }
@@ -7029,6 +7060,7 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
     } catch (error) {
       console.warn(`POST ${path} failed`, error)
       setConnection('offline')
+      if (options.throwOnError) throw error
       return null
     }
   }, [allowProtectedRealtime, applyState, enabled])
@@ -7399,6 +7431,122 @@ function getConfigSavedStatus(state: EventState) {
   return `팀 정보가 저장되고 화면에 반영되었습니다. 저장 시각 ${formatMessageTime(savedAt)} · 반영 버전 ${revision}`
 }
 
+async function saveTeamConfigPayload(post: PostEventState, payload: TeamInfoUpload) {
+  try {
+    return await post('/api/team-config', payload, { throwOnError: true })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || '')
+    if (!message.includes('(403)')) throw error
+    return applyTeamConfigViaGet(payload)
+  }
+}
+
+async function applyTeamConfigViaGet(payload: TeamInfoUpload) {
+  const encoded = encodeConfigPayload(payload)
+  const response = await fetch(`/api/team-config/apply?payload=${encoded}`, {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  })
+
+  if (!response.ok) {
+    let detail = `/api/team-config/apply failed (${response.status})`
+    try {
+      const errorPayload = (await response.json()) as { error?: string }
+      if (errorPayload.error) detail = `${errorPayload.error} (${response.status})`
+    } catch {
+      // Keep the generic message when a proxy or gateway returns HTML.
+    }
+    throw new Error(detail)
+  }
+
+  return (await response.json()) as EventState
+}
+
+function encodeConfigPayload(payload: TeamInfoUpload) {
+  const compressed = deflateSync(strToU8(JSON.stringify(payload)), { level: 9 })
+  return bytesToBase64Url(compressed)
+}
+
+function bytesToBase64Url(bytes: Uint8Array) {
+  let binary = ''
+  const chunkSize = 0x8000
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(index, index + chunkSize))
+  }
+
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+function getConfigSaveTarget() {
+  const host = window.location.hostname.toLowerCase()
+  const isLocal =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+
+  if (isLocal) {
+    return {
+      kind: 'local' as const,
+      label: '로컬 Node 서버',
+      primaryLabel: '로컬에 저장 및 반영',
+      description: '이 화면의 저장은 현재 접속한 로컬/사내망 Node 서버의 teams.json을 갱신하고, 열린 /vote와 /wall에 즉시 방송합니다.',
+    }
+  }
+
+  return {
+    kind: 'cloudflare' as const,
+    label: 'Cloudflare 운영 저장소',
+    primaryLabel: 'Cloudflare 저장 및 반영',
+    description:
+      '이 화면의 저장은 배포 파일을 직접 수정하지 않고, 브라우저가 Cloudflare Durable Object 운영 저장소로 수정 내용을 업로드합니다.',
+  }
+}
+
+function getConfigSaveFailureMessage(error: unknown, target: ReturnType<typeof getConfigSaveTarget>) {
+  const detail = error instanceof Error ? error.message : String(error || '')
+  const normalized = detail.toLowerCase()
+
+  if (normalized.includes('admin authentication required') || normalized.includes('(401)')) {
+    return `${target.label} 저장 실패: 관리자 인증이 만료되었거나 쿠키가 전달되지 않았습니다. 상단의 인증 확인을 누르거나 로그아웃 후 다시 로그인해주세요.`
+  }
+
+  if (normalized.includes('(403)')) {
+    return target.kind === 'cloudflare'
+      ? 'Cloudflare 저장 실패(403): 관리자 인증 문제가 아니라 현재 사내망/보안 프록시가 Cloudflare 저장 요청을 거절한 상태일 수 있습니다. 모바일/외부망에서는 저장이 되면 앱은 정상입니다. 로컬 JSON 저장으로 백업하거나 모바일 핫스팟/외부망에서 다시 저장해주세요.'
+      : '로컬 서버 저장 실패(403): 현재 접속한 로컬 서버가 요청을 거절했습니다. 관리자 인증과 서버 접근 정책을 확인해주세요.'
+  }
+
+  if (
+    normalized.includes('failed to fetch') ||
+    normalized.includes('networkerror') ||
+    normalized.includes('load failed') ||
+    normalized.includes('no response')
+  ) {
+    return target.kind === 'cloudflare'
+      ? 'Cloudflare 저장 실패: 이 브라우저에서 Cloudflare로 나가는 outbound HTTPS 요청이 막혔을 수 있습니다. 로컬 JSON 저장으로 백업한 뒤, 인터넷 연결이 가능한 관리자 PC에서 업로드하면 즉시 반영됩니다.'
+      : '로컬 서버 저장 실패: 현재 접속한 로컬 Node 서버와 통신하지 못했습니다. 서버 실행 상태와 접속 주소를 확인해주세요.'
+  }
+
+  if (normalized.includes('request body too large') || normalized.includes('(413)')) {
+    return `${target.label} 저장 실패: 업로드 내용이 너무 큽니다. 사진 파일 크기를 줄이거나 이미지 URL을 사용해주세요.`
+  }
+
+  if (normalized.includes('(414)')) {
+    return `${target.label} 저장 실패: 사내망 우회 저장 URL이 너무 깁니다. 사진 파일 크기를 줄이거나 로컬 JSON 저장 후 모바일/외부망에서 업로드해주세요.`
+  }
+
+  if (normalized.includes('(400)')) {
+    return `${target.label} 저장 실패: 팀 정보 형식이 올바르지 않습니다. 팀 목록과 JSON 구조를 확인해주세요. (${detail})`
+  }
+
+  return `${target.label} 저장 실패: ${detail || '원인을 알 수 없습니다.'}`
+}
+
 function teamEditorPreview(team: TeamConfigDraft): TeamVisual {
   return {
     name: team.name,
@@ -7549,6 +7697,7 @@ function exportResultsWorkbook(state: EventState) {
         ['투표상태', state.closed ? '마감' : '진행 중'],
         ['세션', state.sessionId],
         ['참여자별 별 개수', state.settings.starBudget],
+        ['팀당 최대 별', getMaxStarsPerTeam(state)],
         ['등록 인원', state.participants.length],
         ['총 별', totalStars],
         ['추첨 응모 완료', eligibleCount],
@@ -7758,7 +7907,7 @@ function downloadBlob(blob: Blob, fileName: string) {
 }
 
 async function updateVote(
-  post: (path: string, body: unknown) => Promise<EventState | null>,
+  post: PostEventState,
   sessionId: number,
   participantId: string,
   name: string,
@@ -7863,6 +8012,14 @@ function sumStars(allocations: Record<string, number>) {
 
 function getStarBudget(state: EventState) {
   return clamp(Math.floor(state.settings.starBudget || DEFAULT_STAR_BUDGET), 1, 20)
+}
+
+function getMaxStarsPerTeam(state: EventState) {
+  return clamp(
+    Math.floor(state.settings.maxStarsPerTeam || DEFAULT_MAX_STARS_PER_TEAM),
+    1,
+    MAX_CONFIGURABLE_STARS_PER_TEAM,
+  )
 }
 
 function getDurationMinutes(state: EventState) {

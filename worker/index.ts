@@ -1,9 +1,11 @@
 import rawConfig from '../teams.json'
+import { inflateSync, strFromU8 } from 'fflate'
 
 const defaultStarBudget = 10
+const defaultMaxStarsPerTeam = 5
+const maxConfigurableStarsPerTeam = 10
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
-const maxStarsPerTeam = 10
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
 const defaultTeamPhotoRadius = 18
@@ -209,6 +211,7 @@ type QuizConfig = {
 type Settings = {
   showScoresToAudience: boolean
   starBudget: number
+  maxStarsPerTeam: number
   durationMinutes: number
   timerMode: 'duration' | 'targetTime'
   targetTime: string
@@ -395,8 +398,8 @@ const defaultQuizBank: QuizConfig[] = [
     id: 'quiz-2',
     title: '투표 규칙',
     question: '한 참가자가 한 팀에 줄 수 있는 별의 최대 개수는 몇 개일까요?',
-    answer: '10',
-    acceptedAnswers: ['10개', '열개'],
+    answer: '5',
+    acceptedAnswers: ['5개', '다섯개', '다섯 개'],
     prizeImageFile: '',
     winnerCount: 2,
     enabled: true,
@@ -511,6 +514,7 @@ export class ArenaRoom {
   private settings: Settings = {
     showScoresToAudience: true,
     starBudget: defaultStarBudget,
+    maxStarsPerTeam: defaultMaxStarsPerTeam,
     durationMinutes: defaultDurationMinutes,
     timerMode: 'duration',
     targetTime: '',
@@ -543,6 +547,19 @@ export class ArenaRoom {
 
     if (request.method === 'GET' && url.pathname === '/events') {
       return this.openEventStream(url)
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/team-config/apply') {
+      let updated: boolean
+      try {
+        updated = this.applyTeamConfig(decodeTeamConfigPayload(url.searchParams.get('payload')))
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : 'invalid team config payload' }, 400)
+      }
+      if (!updated) return json({ error: 'teams array required' }, 400)
+
+      await this.commit({ audience: true })
+      return json(this.getState())
     }
 
     if (request.method !== 'POST') {
@@ -588,6 +605,11 @@ export class ArenaRoom {
     this.settings = {
       showScoresToAudience: Boolean(snapshot.settings?.showScoresToAudience ?? true),
       starBudget: clamp(migratedStarBudget, 1, 20),
+      maxStarsPerTeam: clamp(
+        Math.floor(Number(snapshot.settings?.maxStarsPerTeam) || defaultMaxStarsPerTeam),
+        1,
+        maxConfigurableStarsPerTeam,
+      ),
       durationMinutes: normalizeDurationMinutes(snapshot.settings?.durationMinutes, defaultDurationMinutes),
       timerMode: normalizeTimerMode(snapshot.settings?.timerMode),
       targetTime: normalizeTargetTime(snapshot.settings?.targetTime),
@@ -839,6 +861,11 @@ export class ArenaRoom {
             ? Boolean(body.showScoresToAudience)
             : this.settings.showScoresToAudience,
         starBudget: clamp(Math.floor(Number(body.starBudget) || this.settings.starBudget), 1, 20),
+        maxStarsPerTeam: clamp(
+          Math.floor(Number(body.maxStarsPerTeam) || this.settings.maxStarsPerTeam || defaultMaxStarsPerTeam),
+          1,
+          maxConfigurableStarsPerTeam,
+        ),
         durationMinutes: timerSettings.durationMinutes,
         timerMode: timerSettings.timerMode,
         targetTime: timerSettings.targetTime,
@@ -942,10 +969,28 @@ export class ArenaRoom {
       serverTime,
       sessionId: this.sessionId,
       testMode: this.testMode,
-      settings: this.settings,
+      settings: this.getRuntimeSettings(),
       copy: this.copy,
       configRevision: this.configRevision,
       configUpdatedAt: this.configUpdatedAt,
+    }
+  }
+
+  private getRuntimeSettings(source: Settings = this.settings): Settings {
+    return {
+      ...source,
+      starBudget: clamp(Math.floor(Number(source.starBudget) || defaultStarBudget), 1, 20),
+      maxStarsPerTeam: clamp(
+        Math.floor(Number(source.maxStarsPerTeam) || defaultMaxStarsPerTeam),
+        1,
+        maxConfigurableStarsPerTeam,
+      ),
+      durationMinutes: normalizeDurationMinutes(source.durationMinutes, defaultDurationMinutes),
+      timerMode: normalizeTimerMode(source.timerMode, 'duration'),
+      targetTime: normalizeTargetTime(source.targetTime),
+      minScore: clamp(Number(source.minScore ?? defaultMinScore), 0, 9.9),
+      cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
+      themeMode: normalizeThemeMode(source.themeMode, 'stage'),
     }
   }
 
@@ -1059,7 +1104,9 @@ export class ArenaRoom {
 
   private normalizeAllocations(input: unknown) {
     const normalized: Record<string, number> = {}
-    let remaining = this.settings.starBudget
+    const runtimeSettings = this.getRuntimeSettings()
+    const perTeamLimit = Math.min(runtimeSettings.starBudget, runtimeSettings.maxStarsPerTeam)
+    let remaining = runtimeSettings.starBudget
 
     if (!input || typeof input !== 'object') return normalized
 
@@ -1067,7 +1114,7 @@ export class ArenaRoom {
       if (!this.validTeamIds.has(teamId)) continue
 
       const value = Math.max(0, Math.floor(Number(rawValue) || 0))
-      const next = Math.min(value, remaining, maxStarsPerTeam)
+      const next = Math.min(value, remaining, perTeamLimit)
 
       if (next > 0) {
         normalized[teamId] = next
@@ -1716,6 +1763,20 @@ async function readJson(request: Request): Promise<RequestBody> {
   }
 }
 
+function decodeTeamConfigPayload(value: string | null): RequestBody {
+  const text = String(value || '').trim()
+  if (!text) throw new Error('payload required')
+
+  const binary = atob(text.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(text.length / 4) * 4, '='))
+  const compressed = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    compressed[index] = binary.charCodeAt(index)
+  }
+  if (compressed.length > 1_000_000) throw new Error('payload too large')
+
+  return JSON.parse(strFromU8(inflateSync(compressed))) as RequestBody
+}
+
 function json(data: unknown, status = 200, headers: HeadersInit = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -1922,6 +1983,10 @@ function parseCookies(cookieHeader = '') {
 function isAdminProtectedRequest(url: URL, method: string) {
   if (method === 'GET' && url.pathname === '/events') {
     return url.searchParams.get('role') === 'admin'
+  }
+
+  if (method === 'GET' && url.pathname === '/api/team-config/apply') {
+    return true
   }
 
   if (method !== 'POST') return false
