@@ -6212,6 +6212,47 @@ body.is-wall-resizing * {
     linear-gradient(180deg, #fff, #fff7fa);
 }
 
+.raffle-trophy-gif {
+  position: absolute;
+  right: clamp(18px, 6vw, 90px);
+  bottom: clamp(-14px, -1vh, 10px);
+  z-index: 1;
+  width: min(20vw, 270px);
+  max-width: 34%;
+  max-height: 72%;
+  object-fit: contain;
+  object-position: center bottom;
+  border-radius: 38px;
+  opacity: 0.24;
+  mix-blend-mode: screen;
+  filter:
+    saturate(1.32)
+    contrast(1.08)
+    drop-shadow(0 0 32px rgba(255, 54, 111, 0.3))
+    drop-shadow(0 0 42px rgba(143, 214, 255, 0.16));
+  clip-path: ellipse(48% 47% at 50% 62%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 62%, #000 0 48%, rgba(0, 0, 0, 0.78) 58%, transparent 78%);
+  mask-image: radial-gradient(ellipse at 50% 62%, #000 0 48%, rgba(0, 0, 0, 0.78) 58%, transparent 78%);
+  pointer-events: none;
+}
+
+.raffle-trophy-gif.is-drawing {
+  opacity: 0.34;
+  transform: translate3d(8px, 0, 0) scale(1.04);
+}
+
+.raffle-trophy-gif.has-winners {
+  right: clamp(10px, 4vw, 60px);
+  bottom: clamp(-28px, -2.2vh, -10px);
+  width: min(26vw, 360px);
+  opacity: 0.4;
+  filter:
+    saturate(1.42)
+    contrast(1.14)
+    drop-shadow(0 0 38px rgba(255, 54, 111, 0.36))
+    drop-shadow(0 0 52px rgba(143, 214, 255, 0.2));
+}
+
 .celebration-canvas {
   position: absolute;
   inset: 0;
@@ -9591,6 +9632,27 @@ body.is-wall-resizing * {
 .lg-dot.has-image img {
   padding: 0;
   transform-origin: center;
+}
+
+.lg-dot.default-trophy-logo {
+  border: 1px solid rgba(255, 122, 160, 0.52);
+  background:
+    radial-gradient(circle at 50% 68%, rgba(255, 39, 128, 0.34), transparent 48%),
+    radial-gradient(circle at 38% 18%, rgba(143, 214, 255, 0.22), transparent 38%),
+    linear-gradient(150deg, #05050a, #171124 62%, #0a0710);
+  box-shadow:
+    0 0 0 3px rgba(255, 122, 160, 0.1),
+    0 0 24px rgba(255, 54, 111, 0.26),
+    0 16px 34px rgba(0, 0, 0, 0.22);
+}
+
+.lg-dot.default-trophy-logo img {
+  padding: 2px;
+  filter:
+    saturate(1.22)
+    contrast(1.08)
+    drop-shadow(0 0 8px rgba(255, 122, 160, 0.42))
+    drop-shadow(0 0 16px rgba(143, 214, 255, 0.16));
 }
 
 .wall-topbar .lg-dot {

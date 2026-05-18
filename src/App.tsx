@@ -839,6 +839,8 @@ const registeredSessionKey = 'vibe-vote-registered-session'
 const raffleDismissedKey = 'vibe-vote-raffle-dismissed-at'
 const quizWinnerDismissedKey = 'vibe-vote-quiz-winner-dismissed'
 const themeModeKey = 'vibe-vote-theme-mode'
+const defaultBrandLogoFile = '/event-brand/trophy-static.png'
+const raffleTrophyGifFile = '/event-brand/trophy-spin.gif'
 const cookieMaxAge = 60 * 60 * 24 * 14
 const fallbackCopy: EventCopy = {
   appTitle: 'Vibe Vote Arena',
@@ -1641,22 +1643,24 @@ function Header({
 function BrandMark({ copy }: { copy: EventCopy }) {
   const shape = normalizeImageShape(copy.appLogoShape, 'circle')
   const frame = normalizeImageFrame(copy.appLogoFrame, 'soft')
-  const fit = normalizeImageFit(copy.appLogoFit, 'cover')
+  const logoFile = copy.appLogoFile || defaultBrandLogoFile
+  const isDefaultTrophy = !copy.appLogoFile
+  const fit = isDefaultTrophy ? 'contain' : normalizeImageFit(copy.appLogoFit, 'cover')
 
   return (
     <div
-      className={`lg-dot shape-${shape} frame-${frame} ${copy.appLogoFile ? 'has-image' : ''}`}
+      className={`lg-dot shape-${shape} frame-${frame} ${logoFile ? 'has-image' : ''} ${isDefaultTrophy ? 'default-trophy-logo' : ''}`}
       style={getAppLogoStyle(copy)}
       aria-hidden="true"
     >
-      {copy.appLogoFile ? (
+      {logoFile ? (
         <img
-          src={copy.appLogoFile}
+          src={logoFile}
           alt=""
           style={{
             objectFit: fit,
             objectPosition: `${getPercentValue(copy.appLogoFocusX, 50)}% ${getPercentValue(copy.appLogoFocusY, 50)}%`,
-            transform: `scale(${getZoomValue(copy.appLogoZoom, 1)})`,
+            transform: `scale(${isDefaultTrophy ? 1.06 : getZoomValue(copy.appLogoZoom, 1)})`,
             transformOrigin: `${getPercentValue(copy.appLogoFocusX, 50)}% ${getPercentValue(copy.appLogoFocusY, 50)}%`,
           }}
         />
@@ -6287,6 +6291,13 @@ function RaffleDetailPanel({
     <div className={`raffle-detail ${publicMode ? 'public-mode' : ''}`}>
       <section className={`raffle-showcase style-lotto ${isDrawing ? 'drawing' : ''} ${hasWinners ? 'has-winners' : ''}`} aria-live="polite">
         <CelebrationConfetti active={hasWinners} seedKey={state.lastRaffle?.createdAt ?? 0} />
+        <img
+          className={`raffle-trophy-gif ${isDrawing ? 'is-drawing' : ''} ${hasWinners ? 'has-winners' : ''}`}
+          src={raffleTrophyGifFile}
+          alt=""
+          aria-hidden="true"
+          loading="lazy"
+        />
         {prizeImage || prizeInfo.name ? (
           <>
             <button
