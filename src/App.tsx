@@ -4720,11 +4720,12 @@ function TeamConfigDetail({
     setStatusText(`${saveTarget.label}에 저장하고 열린 화면에 반영하는 중입니다...`)
 
     try {
-      const response = await saveTeamConfigPayload(post, {
+      const payload = compactTeamInfoUploadForSave({
         copy: normalizeCopyForSave(draftCopy),
         teams: draftTeams.map((team, index) => teamDraftToConfig(team, index)),
         quizzes: draftQuizzes.map((quiz, index) => quizDraftToConfig(quiz, index)),
-      })
+      }, state)
+      const response = await saveTeamConfigPayload(post, payload)
 
       if (response) {
         setDraftCopy({ ...fallbackCopy, ...response.copy })
@@ -4749,7 +4750,7 @@ function TeamConfigDetail({
       const parsed = await parseTeamInfoFile(file)
       setSavingConfig(true)
       setStatusText(`${file.name}을 ${saveTarget.label}에 적용하는 중입니다...`)
-      const response = await saveTeamConfigPayload(post, parsed)
+      const response = await saveTeamConfigPayload(post, compactTeamInfoUploadForSave(parsed, state))
 
       if (response) {
         setDraftCopy({ ...fallbackCopy, ...response.copy })
@@ -7149,17 +7150,21 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
   const applyState = useCallback((nextState: EventState) => {
     const previousState = lastRankStateRef.current
     const previousRanks = previousState ? new Map(previousState.teams.map((team) => [team.id, team.rank])) : null
+    const nextCopy = preserveCopyMedia(previousState?.copy, nextState.copy)
+    const nextTeams = preserveTeamMedia(previousState?.teams, nextState.teams)
+    const nextQuizBank = preserveQuizBankMedia(previousState?.quizBank, nextState.quizBank)
+    const nextQuiz = preserveQuizMedia(previousState?.quiz, nextState.quiz)
     const nextWithRankMovement = {
       ...nextState,
-      copy: { ...fallbackCopy, ...(nextState.copy ?? {}) },
+      copy: { ...fallbackCopy, ...nextCopy },
       settings: { ...fallbackState.settings, ...(nextState.settings ?? {}) },
-      quiz: { ...fallbackState.quiz, ...(nextState.quiz ?? {}) },
-      quizBank: Array.isArray(nextState.quizBank) && nextState.quizBank.length ? nextState.quizBank : fallbackQuizBank,
+      quiz: { ...fallbackState.quiz, ...nextQuiz },
+      quizBank: Array.isArray(nextQuizBank) && nextQuizBank.length ? nextQuizBank : fallbackQuizBank,
       configRevision: nextState.configRevision || fallbackState.configRevision,
       configUpdatedAt: nextState.configUpdatedAt || fallbackState.configUpdatedAt,
       serverTime: nextState.serverTime || Date.now(),
       receivedAt: Date.now(),
-      teams: nextState.teams.map((team) => {
+      teams: nextTeams.map((team) => {
         const previousRank = previousRanks?.get(team.id)
         return {
           ...team,
@@ -7184,17 +7189,32 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
     let active = true
     let events: EventSource | null = null
     let pollTimer: number | undefined
+    let hasFullMediaState = false
     const realtime = allowProtectedRealtime && (mode === 'admin' || mode === 'wall' || mode === 'vote' || voteRealtime)
     const shouldPoll = mode === 'vote' || !realtime
     const roleQuery = `role=${encodeURIComponent(mode)}`
 
     const fetchState = async () => {
       try {
-        const response = await fetch(`/api/state?${roleQuery}`, { credentials: 'same-origin' })
+        const mediaQuery = hasFullMediaState ? '&media=slim' : ''
+        const response = await fetch(`/api/state?${roleQuery}${mediaQuery}`, { credentials: 'same-origin' })
         if (!response.ok) throw new Error('state request failed')
-        const nextState = (await response.json()) as EventState
+        let nextState = (await response.json()) as EventState
         if (!active) return
+        const knownConfigRevision = lastRankStateRef.current?.configRevision || 0
+        if (
+          hasFullMediaState &&
+          knownConfigRevision &&
+          nextState.configRevision &&
+          nextState.configRevision !== knownConfigRevision
+        ) {
+          const fullResponse = await fetch(`/api/state?${roleQuery}`, { credentials: 'same-origin' })
+          if (!fullResponse.ok) throw new Error('state request failed')
+          nextState = (await fullResponse.json()) as EventState
+          if (!active) return
+        }
         applyState(nextState)
+        hasFullMediaState = true
         setConnection('live')
 
         if (shouldPoll && nextState.closed && pollTimer && mode !== 'vote') {
@@ -7280,6 +7300,48 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
   }, [allowProtectedRealtime, applyState, enabled])
 
   return { state, connection: enabled ? connection : 'connecting', post }
+}
+
+function preserveCopyMedia(previous: EventCopy | undefined, incoming: EventCopy | undefined) {
+  const next = { ...(incoming ?? {}) } as Partial<EventCopy>
+
+  for (const key of copyImageKeys) {
+    if (next[key] === undefined && previous?.[key]) {
+      next[key] = previous[key]
+    }
+  }
+
+  return next
+}
+
+function preserveTeamMedia(previous: Team[] | undefined, incoming: Team[]) {
+  if (!previous?.length) return incoming
+
+  const previousById = new Map(previous.map((team) => [team.id, team]))
+  return incoming.map((team) => {
+    if (team.logoFile !== undefined) return team
+
+    const previousTeam = previousById.get(team.id)
+    return previousTeam?.logoFile ? { ...team, logoFile: previousTeam.logoFile } : team
+  })
+}
+
+function preserveQuizBankMedia(previous: QuizConfig[] | undefined, incoming: QuizConfig[]) {
+  if (!previous?.length || !Array.isArray(incoming)) return incoming
+
+  const previousById = new Map(previous.map((quiz) => [quiz.id, quiz]))
+  return incoming.map((quiz) => {
+    if (quiz.prizeImageFile !== undefined) return quiz
+
+    const previousQuiz = previousById.get(quiz.id)
+    return previousQuiz?.prizeImageFile ? { ...quiz, prizeImageFile: previousQuiz.prizeImageFile } : quiz
+  })
+}
+
+function preserveQuizMedia(previous: QuizState | undefined, incoming: QuizState | undefined) {
+  if (!incoming) return incoming
+  if (incoming.prizeImageFile !== undefined || !previous?.prizeImageFile) return incoming
+  return { ...incoming, prizeImageFile: previous.prizeImageFile }
 }
 
 function getInitialEventState(): EventState {
@@ -7643,6 +7705,45 @@ function normalizeCopyForSave(copy: EventCopy): EventCopy {
   return next
 }
 
+function compactTeamInfoUploadForSave(payload: TeamInfoUpload, reference: EventState): TeamInfoUpload {
+  const referenceTeamsById = new Map(reference.teams.map((team) => [team.id, team]))
+  const referenceQuizzesById = new Map(reference.quizBank.map((quiz) => [quiz.id, quiz]))
+  const copy = payload.copy ? { ...payload.copy } : undefined
+
+  if (copy) {
+    for (const key of copyImageKeys) {
+      if (isInlineImageSource(copy[key]) && copy[key] === reference.copy?.[key]) {
+        delete copy[key]
+      }
+    }
+  }
+
+  return {
+    ...payload,
+    copy,
+    teams: payload.teams.map((team, index) => {
+      const next = { ...team }
+      const referenceTeam = referenceTeamsById.get(String(team.id || '')) || reference.teams[index]
+      if (isInlineImageSource(next.logoFile) && next.logoFile === referenceTeam?.logoFile) {
+        delete next.logoFile
+      }
+      return next
+    }),
+    quizzes: payload.quizzes?.map((quiz, index) => {
+      const next = { ...quiz }
+      const referenceQuiz = referenceQuizzesById.get(String(quiz.id || '')) || reference.quizBank[index]
+      if (isInlineImageSource(next.prizeImageFile) && next.prizeImageFile === referenceQuiz?.prizeImageFile) {
+        delete next.prizeImageFile
+      }
+      return next
+    }),
+  }
+}
+
+function isInlineImageSource(value: unknown): value is string {
+  return typeof value === 'string' && /^data:image\//i.test(value)
+}
+
 function getConfigSavedStatus(state: EventState) {
   const savedAt = state.configUpdatedAt || Date.now()
   const revision = Math.max(1, Math.floor(Number(state.configRevision) || 1))
@@ -7759,6 +7860,9 @@ function getConfigSaveFailureMessage(error: unknown, target: ReturnType<typeof g
   }
 
   if (normalized.includes('(400)')) {
+    if (normalized.includes('payload')) {
+      return `${target.label} 저장 실패: 사내망 우회 저장 payload가 중간에서 잘렸거나 해석되지 않았습니다. 이번 버전은 기존 이미지를 반복 전송하지 않도록 줄였으니 새로고침 후 다시 저장해보고, 계속 실패하면 로컬 JSON 저장으로 백업해주세요. (${detail})`
+    }
     return `${target.label} 저장 실패: 팀 정보 형식이 올바르지 않습니다. 팀 목록과 JSON 구조를 확인해주세요. (${detail})`
   }
 

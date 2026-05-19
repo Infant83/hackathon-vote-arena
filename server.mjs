@@ -732,7 +732,7 @@ function getRuntimeSettings(source = settings) {
   }
 }
 
-function getState() {
+function getState(options = {}) {
   const serverTime = Date.now()
 
   if (!closed && serverTime > closesAt) {
@@ -798,7 +798,7 @@ function getState() {
     share: maxStars > 0 ? Math.max(8, Math.round((team.totalStars / maxStars) * 100)) : 0,
   }))
 
-  return {
+  const state = {
     teams: rankedTeams,
     participants: participantList,
     cheers: cheers.slice(0, 120),
@@ -817,6 +817,45 @@ function getState() {
     configRevision,
     configUpdatedAt,
   }
+
+  return options.slimMedia ? slimStateMedia(state) : state
+}
+
+function slimStateMedia(state) {
+  return {
+    ...state,
+    copy: slimCopyMedia(state.copy),
+    teams: state.teams.map((team) => slimTeamMedia(team)),
+    quizBank: state.quizBank.map((quiz) => slimQuizConfigMedia(quiz)),
+  }
+}
+
+function slimCopyMedia(source) {
+  const next = { ...source }
+
+  for (const key of Object.keys(next)) {
+    if (isImageCopyKey(key) && isLargeInlineImageSource(next[key])) {
+      delete next[key]
+    }
+  }
+
+  return next
+}
+
+function slimTeamMedia(team) {
+  if (!isLargeInlineImageSource(team.logoFile)) return team
+  const { logoFile, ...rest } = team
+  return rest
+}
+
+function slimQuizConfigMedia(quiz) {
+  if (!isLargeInlineImageSource(quiz.prizeImageFile)) return quiz
+  const { prizeImageFile, ...rest } = quiz
+  return rest
+}
+
+function isLargeInlineImageSource(value) {
+  return typeof value === 'string' && /^data:image\//i.test(value) && value.length > 4096
 }
 
 function normalizeAllocations(input) {
@@ -1762,15 +1801,19 @@ function decodeTeamConfigPayload(value) {
   const text = String(value || '').trim()
   if (!text) throw new Error('payload required')
 
-  const base64 = text.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(text.length / 4) * 4, '=')
-  const compressed = Buffer.from(base64, 'base64')
-  if (compressed.length > 1_000_000) throw new Error('payload too large')
+  try {
+    const base64 = text.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(text.length / 4) * 4, '=')
+    const compressed = Buffer.from(base64, 'base64')
+    if (compressed.length > 1_000_000) throw new Error('payload too large')
 
-  return JSON.parse(strFromU8(inflateSync(new Uint8Array(compressed))))
+    return JSON.parse(strFromU8(inflateSync(new Uint8Array(compressed))))
+  } catch (error) {
+    throw new Error(`payload decode failed: ${error.message || 'invalid compressed config'}`, { cause: error })
+  }
 }
 
-function broadcast({ audience = false } = {}) {
-  const payload = `event: state\ndata: ${JSON.stringify(getState())}\n\n`
+function broadcast({ audience = false, fullMedia = false } = {}) {
+  const payload = `event: state\ndata: ${JSON.stringify(getState({ slimMedia: !fullMedia }))}\n\n`
 
   for (const [response, role] of clients.entries()) {
     if (role === 'vote' && !audience) continue
@@ -1818,7 +1861,7 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === 'GET' && url.pathname === '/api/state') {
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: url.searchParams.get('media') === 'slim' }))
     return
   }
 
@@ -1848,7 +1891,7 @@ async function handleApi(request, response, url) {
 
     try {
       await applyTeamConfig(decodeTeamConfigPayload(url.searchParams.get('payload')))
-      broadcast({ audience: true })
+      broadcast({ audience: true, fullMedia: true })
       sendJson(response, 200, getState())
     } catch (error) {
       sendJson(response, 400, { error: error.message || 'invalid team config payload' })
@@ -1896,7 +1939,7 @@ async function handleApi(request, response, url) {
     removeCheersForClearedTeams(person, previousAllocations, nextAllocations)
     lastRaffle = null
     broadcast()
-    sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getState({ slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -1941,7 +1984,7 @@ async function handleApi(request, response, url) {
     })
     cheers.splice(maxStoredCheerMessages)
     broadcast()
-    sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getState({ slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -1957,7 +2000,7 @@ async function handleApi(request, response, url) {
     message.hidden = Boolean(body.hidden)
     lastRaffle = null
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 
@@ -1986,7 +2029,7 @@ async function handleApi(request, response, url) {
 
     lastRaffle = null
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 
@@ -2037,7 +2080,7 @@ async function handleApi(request, response, url) {
     }
 
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 
@@ -2048,14 +2091,14 @@ async function handleApi(request, response, url) {
     }
 
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 
   if (url.pathname === '/api/quiz/prepare') {
     prepareQuiz()
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 
@@ -2074,7 +2117,7 @@ async function handleApi(request, response, url) {
         response,
         200,
         {
-          ...getState(),
+          ...getState({ slimMedia: true }),
           quizSubmission: {
             accepted: false,
             reason: getQuizAnswerRejectionReason(person, body.text, body),
@@ -2090,7 +2133,7 @@ async function handleApi(request, response, url) {
       response,
       200,
       {
-        ...getState(),
+        ...getState({ slimMedia: true }),
         quizSubmission: {
           accepted: true,
           answerId: answer.id,
@@ -2107,14 +2150,14 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/quiz/close') {
     closeQuiz()
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 
   if (url.pathname === '/api/quiz/clear') {
     clearQuiz()
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 
@@ -2124,7 +2167,7 @@ async function handleApi(request, response, url) {
       closesAt = calculateClosesAt(settings)
     }
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 
@@ -2146,7 +2189,7 @@ async function handleApi(request, response, url) {
     }
 
     broadcast()
-    sendJson(response, 200, getState(), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getState({ slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -2157,7 +2200,7 @@ async function handleApi(request, response, url) {
     }
 
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 
@@ -2168,7 +2211,7 @@ async function handleApi(request, response, url) {
     }
 
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 
@@ -2209,14 +2252,14 @@ async function handleApi(request, response, url) {
     closed = false
     closesAt = calculateClosesAt(settings)
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 
   if (url.pathname === '/api/team-config') {
     try {
       await applyTeamConfig(body)
-      broadcast({ audience: true })
+      broadcast({ audience: true, fullMedia: true })
       sendJson(response, 200, getState())
     } catch (error) {
       sendJson(response, 400, { error: error.message || 'invalid team config' })
@@ -2227,7 +2270,7 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/team-self-config') {
     try {
       await applyTeamSelfConfig(body)
-      broadcast({ audience: true })
+      broadcast({ audience: true, fullMedia: true })
       sendJson(response, 200, getState())
     } catch (error) {
       sendJson(response, 400, { error: error.message || 'invalid team config' })
@@ -2238,7 +2281,7 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/reset') {
     resetRuntimeState({ seed: Boolean(body.seed), keepParticipants: Boolean(body.keepParticipants) && !body.seed })
     broadcast({ audience: true })
-    sendJson(response, 200, getState())
+    sendJson(response, 200, getState({ slimMedia: true }))
     return
   }
 

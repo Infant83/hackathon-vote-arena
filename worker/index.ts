@@ -559,7 +559,7 @@ export class ArenaRoom {
     const url = new URL(request.url)
 
     if (request.method === 'GET' && url.pathname === '/api/state') {
-      return json(this.getState())
+      return json(this.getState({ slimMedia: url.searchParams.get('media') === 'slim' }))
     }
 
     if (request.method === 'GET' && url.pathname === '/events') {
@@ -575,7 +575,7 @@ export class ArenaRoom {
       }
       if (!updated) return json({ error: 'teams array required' }, 400)
 
-      await this.commit({ audience: true })
+      await this.commit({ audience: true, fullMedia: true })
       return json(this.getState())
     }
 
@@ -691,7 +691,7 @@ export class ArenaRoom {
       this.removeCheersForClearedTeams(person, previousAllocations, nextAllocations)
       this.lastRaffle = null
       await this.commit()
-      return json(this.getState(), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+      return json(this.getState({ slimMedia: true }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
     if (pathname === '/api/cheer') {
@@ -719,7 +719,7 @@ export class ArenaRoom {
       })
       this.cheers.splice(maxStoredCheerMessages)
       await this.commit()
-      return json(this.getState(), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+      return json(this.getState({ slimMedia: true }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
     if (pathname === '/api/cheer/moderate') {
@@ -731,7 +731,7 @@ export class ArenaRoom {
       message.hidden = Boolean(body.hidden)
       this.lastRaffle = null
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     if (pathname === '/api/cheer/bulk') {
@@ -754,7 +754,7 @@ export class ArenaRoom {
 
       this.lastRaffle = null
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     if (pathname === '/api/raffle') {
@@ -804,20 +804,20 @@ export class ArenaRoom {
       }
 
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     if (pathname === '/api/quiz/open') {
       if (!this.openQuiz(body)) return json({ error: 'quiz question and answer required' }, 400)
 
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     if (pathname === '/api/quiz/prepare') {
       this.prepareQuiz()
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     if (pathname === '/api/quiz/answer') {
@@ -830,7 +830,7 @@ export class ArenaRoom {
       if (!answer) {
         return json(
           {
-            ...this.getState(),
+            ...this.getState({ slimMedia: true }),
             quizSubmission: {
               accepted: false,
               reason: this.getQuizAnswerRejectionReason(person, body.text, body),
@@ -845,7 +845,7 @@ export class ArenaRoom {
       await this.commit({ audience: true })
       return json(
         {
-          ...this.getState(),
+          ...this.getState({ slimMedia: true }),
           quizSubmission: {
             accepted: true,
             answerId: answer.id,
@@ -862,13 +862,13 @@ export class ArenaRoom {
     if (pathname === '/api/quiz/close') {
       this.closeQuiz()
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     if (pathname === '/api/quiz/clear') {
       this.clearQuiz()
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     if (pathname === '/api/close') {
@@ -877,7 +877,7 @@ export class ArenaRoom {
         this.closesAt = calculateClosesAt(this.settings)
       }
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     if (pathname === '/api/register') {
@@ -889,21 +889,21 @@ export class ArenaRoom {
       if (!person) return json({ error: 'name, group, and department required' }, 400)
 
       await this.commit()
-      return json(this.getState(), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+      return json(this.getState({ slimMedia: true }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
     if (pathname === '/api/participant/reset') {
       if (!this.resetParticipant(body.participantId)) return json({ error: 'participant not found' }, 404)
 
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     if (pathname === '/api/participant/delete') {
       if (!this.deleteParticipant(body.participantId)) return json({ error: 'participant not found' }, 404)
 
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     if (pathname === '/api/settings') {
@@ -933,14 +933,14 @@ export class ArenaRoom {
       this.closed = false
       this.lastRaffle = null
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     if (pathname === '/api/team-config') {
       const updated = this.applyTeamConfig(body)
       if (!updated) return json({ error: 'teams array required' }, 400)
 
-      await this.commit({ audience: true })
+      await this.commit({ audience: true, fullMedia: true })
       return json(this.getState())
     }
 
@@ -948,20 +948,20 @@ export class ArenaRoom {
       const updated = this.applyTeamSelfConfig(body)
       if (!updated) return json({ error: 'team not found' }, 400)
 
-      await this.commit({ audience: true })
+      await this.commit({ audience: true, fullMedia: true })
       return json(this.getState())
     }
 
     if (pathname === '/api/reset') {
       await this.resetRuntimeState({ seed: Boolean(body.seed), keepParticipants: Boolean(body.keepParticipants) && !body.seed })
       await this.commit({ audience: true })
-      return json(this.getState())
+      return json(this.getState({ slimMedia: true }))
     }
 
     return json({ error: 'not found' }, 404)
   }
 
-  private getState() {
+  private getState(options: { slimMedia?: boolean } = {}) {
     const serverTime = Date.now()
 
     if (!this.closed && serverTime > this.closesAt) {
@@ -1030,7 +1030,7 @@ export class ArenaRoom {
       share: maxStars > 0 ? Math.max(8, Math.round((team.totalStars / maxStars) * 100)) : 0,
     }))
 
-    return {
+    const state = {
       teams: rankedTeams,
       participants: participantList,
       cheers: this.cheers.slice(0, 120),
@@ -1049,6 +1049,8 @@ export class ArenaRoom {
       configRevision: this.configRevision,
       configUpdatedAt: this.configUpdatedAt,
     }
+
+    return options.slimMedia ? slimStateMedia(state) : state
   }
 
   private getRuntimeSettings(source: Settings = this.settings): Settings {
@@ -1153,7 +1155,7 @@ export class ArenaRoom {
     })
   }
 
-  private async commit(options: { audience?: boolean } = {}) {
+  private async commit(options: { audience?: boolean; fullMedia?: boolean } = {}) {
     this.advanceQuizPhase()
     await this.persist()
     this.broadcast(options)
@@ -1164,8 +1166,8 @@ export class ArenaRoom {
     this.configUpdatedAt = Date.now()
   }
 
-  private broadcast({ audience = false }: { audience?: boolean } = {}) {
-    const payload = `event: state\ndata: ${JSON.stringify(this.getState())}\n\n`
+  private broadcast({ audience = false, fullMedia = false }: { audience?: boolean; fullMedia?: boolean } = {}) {
+    const payload = `event: state\ndata: ${JSON.stringify(this.getState({ slimMedia: !fullMedia }))}\n\n`
     for (const [client, role] of this.clients.entries()) {
       if (role === 'vote' && !audience) continue
       this.sendState(client, payload)
@@ -1841,6 +1843,49 @@ export class ArenaRoom {
   }
 }
 
+function slimStateMedia<T extends {
+  copy: EventCopy
+  teams: TeamState[]
+  quizBank: QuizConfig[]
+}>(state: T): T {
+  return {
+    ...state,
+    copy: slimCopyMedia(state.copy),
+    teams: state.teams.map((team) => slimTeamMedia(team)) as TeamState[],
+    quizBank: state.quizBank.map((quiz) => slimQuizConfigMedia(quiz)) as QuizConfig[],
+  }
+}
+
+function slimCopyMedia(source: EventCopy): EventCopy {
+  const next = { ...source }
+
+  for (const key of Object.keys(next)) {
+    if (isImageCopyKey(key) && isLargeInlineImageSource(next[key as keyof EventCopy])) {
+      delete (next as Partial<EventCopy>)[key as keyof EventCopy]
+    }
+  }
+
+  return next as EventCopy
+}
+
+function slimTeamMedia<T extends TeamState>(team: T): T {
+  if (!isLargeInlineImageSource(team.logoFile)) return team
+  const next = { ...team } as Partial<TeamState>
+  delete next.logoFile
+  return next as T
+}
+
+function slimQuizConfigMedia<T extends QuizConfig>(quiz: T): T {
+  if (!isLargeInlineImageSource(quiz.prizeImageFile)) return quiz
+  const next = { ...quiz } as Partial<QuizConfig>
+  delete next.prizeImageFile
+  return next as T
+}
+
+function isLargeInlineImageSource(value: unknown) {
+  return typeof value === 'string' && /^data:image\//i.test(value) && value.length > 4096
+}
+
 function loadConfig(config: unknown) {
   const parsed = config && typeof config === 'object' ? (config as Record<string, unknown>) : {}
   const teamSource = Array.isArray(parsed) ? parsed : parsed.teams
@@ -1977,14 +2022,20 @@ function decodeTeamConfigPayload(value: string | null): RequestBody {
   const text = String(value || '').trim()
   if (!text) throw new Error('payload required')
 
-  const binary = atob(text.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(text.length / 4) * 4, '='))
-  const compressed = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) {
-    compressed[index] = binary.charCodeAt(index)
-  }
-  if (compressed.length > 1_000_000) throw new Error('payload too large')
+  try {
+    const binary = atob(text.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(text.length / 4) * 4, '='))
+    const compressed = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) {
+      compressed[index] = binary.charCodeAt(index)
+    }
+    if (compressed.length > 1_000_000) throw new Error('payload too large')
 
-  return JSON.parse(strFromU8(inflateSync(compressed))) as RequestBody
+    return JSON.parse(strFromU8(inflateSync(compressed))) as RequestBody
+  } catch (error) {
+    throw new Error(`payload decode failed: ${error instanceof Error ? error.message : 'invalid compressed config'}`, {
+      cause: error,
+    })
+  }
 }
 
 function json(data: unknown, status = 200, headers: HeadersInit = {}) {
