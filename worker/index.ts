@@ -121,7 +121,7 @@ type VoteEvent = {
   createdAt: number
 }
 
-type RaffleRule = 'all' | 'leader' | 'top3' | 'rank456' | 'rank7to10Three' | 'multi' | 'big' | 'longestCheer' | 'cheer'
+type RaffleRule = 'all' | 'leader' | 'top3' | 'rank456' | 'rank789Cheer' | 'rank10Cheer' | 'multi' | 'big' | 'longestCheer' | 'cheer'
 
 type RaffleSupportDetail = {
   teamId: string
@@ -240,6 +240,7 @@ type Snapshot = {
   closed: boolean
   closesAt: number
   lastRaffle: LastRaffle | null
+  raffleStage?: RaffleStageState
   awardHistory?: AwardRecord[]
   quiz?: QuizState
   quizAnswerKeys?: string[]
@@ -255,6 +256,13 @@ type Snapshot = {
   configRevision?: number
   configUpdatedAt?: number
   settingsVersion?: number
+}
+
+type RaffleStageState = {
+  active: boolean
+  rule: RaffleRule
+  drawing: boolean
+  updatedAt: number
 }
 
 type RequestBody = Record<string, unknown>
@@ -317,7 +325,7 @@ const defaultCopy = {
   wallOverviewLabel: '실시간 현황',
   wallCheerLabel: '응원메세지',
   wallRaffleLabel: '행운권추첨',
-  wallShowupLabel: '말풍선 Showup',
+  wallShowupLabel: '말풍선',
   wallQuizLabel: '퀴즈',
   wallArenaEyeline: 'Live Arena Wall',
   wallArenaTitle: '실시간 별 현황',
@@ -329,7 +337,7 @@ const defaultCopy = {
   wallQuizEyeline: 'Live Quiz',
   wallQuizTitle: '퀴즈',
   quizStandbyHeadline: '퀴즈를 준비 중입니다',
-  quizStandbySubhead: '참가자 화면이 퀴즈 대기 모드로 전환되었습니다',
+  quizStandbySubhead: '',
   quizStandbyHint: '문제가 출제되면 3초 카운트다운 뒤 문제가 공개됩니다. 최대한 빨리 정답을 입력하세요. :)',
   quizCurrentQuestionLabel: 'Current Question',
   quizPendingQuestion: '퀴즈 대기 중입니다.',
@@ -348,6 +356,7 @@ const defaultCopy = {
   rafflePrizeImageTop3: '',
   rafflePrizeImageRank456: '',
   rafflePrizeImageLowerPack: '',
+  rafflePrizeImageRank10: '',
   rafflePrizeImageMulti: '',
   rafflePrizeImageBig: '',
   rafflePrizeImageLongestCheer: '',
@@ -357,9 +366,19 @@ const defaultCopy = {
   rafflePrizeNameTop3: '',
   rafflePrizeNameRank456: '',
   rafflePrizeNameLowerPack: '',
+  rafflePrizeNameRank10: '',
   rafflePrizeNameMulti: '',
   rafflePrizeNameBig: '',
   rafflePrizeNameLongestCheer: '',
+  raffleRuleLabelAll: '공개 응원 메시지 참여자',
+  raffleRuleLabelLeader: '현재 1위 팀에 별을 준 참여자',
+  raffleRuleLabelTop3: '현재 1·2·3위 팀 모두에 별을 준 참여자',
+  raffleRuleLabelRank456: '현재 4·5·6위 팀 모두에 별을 준 참여자',
+  raffleRuleLabelRank789Cheer: '현재 7·8·9위 팀 모두에게 응원 메시지를 보낸 참여자',
+  raffleRuleLabelRank10Cheer: '현재 10위 팀에게 응원 메시지를 보낸 참여자',
+  raffleRuleLabelMulti: '5개 이상 팀에 별을 나눠 준 참여자',
+  raffleRuleLabelBig: '한 팀에 최대 별을 모두 준 참여자',
+  raffleRuleLabelLongestCheer: '가장 긴 응원 메시지를 남긴 참여자',
   raffleStartButtonLabel: '추첨 시작',
   raffleStopButtonLabel: '정지',
   awardHistoryNotice: '당첨 선물은 행사 종료 후 운영진 확인을 거쳐 순차적으로 전달됩니다.',
@@ -427,7 +446,8 @@ const rafflePrizeImageKeyByRule: Record<RaffleRule, keyof EventCopy> = {
   leader: 'rafflePrizeImageLeader',
   top3: 'rafflePrizeImageTop3',
   rank456: 'rafflePrizeImageRank456',
-  rank7to10Three: 'rafflePrizeImageLowerPack',
+  rank789Cheer: 'rafflePrizeImageLowerPack',
+  rank10Cheer: 'rafflePrizeImageRank10',
   multi: 'rafflePrizeImageMulti',
   big: 'rafflePrizeImageBig',
   longestCheer: 'rafflePrizeImageLongestCheer',
@@ -439,7 +459,8 @@ const rafflePrizeNameKeyByRule: Record<RaffleRule, keyof EventCopy> = {
   leader: 'rafflePrizeNameLeader',
   top3: 'rafflePrizeNameTop3',
   rank456: 'rafflePrizeNameRank456',
-  rank7to10Three: 'rafflePrizeNameLowerPack',
+  rank789Cheer: 'rafflePrizeNameLowerPack',
+  rank10Cheer: 'rafflePrizeNameRank10',
   multi: 'rafflePrizeNameMulti',
   big: 'rafflePrizeNameBig',
   longestCheer: 'rafflePrizeNameLongestCheer',
@@ -520,6 +541,12 @@ export class ArenaRoom {
   private closed = false
   private closesAt = Date.now() + defaultDurationMinutes * 60 * 1000
   private lastRaffle: LastRaffle | null = null
+  private raffleStage: RaffleStageState = {
+    active: false,
+    rule: 'all',
+    drawing: false,
+    updatedAt: Date.now(),
+  }
   private quiz: QuizState = { ...emptyQuizState }
   private quizAnswerKeys: string[] = []
   private cheerId = 1
@@ -606,6 +633,7 @@ export class ArenaRoom {
     this.closed = Boolean(snapshot.closed)
     this.closesAt = Number(snapshot.closesAt || Date.now() + defaultDurationMinutes * 60 * 1000)
     this.lastRaffle = snapshot.lastRaffle || null
+    this.raffleStage = normalizeRaffleStage(snapshot.raffleStage)
     this.quiz = normalizeQuizState(snapshot.quiz)
     this.quizAnswerKeys = Array.isArray(snapshot.quizAnswerKeys) ? snapshot.quizAnswerKeys.filter(Boolean) : []
     this.quizBank = normalizeQuizBank(snapshot.quizBank, initialConfig.quizBank)
@@ -656,6 +684,7 @@ export class ArenaRoom {
       closed: this.closed,
       closesAt: this.closesAt,
       lastRaffle: this.lastRaffle,
+      raffleStage: this.raffleStage,
       quiz: this.quiz,
       quizAnswerKeys: this.quizAnswerKeys,
       quizAnswerId: this.quizAnswerId,
@@ -801,6 +830,20 @@ export class ArenaRoom {
           prizeName,
           createdAt,
         })
+      }
+
+      await this.commit({ audience: true })
+      return json(this.getState({ slimMedia: true }))
+    }
+
+    if (pathname === '/api/raffle/stage') {
+      const active = body.active === undefined ? true : Boolean(body.active)
+      const rule = isRaffleRule(body.rule) ? body.rule : this.raffleStage.rule
+      this.raffleStage = {
+        active,
+        rule,
+        drawing: active ? Boolean(body.drawing) : false,
+        updatedAt: Date.now(),
       }
 
       await this.commit({ audience: true })
@@ -1039,6 +1082,7 @@ export class ArenaRoom {
       closed: this.closed,
       closesAt: this.closesAt,
       lastRaffle: this.lastRaffle,
+      raffleStage: this.raffleStage,
       quiz: this.sanitizeQuizState(),
       quizBank: this.quizBank,
       serverTime,
@@ -1325,16 +1369,27 @@ export class ArenaRoom {
     const leaderId = state.teams[0]?.id
     const topThreeIds = state.teams.slice(0, 3).map((team) => team.id)
     const rank456Ids = state.teams.slice(3, 6).map((team) => team.id)
-    const rank7to10Ids = state.teams.slice(6, 10).map((team) => team.id)
+    const rank789Ids = state.teams.slice(6, 9).map((team) => team.id)
+    const rank10Id = state.teams[9]?.id
+    const runtimeSettings = this.getRuntimeSettings()
+    const bigThreshold = Math.min(runtimeSettings.starBudget, runtimeSettings.maxStarsPerTeam)
+    const cheeredTeamIdsByParticipant = new Map<string, Set<string>>()
     const longestCheerByParticipant = new Map<string, number>()
 
-    if (rule === 'longestCheer') {
+    if (rule === 'longestCheer' || rule === 'rank789Cheer' || rule === 'rank10Cheer') {
       for (const message of this.cheers) {
         if (!message.participantId || message.hidden) continue
-        longestCheerByParticipant.set(
-          message.participantId,
-          Math.max(longestCheerByParticipant.get(message.participantId) ?? 0, message.text.trim().length),
-        )
+        if (rule === 'rank789Cheer' || rule === 'rank10Cheer') {
+          const teamIds = cheeredTeamIdsByParticipant.get(message.participantId) ?? new Set<string>()
+          teamIds.add(message.teamId)
+          cheeredTeamIdsByParticipant.set(message.participantId, teamIds)
+        }
+        if (rule === 'longestCheer') {
+          longestCheerByParticipant.set(
+            message.participantId,
+            Math.max(longestCheerByParticipant.get(message.participantId) ?? 0, message.text.trim().length),
+          )
+        }
       }
     }
 
@@ -1350,11 +1405,10 @@ export class ArenaRoom {
       if (rule === 'leader') return Boolean(leaderId && person.allocations[leaderId])
       if (rule === 'top3') return topThreeIds.every((teamId) => Boolean(person.allocations[teamId]))
       if (rule === 'rank456') return rank456Ids.length === 3 && rank456Ids.every((teamId) => Boolean(person.allocations[teamId]))
-      if (rule === 'rank7to10Three') {
-        return rank7to10Ids.length >= 3 && rank7to10Ids.filter((teamId) => Boolean(person.allocations[teamId])).length >= 3
-      }
+      if (rule === 'rank789Cheer') return rank789Ids.length === 3 && rank789Ids.every((teamId) => cheeredTeamIdsByParticipant.get(person.id)?.has(teamId))
+      if (rule === 'rank10Cheer') return Boolean(rank10Id && cheeredTeamIdsByParticipant.get(person.id)?.has(rank10Id))
       if (rule === 'multi') return allocationValues.length >= 5
-      if (rule === 'big') return allocationValues.some((value) => value >= 7)
+      if (rule === 'big') return allocationValues.some((value) => value >= bigThreshold)
       if (rule === 'longestCheer') return longestCheerLength > 0 && (longestCheerByParticipant.get(person.id) ?? 0) === longestCheerLength
       if (rule === 'cheer') return person.cheered
       return true
@@ -1504,12 +1558,14 @@ export class ArenaRoom {
 
     this.quiz = {
       ...this.quiz,
-      mode: 'closed',
+      mode: 'open',
       answers: this.quiz.answers.map((answer) => ({
         ...answer,
         rank: winnerRankById.get(answer.id),
       })),
       winners: rankedWinners,
+      settlementStartedAt: 0,
+      settlementDeadlineAt: 0,
       updatedAt: now,
     }
 
@@ -1640,7 +1696,7 @@ export class ArenaRoom {
     this.quiz.answers.unshift(answer)
     this.quiz.answers.splice(maxStoredQuizAnswers)
 
-    if (correct && this.quiz.mode === 'open') {
+    if (correct && this.quiz.mode === 'open' && this.quiz.winners.length === 0) {
       this.quiz = {
         ...this.quiz,
         mode: 'settling',
@@ -1769,6 +1825,12 @@ export class ArenaRoom {
     this.closed = false
     this.closesAt = calculateClosesAt(this.settings)
     this.lastRaffle = null
+    this.raffleStage = {
+      active: false,
+      rule: 'all',
+      drawing: false,
+      updatedAt: Date.now(),
+    }
 
     if (seed) {
       this.seedTestData()
@@ -2257,6 +2319,7 @@ function isAdminProtectedRequest(url: URL, method: string) {
     '/api/cheer/moderate',
     '/api/cheer/bulk',
     '/api/raffle',
+    '/api/raffle/stage',
     '/api/quiz/open',
     '/api/quiz/prepare',
     '/api/quiz/close',
@@ -2307,12 +2370,23 @@ function isRaffleRule(value: unknown): value is RaffleRule {
     value === 'leader' ||
     value === 'top3' ||
     value === 'rank456' ||
-    value === 'rank7to10Three' ||
+    value === 'rank789Cheer' ||
+    value === 'rank10Cheer' ||
     value === 'multi' ||
     value === 'big' ||
     value === 'longestCheer' ||
     value === 'cheer'
   )
+}
+
+function normalizeRaffleStage(value: unknown): RaffleStageState {
+  const source = value && typeof value === 'object' ? value as Partial<RaffleStageState> : {}
+  return {
+    active: Boolean(source.active),
+    rule: isRaffleRule(source.rule) ? source.rule : 'all',
+    drawing: Boolean(source.active && source.drawing),
+    updatedAt: Number(source.updatedAt || Date.now()),
+  }
 }
 
 function shuffle<T>(items: T[]) {

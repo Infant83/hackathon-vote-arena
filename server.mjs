@@ -17,6 +17,7 @@ const maxConfigurableStarsPerTeam = 10
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const defaultRaffleCheerWeight = 0.2
+const raffleRules = new Set(['all', 'leader', 'top3', 'rank456', 'rank789Cheer', 'rank10Cheer', 'multi', 'big', 'longestCheer', 'cheer'])
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
 const maxStoredCheerMessages = 5000
@@ -77,7 +78,7 @@ const defaultCopy = {
   wallOverviewLabel: '실시간 현황',
   wallCheerLabel: '응원메세지',
   wallRaffleLabel: '행운권추첨',
-  wallShowupLabel: '말풍선 Showup',
+  wallShowupLabel: '말풍선',
   wallQuizLabel: '퀴즈',
   wallArenaEyeline: 'Live Arena Wall',
   wallArenaTitle: '실시간 별 현황',
@@ -89,7 +90,7 @@ const defaultCopy = {
   wallQuizEyeline: 'Live Quiz',
   wallQuizTitle: '퀴즈',
   quizStandbyHeadline: '퀴즈를 준비 중입니다',
-  quizStandbySubhead: '참가자 화면이 퀴즈 대기 모드로 전환되었습니다',
+  quizStandbySubhead: '',
   quizStandbyHint: '문제가 출제되면 3초 카운트다운 뒤 문제가 공개됩니다. 최대한 빨리 정답을 입력하세요. :)',
   quizCurrentQuestionLabel: 'Current Question',
   quizPendingQuestion: '퀴즈 대기 중입니다.',
@@ -108,6 +109,7 @@ const defaultCopy = {
   rafflePrizeImageTop3: '',
   rafflePrizeImageRank456: '',
   rafflePrizeImageLowerPack: '',
+  rafflePrizeImageRank10: '',
   rafflePrizeImageMulti: '',
   rafflePrizeImageBig: '',
   rafflePrizeImageLongestCheer: '',
@@ -117,9 +119,19 @@ const defaultCopy = {
   rafflePrizeNameTop3: '',
   rafflePrizeNameRank456: '',
   rafflePrizeNameLowerPack: '',
+  rafflePrizeNameRank10: '',
   rafflePrizeNameMulti: '',
   rafflePrizeNameBig: '',
   rafflePrizeNameLongestCheer: '',
+  raffleRuleLabelAll: '공개 응원 메시지 참여자',
+  raffleRuleLabelLeader: '현재 1위 팀에 별을 준 참여자',
+  raffleRuleLabelTop3: '현재 1·2·3위 팀 모두에 별을 준 참여자',
+  raffleRuleLabelRank456: '현재 4·5·6위 팀 모두에 별을 준 참여자',
+  raffleRuleLabelRank789Cheer: '현재 7·8·9위 팀 모두에게 응원 메시지를 보낸 참여자',
+  raffleRuleLabelRank10Cheer: '현재 10위 팀에게 응원 메시지를 보낸 참여자',
+  raffleRuleLabelMulti: '5개 이상 팀에 별을 나눠 준 참여자',
+  raffleRuleLabelBig: '한 팀에 최대 별을 모두 준 참여자',
+  raffleRuleLabelLongestCheer: '가장 긴 응원 메시지를 남긴 참여자',
   raffleStartButtonLabel: '추첨 시작',
   raffleStopButtonLabel: '정지',
   awardHistoryNotice: '당첨 선물은 행사 종료 후 운영진 확인을 거쳐 순차적으로 전달됩니다.',
@@ -276,7 +288,8 @@ const rafflePrizeImageKeyByRule = {
   leader: 'rafflePrizeImageLeader',
   top3: 'rafflePrizeImageTop3',
   rank456: 'rafflePrizeImageRank456',
-  rank7to10Three: 'rafflePrizeImageLowerPack',
+  rank789Cheer: 'rafflePrizeImageLowerPack',
+  rank10Cheer: 'rafflePrizeImageRank10',
   multi: 'rafflePrizeImageMulti',
   big: 'rafflePrizeImageBig',
   longestCheer: 'rafflePrizeImageLongestCheer',
@@ -288,7 +301,8 @@ const rafflePrizeNameKeyByRule = {
   leader: 'rafflePrizeNameLeader',
   top3: 'rafflePrizeNameTop3',
   rank456: 'rafflePrizeNameRank456',
-  rank7to10Three: 'rafflePrizeNameLowerPack',
+  rank789Cheer: 'rafflePrizeNameLowerPack',
+  rank10Cheer: 'rafflePrizeNameRank10',
   multi: 'rafflePrizeNameMulti',
   big: 'rafflePrizeNameBig',
   longestCheer: 'rafflePrizeNameLongestCheer',
@@ -328,6 +342,12 @@ const emptyQuizState = {
 let closed = false
 let closesAt = Date.now() + defaultDurationMinutes * 60 * 1000
 let lastRaffle = null
+let raffleStage = {
+  active: false,
+  rule: 'all',
+  drawing: false,
+  updatedAt: Date.now(),
+}
 let cheerId = 1
 let voteEventId = 1
 let quizAnswerId = 1
@@ -807,6 +827,7 @@ function getState(options = {}) {
     closed,
     closesAt,
     lastRaffle,
+    raffleStage,
     quiz: sanitizeQuizState(),
     quizBank,
     serverTime,
@@ -818,7 +839,40 @@ function getState(options = {}) {
     configUpdatedAt,
   }
 
-  return options.slimMedia ? slimStateMedia(state) : state
+  const mediaState = options.slimMedia ? slimStateMedia(state) : state
+  return shapeStateForRole(mediaState, options)
+}
+
+function shapeStateForRole(state, options = {}) {
+  if (options.role !== 'vote') return state
+
+  const participantId = String(options.participantId || '')
+  const ownParticipants = participantId
+    ? state.participants.filter((person) => person.id === participantId || getParticipantDeviceIds(person).includes(participantId))
+    : []
+  const ownParticipantIds = new Set(ownParticipants.map((person) => person.id))
+  const ownAwardHistory = ownParticipantIds.size
+    ? state.awardHistory.filter((record) => ownParticipantIds.has(record.participantId))
+    : []
+  const ownQuizAnswers = ownParticipantIds.size
+    ? state.quiz.answers.filter((answer) => ownParticipantIds.has(answer.participantId))
+    : []
+  const visibleOrOwnCheers = state.cheers.filter((message) => {
+    if (!message.hidden) return true
+    return ownParticipantIds.has(message.participantId)
+  })
+
+  return {
+    ...state,
+    participants: ownParticipants,
+    cheers: visibleOrOwnCheers,
+    voteEvents: [],
+    awardHistory: ownAwardHistory,
+    quiz: {
+      ...state.quiz,
+      answers: ownQuizAnswers,
+    },
+  }
 }
 
 function slimStateMedia(state) {
@@ -988,16 +1042,27 @@ function getRaffleCandidates(rule) {
   const leaderId = state.teams[0]?.id
   const topThreeIds = state.teams.slice(0, 3).map((team) => team.id)
   const rank456Ids = state.teams.slice(3, 6).map((team) => team.id)
-  const rank7to10Ids = state.teams.slice(6, 10).map((team) => team.id)
+  const rank789Ids = state.teams.slice(6, 9).map((team) => team.id)
+  const rank10Id = state.teams[9]?.id
+  const runtimeSettings = getRuntimeSettings()
+  const bigThreshold = Math.min(runtimeSettings.starBudget, runtimeSettings.maxStarsPerTeam)
+  const cheeredTeamIdsByParticipant = new Map()
   const longestCheerByParticipant = new Map()
 
-  if (rule === 'longestCheer') {
+  if (rule === 'longestCheer' || rule === 'rank789Cheer' || rule === 'rank10Cheer') {
     for (const message of cheers) {
       if (!message.participantId || message.hidden) continue
-      longestCheerByParticipant.set(
-        message.participantId,
-        Math.max(longestCheerByParticipant.get(message.participantId) || 0, message.text.trim().length),
-      )
+      if (rule === 'rank789Cheer' || rule === 'rank10Cheer') {
+        const teamIds = cheeredTeamIdsByParticipant.get(message.participantId) || new Set()
+        teamIds.add(message.teamId)
+        cheeredTeamIdsByParticipant.set(message.participantId, teamIds)
+      }
+      if (rule === 'longestCheer') {
+        longestCheerByParticipant.set(
+          message.participantId,
+          Math.max(longestCheerByParticipant.get(message.participantId) || 0, message.text.trim().length),
+        )
+      }
     }
   }
 
@@ -1013,11 +1078,10 @@ function getRaffleCandidates(rule) {
     if (rule === 'leader') return Boolean(person.allocations[leaderId])
     if (rule === 'top3') return topThreeIds.every((teamId) => Boolean(person.allocations[teamId]))
     if (rule === 'rank456') return rank456Ids.length === 3 && rank456Ids.every((teamId) => Boolean(person.allocations[teamId]))
-    if (rule === 'rank7to10Three') {
-      return rank7to10Ids.length >= 3 && rank7to10Ids.filter((teamId) => Boolean(person.allocations[teamId])).length >= 3
-    }
+    if (rule === 'rank789Cheer') return rank789Ids.length === 3 && rank789Ids.every((teamId) => cheeredTeamIdsByParticipant.get(person.id)?.has(teamId))
+    if (rule === 'rank10Cheer') return Boolean(rank10Id && cheeredTeamIdsByParticipant.get(person.id)?.has(rank10Id))
     if (rule === 'multi') return allocationValues.length >= 5
-    if (rule === 'big') return allocationValues.some((value) => value >= 7)
+    if (rule === 'big') return allocationValues.some((value) => value >= bigThreshold)
     if (rule === 'longestCheer') return longestCheerLength > 0 && (longestCheerByParticipant.get(person.id) || 0) === longestCheerLength
     if (rule === 'cheer') return person.cheered
     return true
@@ -1185,12 +1249,14 @@ function finalizeQuizSettlement(now = Date.now()) {
 
   quiz = {
     ...quiz,
-    mode: 'closed',
+    mode: 'open',
     answers: quiz.answers.map((answer) => ({
       ...answer,
       rank: winnerRankById.get(answer.id),
     })),
     winners: rankedWinners,
+    settlementStartedAt: 0,
+    settlementDeadlineAt: 0,
     updatedAt: now,
   }
 
@@ -1332,7 +1398,7 @@ function submitQuizAnswer(person, textValue, body = {}) {
   quiz.answers.unshift(answer)
   quiz.answers.splice(maxStoredQuizAnswers)
 
-  if (correct && quiz.mode === 'open') {
+  if (correct && quiz.mode === 'open' && quiz.winners.length === 0) {
     quiz = {
       ...quiz,
       mode: 'settling',
@@ -1636,6 +1702,7 @@ function isAdminProtectedPath(pathname) {
     '/api/cheer/moderate',
     '/api/cheer/bulk',
     '/api/raffle',
+    '/api/raffle/stage',
     '/api/quiz/open',
     '/api/quiz/prepare',
     '/api/quiz/close',
@@ -1705,6 +1772,12 @@ function resetRuntimeState({ seed = false, keepParticipants = false } = {}) {
   closed = false
   closesAt = calculateClosesAt(settings)
   lastRaffle = null
+  raffleStage = {
+    active: false,
+    rule: 'all',
+    drawing: false,
+    updatedAt: Date.now(),
+  }
 
   if (seed) {
     seedTestData()
@@ -1813,17 +1886,55 @@ function decodeTeamConfigPayload(value) {
 }
 
 function broadcast({ audience = false, fullMedia = false } = {}) {
-  const payload = `event: state\ndata: ${JSON.stringify(getState({ slimMedia: !fullMedia }))}\n\n`
+  const payloadCache = new Map()
+  const getPayload = (client) => {
+    const cacheKey = `${client.role}:${client.participantId || ''}:${fullMedia ? 'full' : 'slim'}`
+    if (!payloadCache.has(cacheKey)) {
+      payloadCache.set(
+        cacheKey,
+        `event: state\ndata: ${JSON.stringify(getState({ slimMedia: !fullMedia, role: client.role, participantId: client.participantId }))}\n\n`,
+      )
+    }
+    return payloadCache.get(cacheKey)
+  }
 
-  for (const [response, role] of clients.entries()) {
-    if (role === 'vote' && !audience) continue
+  for (const [response, client] of clients.entries()) {
+    if (client.role === 'vote' && !audience) continue
 
     try {
-      response.write(payload)
+      response.write(getPayload(client))
     } catch {
       clients.delete(response)
     }
   }
+}
+
+function getRequestParticipantCookie(request) {
+  const cookies = parseCookies(request.headers.cookie)
+  return cookies[participantCookieName] || ''
+}
+
+function getRequestRoleFromHeaders(request, fallback = 'admin') {
+  const referer = request.headers.referer || ''
+  try {
+    const pathname = new URL(referer).pathname
+    if (pathname.startsWith('/vote')) return 'vote'
+    if (pathname.startsWith('/wall')) return 'wall'
+    if (pathname.startsWith('/admin')) return 'admin'
+  } catch {
+    // Requests without a referer keep the explicit fallback.
+  }
+
+  return fallback
+}
+
+function getStateForRequest(request, options = {}) {
+  const role = options.role || getRequestRoleFromHeaders(request)
+  return getState({
+    ...options,
+    role,
+    participantId: options.participantId ?? getRequestParticipantCookie(request),
+  })
 }
 
 function getEventRole(url) {
@@ -1861,7 +1972,8 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === 'GET' && url.pathname === '/api/state') {
-    sendJson(response, 200, getState({ slimMedia: url.searchParams.get('media') === 'slim' }))
+    const role = getEventRole(url)
+    sendJson(response, 200, getState({ slimMedia: url.searchParams.get('media') === 'slim', role, participantId: getRequestParticipantCookie(request) }))
     return
   }
 
@@ -1877,8 +1989,10 @@ async function handleApi(request, response, url) {
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     })
-    response.write(`event: state\ndata: ${JSON.stringify(getState())}\n\n`)
-    clients.set(response, getEventRole(url))
+    const role = getEventRole(url)
+    const participantId = getRequestParticipantCookie(request)
+    response.write(`event: state\ndata: ${JSON.stringify(getState({ role, participantId }))}\n\n`)
+    clients.set(response, { role, participantId })
     request.on('close', () => clients.delete(response))
     return
   }
@@ -1892,7 +2006,7 @@ async function handleApi(request, response, url) {
     try {
       await applyTeamConfig(decodeTeamConfigPayload(url.searchParams.get('payload')))
       broadcast({ audience: true, fullMedia: true })
-      sendJson(response, 200, getState())
+      sendJson(response, 200, getStateForRequest(request))
     } catch (error) {
       sendJson(response, 400, { error: error.message || 'invalid team config payload' })
     }
@@ -1939,7 +2053,7 @@ async function handleApi(request, response, url) {
     removeCheersForClearedTeams(person, previousAllocations, nextAllocations)
     lastRaffle = null
     broadcast()
-    sendJson(response, 200, getState({ slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -1984,7 +2098,7 @@ async function handleApi(request, response, url) {
     })
     cheers.splice(maxStoredCheerMessages)
     broadcast()
-    sendJson(response, 200, getState({ slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -2000,7 +2114,7 @@ async function handleApi(request, response, url) {
     message.hidden = Boolean(body.hidden)
     lastRaffle = null
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
@@ -2029,12 +2143,12 @@ async function handleApi(request, response, url) {
 
     lastRaffle = null
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
   if (url.pathname === '/api/raffle') {
-    const rule = ['all', 'leader', 'top3', 'rank456', 'rank7to10Three', 'multi', 'big', 'longestCheer', 'cheer'].includes(body.rule) ? body.rule : 'all'
+    const rule = raffleRules.has(body.rule) ? body.rule : 'all'
     const winnerCount = 1
     const candidates = getRaffleCandidates(rule)
     const createdAt = Date.now()
@@ -2080,7 +2194,21 @@ async function handleApi(request, response, url) {
     }
 
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
+    return
+  }
+
+  if (url.pathname === '/api/raffle/stage') {
+    const active = body.active === undefined ? true : Boolean(body.active)
+    const rule = raffleRules.has(body.rule) ? body.rule : raffleStage.rule
+    raffleStage = {
+      active,
+      rule,
+      drawing: active ? Boolean(body.drawing) : false,
+      updatedAt: Date.now(),
+    }
+    broadcast({ audience: true })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
@@ -2091,14 +2219,14 @@ async function handleApi(request, response, url) {
     }
 
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
   if (url.pathname === '/api/quiz/prepare') {
     prepareQuiz()
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
@@ -2117,7 +2245,7 @@ async function handleApi(request, response, url) {
         response,
         200,
         {
-          ...getState({ slimMedia: true }),
+          ...getStateForRequest(request, { slimMedia: true }),
           quizSubmission: {
             accepted: false,
             reason: getQuizAnswerRejectionReason(person, body.text, body),
@@ -2133,7 +2261,7 @@ async function handleApi(request, response, url) {
       response,
       200,
       {
-        ...getState({ slimMedia: true }),
+        ...getStateForRequest(request, { slimMedia: true }),
         quizSubmission: {
           accepted: true,
           answerId: answer.id,
@@ -2150,14 +2278,14 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/quiz/close') {
     closeQuiz()
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
   if (url.pathname === '/api/quiz/clear') {
     clearQuiz()
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
@@ -2167,7 +2295,7 @@ async function handleApi(request, response, url) {
       closesAt = calculateClosesAt(settings)
     }
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
@@ -2189,7 +2317,7 @@ async function handleApi(request, response, url) {
     }
 
     broadcast()
-    sendJson(response, 200, getState({ slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -2200,7 +2328,7 @@ async function handleApi(request, response, url) {
     }
 
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
@@ -2211,7 +2339,7 @@ async function handleApi(request, response, url) {
     }
 
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
@@ -2252,7 +2380,7 @@ async function handleApi(request, response, url) {
     closed = false
     closesAt = calculateClosesAt(settings)
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
@@ -2260,7 +2388,7 @@ async function handleApi(request, response, url) {
     try {
       await applyTeamConfig(body)
       broadcast({ audience: true, fullMedia: true })
-      sendJson(response, 200, getState())
+      sendJson(response, 200, getStateForRequest(request))
     } catch (error) {
       sendJson(response, 400, { error: error.message || 'invalid team config' })
     }
@@ -2271,7 +2399,7 @@ async function handleApi(request, response, url) {
     try {
       await applyTeamSelfConfig(body)
       broadcast({ audience: true, fullMedia: true })
-      sendJson(response, 200, getState())
+      sendJson(response, 200, getStateForRequest(request))
     } catch (error) {
       sendJson(response, 400, { error: error.message || 'invalid team config' })
     }
@@ -2281,7 +2409,7 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/reset') {
     resetRuntimeState({ seed: Boolean(body.seed), keepParticipants: Boolean(body.keepParticipants) && !body.seed })
     broadcast({ audience: true })
-    sendJson(response, 200, getState({ slimMedia: true }))
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
