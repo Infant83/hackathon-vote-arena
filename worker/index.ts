@@ -30,6 +30,8 @@ const participantCookieMaxAge = 60 * 60 * 24 * 14
 const adminCookieName = 'vibe-vote-admin'
 const adminCookieMaxAge = 60 * 60 * 8
 const snapshotKey = 'event-state-v1'
+const mediaStoragePrefix = 'event-media-v1:'
+const storedMediaTokenPrefix = '__stored_media__:'
 const settingsVersion = 6
 
 type Env = {
@@ -626,6 +628,7 @@ export class ArenaRoom {
   private configRevision = 1
   private configUpdatedAt = Date.now()
   private validTeamIds = new Set(initialConfig.teams.map((team) => team.id))
+  private storedMediaKeys = new Set<string>()
   private state: DurableObjectState
   private loaded: Promise<void>
 
@@ -677,9 +680,17 @@ export class ArenaRoom {
   }
 
   private async load() {
-    const snapshot = await this.state.storage.get<Snapshot>(snapshotKey)
+    const rawSnapshot = await this.state.storage.get<Snapshot>(snapshotKey)
 
-    if (!snapshot) return
+    if (!rawSnapshot) return
+
+    const storedMedia = await this.state.storage.list<string>({ prefix: mediaStoragePrefix })
+    this.storedMediaKeys = new Set(storedMedia.keys())
+    const mediaByKey = new Map<string, string>()
+    for (const [storageKey, mediaValue] of storedMedia.entries()) {
+      mediaByKey.set(storageKey.slice(mediaStoragePrefix.length), mediaValue)
+    }
+    const snapshot = restoreStoredMedia(rawSnapshot, mediaByKey)
 
     this.participants = new Map(snapshot.participants.map((person) => [person.id, person]))
     this.cheers = snapshot.cheers || []
@@ -768,7 +779,23 @@ export class ArenaRoom {
       settingsVersion,
     }
 
-    await this.state.storage.put(snapshotKey, snapshot)
+    const { value: storageSnapshot, media } = extractStoredMedia(snapshot)
+    const activeMediaKeys = new Set([...media.keys()].map((key) => `${mediaStoragePrefix}${key}`))
+
+    for (const [key, mediaValue] of media.entries()) {
+      const storageKey = `${mediaStoragePrefix}${key}`
+      if (this.storedMediaKeys.has(storageKey)) continue
+      await this.state.storage.put(storageKey, mediaValue)
+      this.storedMediaKeys.add(storageKey)
+    }
+
+    await this.state.storage.put(snapshotKey, storageSnapshot)
+
+    const staleMediaKeys = [...this.storedMediaKeys].filter((key) => !activeMediaKeys.has(key))
+    if (staleMediaKeys.length) {
+      await this.state.storage.delete(staleMediaKeys)
+      for (const key of staleMediaKeys) this.storedMediaKeys.delete(key)
+    }
   }
 
   private async handleMutation(request: Request, pathname: string, body: RequestBody) {
@@ -2334,8 +2361,75 @@ function slimQuizConfigMedia<T extends QuizConfig>(quiz: T): T {
   return next as T
 }
 
-function isLargeInlineImageSource(value: unknown) {
+function isLargeInlineImageSource(value: unknown): value is string {
   return typeof value === 'string' && /^data:image\//i.test(value) && value.length > 4096
+}
+
+function extractStoredMedia<T>(value: T) {
+  const media = new Map<string, string>()
+  return {
+    value: replaceInlineMedia(value, media) as T,
+    media,
+  }
+}
+
+function replaceInlineMedia(value: unknown, media: Map<string, string>): unknown {
+  if (isLargeInlineImageSource(value)) {
+    const key = getStoredMediaKey(value)
+    media.set(key, value)
+    return `${storedMediaTokenPrefix}${key}`
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => replaceInlineMedia(item, media))
+  }
+
+  if (value && typeof value === 'object') {
+    const next: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      next[key] = replaceInlineMedia(child, media)
+    }
+    return next
+  }
+
+  return value
+}
+
+function restoreStoredMedia<T>(value: T, mediaByKey: Map<string, string>): T {
+  return restoreStoredMediaValue(value, mediaByKey) as T
+}
+
+function restoreStoredMediaValue(value: unknown, mediaByKey: Map<string, string>): unknown {
+  if (typeof value === 'string' && value.startsWith(storedMediaTokenPrefix)) {
+    return mediaByKey.get(value.slice(storedMediaTokenPrefix.length)) || ''
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => restoreStoredMediaValue(item, mediaByKey))
+  }
+
+  if (value && typeof value === 'object') {
+    const next: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      next[key] = restoreStoredMediaValue(child, mediaByKey)
+    }
+    return next
+  }
+
+  return value
+}
+
+function getStoredMediaKey(value: string) {
+  return `${hashString(value)}-${value.length}`
+}
+
+function hashString(value: string) {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
 }
 
 function loadConfig(config: unknown) {

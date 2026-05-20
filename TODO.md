@@ -64,6 +64,7 @@
 - [x] 서버/Worker broadcast를 `vote`, `admin`, `wall/showup` 역할 기준으로 분리했다.
 - [x] 500명 규모를 고려해 `getState()`에서 참여자별 응원 수와 팀별 별 합계를 한 번만 집계하도록 최적화했다.
 - [x] 반복 polling/SSE 상태에서는 큰 inline 이미지를 생략하고 클라이언트가 기존 이미지를 보존하도록 했다.
+- [x] Cloudflare Durable Object 저장 snapshot에서도 큰 inline 이미지를 별도 storage key로 분리해 `SQLITE_TOOBIG` 위험을 낮췄다.
 - [x] 표시용 응원 메시지는 최근 120개만 내려주고, 내부 저장은 최대 5000개까지 유지하도록 했다.
 
 ### 퀴즈 운영
@@ -198,6 +199,7 @@
 - [ ] 긴급 복구 절차를 운영자용 1페이지로 정리한다.
   - Cloudflare Dashboard에서 Worker 상태 확인
   - `npm run cf:deploy` 수동 배포
+  - `README.md`의 긴급 롤백 절차에 따라 직전 안정 버전으로 되돌리기
   - Cloudflare 접속 장애 시 로컬 Node 서버 임시 전환
   - Reset/설정 복원 순서
 

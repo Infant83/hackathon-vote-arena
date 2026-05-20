@@ -1519,6 +1519,7 @@ function App() {
               active: true,
               rule: state.raffleStage.rule,
               drawing: false,
+              clearResult: !state.raffleStage.active,
               ...getRaffleDrawConfig(state, state.raffleStage.rule),
             })
           }
@@ -3160,7 +3161,13 @@ function AdminView({
 
   const openRafflePanel = () => {
     openAdminPanel('raffle')
-    void post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false, ...getRaffleDrawConfig(state, raffleRule) })
+    void post('/api/raffle/stage', {
+      active: true,
+      rule: raffleRule,
+      drawing: false,
+      clearResult: !state.raffleStage.active,
+      ...getRaffleDrawConfig(state, raffleRule),
+    })
   }
 
   const closeDetailPanel = async () => {
