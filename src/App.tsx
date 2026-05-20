@@ -209,6 +209,8 @@ type QuizState = {
   winners: QuizAnswer[]
   introEndsAt: number
   opensAt: number
+  confirmReadyAt: number
+  confirmModeStartedAt: number
   settlementStartedAt: number
   settlementDeadlineAt: number
   createdAt: number
@@ -265,6 +267,7 @@ type EventState = {
     minScore: number
     raffleCheerWeight: number
     quizAnswerLimit: number
+    quizInitialConfirmDelaySeconds: number
     cheerNameMode: CheerNameMode
     themeMode: ThemeMode
   }
@@ -424,7 +427,15 @@ type RaffleStageState = {
   active: boolean
   rule: RaffleRule
   drawing: boolean
+  winnerCount?: number
+  prizeImageFile?: string
+  prizeName?: string
   updatedAt: number
+}
+type RafflePrizeSelection = {
+  name: string
+  image: string
+  label: string
 }
 type AdminSessionState = {
   ready: boolean
@@ -742,6 +753,8 @@ const DEFAULT_MIN_SCORE = 5
 const DEFAULT_RAFFLE_CHEER_WEIGHT = 0.2
 const DEFAULT_QUIZ_ANSWER_LIMIT = 3
 const MAX_QUIZ_ANSWER_LIMIT = 10
+const DEFAULT_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS = 20
+const MAX_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS = 60
 const KST_OFFSET_MINUTES = 9 * 60
 const DEFAULT_TEAM_PHOTO_RADIUS = 18
 const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
@@ -1370,6 +1383,8 @@ const fallbackState: EventState = {
     winners: [],
     introEndsAt: 0,
     opensAt: 0,
+    confirmReadyAt: 0,
+    confirmModeStartedAt: 0,
     settlementStartedAt: 0,
     settlementDeadlineAt: 0,
     createdAt: 0,
@@ -1391,6 +1406,7 @@ const fallbackState: EventState = {
     minScore: DEFAULT_MIN_SCORE,
     raffleCheerWeight: DEFAULT_RAFFLE_CHEER_WEIGHT,
     quizAnswerLimit: DEFAULT_QUIZ_ANSWER_LIMIT,
+    quizInitialConfirmDelaySeconds: DEFAULT_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS,
     cheerNameMode: 'masked',
     themeMode: 'stage',
   },
@@ -1498,11 +1514,25 @@ function App() {
           return null
         }}
         onPrepareRaffle={() => {
-          if (mode === 'admin' || mode === 'wall') return post('/api/raffle/stage', { active: true, rule: state.raffleStage.rule, drawing: false })
+          if (mode === 'admin' || mode === 'wall') {
+            return post('/api/raffle/stage', {
+              active: true,
+              rule: state.raffleStage.rule,
+              drawing: false,
+              ...getRaffleDrawConfig(state, state.raffleStage.rule),
+            })
+          }
           return null
         }}
         onEndRaffle={() => {
-          if (mode === 'admin' || mode === 'wall') return post('/api/raffle/stage', { active: false, rule: state.raffleStage.rule, drawing: false })
+          if (mode === 'admin' || mode === 'wall') {
+            return post('/api/raffle/stage', {
+              active: false,
+              rule: state.raffleStage.rule,
+              drawing: false,
+              ...getRaffleDrawConfig(state, state.raffleStage.rule),
+            })
+          }
           return null
         }}
         onEndQuiz={() => {
@@ -2129,6 +2159,18 @@ function getQuizSettlementValue(quiz: QuizState, now: number) {
   return clamp(Math.ceil(Math.max(0, quiz.settlementDeadlineAt - now) / 1000), 1, 3)
 }
 
+function isQuizInitialConfirmHoldActive(quiz: QuizState, now = Date.now()) {
+  return quiz.mode === 'open' && !quiz.confirmModeStartedAt && quiz.confirmReadyAt > 0 && now < quiz.confirmReadyAt
+}
+
+function getQuizInitialConfirmHoldValue(quiz: QuizState, now: number) {
+  return clamp(
+    Math.ceil(Math.max(0, quiz.confirmReadyAt - now) / 1000),
+    0,
+    MAX_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS,
+  )
+}
+
 function isQuizParticipationActive(quiz: QuizState, now = Date.now()) {
   const phase = getQuizDisplayPhase(quiz, now)
   return phase === 'standby' || phase === 'intro' || phase === 'countdown' || phase === 'open' || phase === 'settling' || phase === 'closed'
@@ -2413,6 +2455,8 @@ function VoteView({
       text: (submission?.correct ?? submittedAnswer?.correct)
         ? response.quiz.mode === 'settling'
           ? '정답 후보입니다. 최종 정답 확인 중...'
+          : isQuizInitialConfirmHoldActive(response.quiz, response.serverTime || Date.now())
+            ? '정답 후보입니다. 사회자 확인 모드 대기 중...'
           : '정답 후보로 접수되었습니다.'
         : '정답이 아닙니다.',
     })
@@ -2915,14 +2959,18 @@ function QuizParticipationView({
   const phase = getQuizDisplayPhase(quiz, now)
   const countdownValue = getQuizCountdownValue(quiz, now)
   const settlementValue = getQuizSettlementValue(quiz, now)
+  const confirmHoldActive = isQuizInitialConfirmHoldActive(quiz, now)
+  const confirmHoldValue = getQuizInitialConfirmHoldValue(quiz, now)
   const isOpen = phase === 'open'
   const canSubmit = phase === 'open' || phase === 'settling'
   const hasWon = Boolean(winningAnswer)
   const reachedAttemptLimit = attemptCount >= attemptLimit
-  const stalePendingFeedback = phase !== 'settling' && /정답 후보|확인 중/.test(feedback)
+  const stalePendingFeedback = phase !== 'settling' && !confirmHoldActive && /정답 후보|확인 중/.test(feedback)
   const visibleFeedback = hasWon || stalePendingFeedback ? '' : feedback
   const statusText = hasWon
     ? `${winningAnswer?.rank ?? 1}번째 정답자로 선정되었습니다.`
+    : confirmHoldActive && latestAnswer?.correct
+      ? '정답 후보입니다. 사회자 확인 모드까지 답변은 계속 접수됩니다.'
     : phase === 'settling' && latestAnswer?.correct
       ? '정답 후보입니다. 최종 확인 전까지 다른 답변도 계속 접수됩니다.'
       : phase === 'closed' && latestAnswer?.correct
@@ -2972,6 +3020,13 @@ function QuizParticipationView({
           <Sparkles size={20} />
           <strong>정답 확인 중...</strong>
           <span>{settlementValue}초 후 확정합니다. 그동안 답변 제출은 계속 가능합니다.</span>
+        </div>
+      ) : null}
+      {confirmHoldActive ? (
+        <div className="quiz-settlement-banner pending" aria-live="polite">
+          <Sparkles size={20} />
+          <strong>정답 후보 수집 중</strong>
+          <span>{confirmHoldValue}초 후 확인 모드로 전환됩니다. 그동안 답변 제출은 계속 가능합니다.</span>
         </div>
       ) : null}
       <div className="quiz-question-card">
@@ -3068,6 +3123,7 @@ function AdminView({
   const minScore = getMinScore(state)
   const raffleCheerWeight = getRaffleCheerWeight(state)
   const quizAnswerLimit = getQuizAnswerLimit(state)
+  const quizInitialConfirmDelaySeconds = getQuizInitialConfirmDelaySeconds(state)
   const cheerNameMode = getCheerNameMode(state)
   const themeMode = getThemeMode(state)
   const [draftTimerMode, setDraftTimerMode] = useState<TimerMode>(timerMode)
@@ -3104,7 +3160,7 @@ function AdminView({
 
   const openRafflePanel = () => {
     openAdminPanel('raffle')
-    void post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false })
+    void post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false, ...getRaffleDrawConfig(state, raffleRule) })
   }
 
   const closeDetailPanel = async () => {
@@ -3114,7 +3170,7 @@ function AdminView({
     }
 
     if (visiblePanel === 'raffle' && state.raffleStage.active) {
-      const nextState = await post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false })
+      const nextState = await post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false, ...getRaffleDrawConfig(state, raffleRule) })
       if (!nextState || nextState.raffleStage.active) return
     }
 
@@ -3123,18 +3179,37 @@ function AdminView({
 
   const startDrawing = () => {
     openAdminPanel('raffle')
-    post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: true })
+    post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: true, ...getRaffleDrawConfig(state, raffleRule) })
   }
 
   const stopDrawing = async () => {
-    if (!isDrawing) await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: true })
+    const drawConfig = getRaffleDrawConfig(state, raffleRule)
+    if (!isDrawing) await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: true, ...drawConfig })
     await new Promise((resolve) => window.setTimeout(resolve, isDrawing ? 320 : 900))
-    await post('/api/raffle', { rule: raffleRule, winnerCount: getRaffleWinnerCount(state, raffleRule) })
-    await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false })
+    await post('/api/raffle', { rule: raffleRule, ...drawConfig })
+    await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false, ...drawConfig })
   }
 
   const changeRaffleRule = (rule: RaffleRule) => {
-    post('/api/raffle/stage', { active: true, rule, drawing: false, clearResult: true })
+    post('/api/raffle/stage', { active: true, rule, drawing: false, clearResult: true, ...getDefaultRaffleDrawConfig(state, rule) })
+  }
+
+  const changeRaffleWinnerCount = (winnerCount: number) => {
+    const current = getRaffleDrawConfig(state, raffleRule)
+    post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false, clearResult: true, ...current, winnerCount })
+  }
+
+  const changeRafflePrize = (selection: RafflePrizeSelection) => {
+    const current = getRaffleDrawConfig(state, raffleRule)
+    post('/api/raffle/stage', {
+      active: true,
+      rule: raffleRule,
+      drawing: false,
+      clearResult: true,
+      ...current,
+      prizeName: selection.name,
+      prizeImageFile: selection.image,
+    })
   }
 
   const closeVote = () => {
@@ -3164,6 +3239,7 @@ function AdminView({
       minScore: data.get('minScore'),
       raffleCheerWeight: data.get('raffleCheerWeight'),
       quizAnswerLimit: data.get('quizAnswerLimit'),
+      quizInitialConfirmDelaySeconds: data.get('quizInitialConfirmDelaySeconds'),
       cheerNameMode: data.get('cheerNameMode'),
       themeMode: data.get('themeMode'),
     })
@@ -3179,6 +3255,7 @@ function AdminView({
       minScore,
       raffleCheerWeight,
       quizAnswerLimit,
+      quizInitialConfirmDelaySeconds,
       cheerNameMode,
       themeMode: nextThemeMode,
     })
@@ -3228,6 +3305,8 @@ function AdminView({
               onRuleChange={changeRaffleRule}
               onStart={startDrawing}
               onStop={stopDrawing}
+              onWinnerCountChange={changeRaffleWinnerCount}
+              onPrizeChange={changeRafflePrize}
               stageMode
             />
           ) : null}
@@ -3275,7 +3354,7 @@ function AdminView({
         </div>
         <form
           className="control-grid"
-          key={`${starBudget}:${maxStarsPerTeam}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${raffleCheerWeight}:${quizAnswerLimit}:${cheerNameMode}:${themeMode}`}
+          key={`${starBudget}:${maxStarsPerTeam}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${raffleCheerWeight}:${quizAnswerLimit}:${quizInitialConfirmDelaySeconds}:${cheerNameMode}:${themeMode}`}
           onSubmit={(event) => {
             event.preventDefault()
             applySettings(event.currentTarget)
@@ -3343,6 +3422,20 @@ function AdminView({
               <em>회</em>
             </div>
             <small className="control-hint">참여자 1명이 한 문제에 제출할 수 있는 최대 횟수입니다. 기본 3회입니다.</small>
+          </label>
+          <label>
+            <span>퀴즈 정답 확인 딜레이시간(최초)</span>
+            <div className="inline-input">
+              <input
+                name="quizInitialConfirmDelaySeconds"
+                type="number"
+                min={0}
+                max={MAX_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS}
+                defaultValue={quizInitialConfirmDelaySeconds}
+              />
+              <em>초</em>
+            </div>
+            <small className="control-hint">출제 후 사회자가 문제를 읽는 동안 정답 후보만 모읍니다. 확인 모드 전환 시 기존 3초 보정 판정으로 넘어갑니다.</small>
           </label>
           <label>
             <span>타이머 방식</span>
@@ -3504,6 +3597,8 @@ function AdminView({
             onStart={startDrawing}
             onStop={stopDrawing}
             onOpen={openRafflePanel}
+            onWinnerCountChange={changeRaffleWinnerCount}
+            onPrizeChange={changeRafflePrize}
           />
         </aside>
       </section>
@@ -3542,25 +3637,44 @@ function PublicWallView({
 
   const startDrawing = () => {
     setWallPanel('raffle')
-    post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: true })
+    post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: true, ...getRaffleDrawConfig(state, raffleRule) })
   }
 
   const stopDrawing = async () => {
-    if (!isDrawing) await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: true })
+    const drawConfig = getRaffleDrawConfig(state, raffleRule)
+    if (!isDrawing) await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: true, ...drawConfig })
     await new Promise((resolve) => window.setTimeout(resolve, isDrawing ? 320 : 900))
-    await post('/api/raffle', { rule: raffleRule, winnerCount: getRaffleWinnerCount(state, raffleRule) })
-    await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false })
+    await post('/api/raffle', { rule: raffleRule, ...drawConfig })
+    await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false, ...drawConfig })
   }
 
   const changeRaffleRule = (rule: RaffleRule) => {
-    post('/api/raffle/stage', { active: true, rule, drawing: false, clearResult: true })
+    post('/api/raffle/stage', { active: true, rule, drawing: false, clearResult: true, ...getDefaultRaffleDrawConfig(state, rule) })
+  }
+
+  const changeRaffleWinnerCount = (winnerCount: number) => {
+    const current = getRaffleDrawConfig(state, raffleRule)
+    post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false, clearResult: true, ...current, winnerCount })
+  }
+
+  const changeRafflePrize = (selection: RafflePrizeSelection) => {
+    const current = getRaffleDrawConfig(state, raffleRule)
+    post('/api/raffle/stage', {
+      active: true,
+      rule: raffleRule,
+      drawing: false,
+      clearResult: true,
+      ...current,
+      prizeName: selection.name,
+      prizeImageFile: selection.image,
+    })
   }
 
   const selectTeamMessages = (teamId: string) => {
     setSelectedTeamId((current) => (current === teamId ? 'all' : teamId))
     if (wallPanel === 'raffle') {
       void (async () => {
-        const nextState = await post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false })
+        const nextState = await post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false, ...getRaffleDrawConfig(state, raffleRule) })
         if (!nextState || nextState.raffleStage.active) return
         setWallPanel('overview')
       })()
@@ -3621,7 +3735,7 @@ function PublicWallView({
                 type="button"
                 onClick={() => {
                   void (async () => {
-                    const nextState = await post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false })
+                    const nextState = await post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false, ...getRaffleDrawConfig(state, raffleRule) })
                     if (!nextState || nextState.raffleStage.active) return
                     setWallPanel('overview')
                   })()
@@ -3638,6 +3752,8 @@ function PublicWallView({
               onRuleChange={changeRaffleRule}
               onStart={startDrawing}
               onStop={stopDrawing}
+              onWinnerCountChange={changeRaffleWinnerCount}
+              onPrizeChange={changeRafflePrize}
               publicMode
             />
           </section>
@@ -3722,6 +3838,8 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
   const phase = getQuizDisplayPhase(state.quiz, now)
   const countdownValue = getQuizCountdownValue(state.quiz, now)
   const settlementValue = getQuizSettlementValue(state.quiz, now)
+  const confirmHoldActive = isQuizInitialConfirmHoldActive(state.quiz, now)
+  const confirmHoldValue = getQuizInitialConfirmHoldValue(state.quiz, now)
   const latestWinner = state.quiz.winners.at(-1) ?? null
   const latestWinnerKey = latestWinner ? `${latestWinner.quizId}-${latestWinner.id}-${latestWinner.participantId}` : ''
   const [dismissedSpotlightKey, setDismissedSpotlightKey] = useState('')
@@ -3810,6 +3928,15 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
         </div>
       ) : null}
 
+      {confirmHoldActive ? (
+        <div className="quiz-wall-settlement pending" aria-live="polite">
+          <Sparkles size={36} />
+          <p>정답 후보 수집 중...</p>
+          <strong>{confirmHoldValue}초 후 정답 확인 모드로 전환됩니다</strong>
+          <span>사회자가 문제를 읽는 동안 제출된 정답은 후보로 보관됩니다.</span>
+        </div>
+      ) : null}
+
       <div className="quiz-current-panel">
         <div className="quiz-question-layout wall">
           <div className="quiz-question-copy">
@@ -3827,7 +3954,7 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
             <div className="quiz-stats">
               <span>답변 {answerCount}</span>
               <span>정답 {correctCount}</span>
-              <span>{phase === 'settling' ? '정답 후보' : '정답자'} {phase === 'settling' ? correctCount : state.quiz.winners.length}/{state.quiz.winnerCount}</span>
+              <span>{phase === 'settling' || confirmHoldActive ? '정답 후보' : '정답자'} {phase === 'settling' || confirmHoldActive ? correctCount : state.quiz.winners.length}/{state.quiz.winnerCount}</span>
             </div>
           </div>
           <QuizPrizeCard image={state.quiz.prizeImageFile} label="퀴즈 상품" />
@@ -3977,9 +4104,13 @@ function QuizAdminPanel({
   const now = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
   const phase = getQuizDisplayPhase(state.quiz, now)
   const settlementValue = getQuizSettlementValue(state.quiz, now)
+  const confirmHoldActive = isQuizInitialConfirmHoldActive(state.quiz, now)
+  const confirmHoldValue = getQuizInitialConfirmHoldValue(state.quiz, now)
   const answerCount = state.quiz.answers.length
   const correctCount = state.quiz.answers.filter((item) => item.correct).length
   const quizWinnerHistory = buildQuizWinnerHistory(state)
+  const canActivateConfirmMode =
+    (state.quiz.mode === 'countdown' || phase === 'open' || phase === 'settling') && !state.quiz.confirmModeStartedAt
 
   const selectQuiz = (quizId: string) => {
     const nextQuiz = availableQuizzes.find((quiz) => quiz.id === quizId) || initialQuiz
@@ -4022,6 +4153,10 @@ function QuizAdminPanel({
     post('/api/quiz/close', {})
   }
 
+  const activateConfirmMode = () => {
+    post('/api/quiz/confirm-mode', {})
+  }
+
   const clearQuiz = async () => {
     if (onEndQuiz) {
       await onEndQuiz()
@@ -4062,13 +4197,19 @@ function QuizAdminPanel({
         </span>
         <strong>답변 {answerCount}</strong>
         <strong>정답 {correctCount}</strong>
-        <strong>{phase === 'settling' ? '정답 후보' : '정답자'} {phase === 'settling' ? correctCount : state.quiz.winners.length}/{state.quiz.winnerCount}</strong>
+        <strong>{phase === 'settling' || confirmHoldActive ? '정답 후보' : '정답자'} {phase === 'settling' || confirmHoldActive ? correctCount : state.quiz.winners.length}/{state.quiz.winnerCount}</strong>
       </div>
 
       {phase === 'settling' ? (
         <div className="quiz-admin-settlement" role="status" aria-live="assertive">
           <strong>정답 확인 중...</strong>
           <span>{settlementValue}초 후 보정 제출시각 기준으로 확정합니다. 확인 중에도 답변은 계속 접수됩니다.</span>
+        </div>
+      ) : null}
+      {confirmHoldActive ? (
+        <div className="quiz-admin-settlement pending" role="status" aria-live="polite">
+          <strong>정답 후보 수집 중</strong>
+          <span>{confirmHoldValue}초 후 정답 확인 모드로 전환됩니다. 사회자가 문제를 다 읽으면 바로 전환할 수 있습니다.</span>
         </div>
       ) : null}
 
@@ -4128,6 +4269,9 @@ function QuizAdminPanel({
         <div className="quiz-actions">
           <button type="button" className="primary-action" onClick={openQuiz} disabled={!question.trim() || !answer.trim()}>
             출제 / 다음 문제
+          </button>
+          <button type="button" onClick={activateConfirmMode} disabled={!canActivateConfirmMode}>
+            정답 확인 모드 전환
           </button>
           <button type="button" onClick={closeQuiz} disabled={state.quiz.mode === 'idle' || state.quiz.mode === 'standby'}>
             답변 마감
@@ -6746,6 +6890,69 @@ function CheerConstellation({
   )
 }
 
+function RaffleDrawConfigControls({
+  state,
+  raffleRule,
+  winnerCount,
+  prizeName,
+  prizeImageFile,
+  onWinnerCountChange,
+  onPrizeChange,
+}: {
+  state: EventState
+  raffleRule: RaffleRule
+  winnerCount: number
+  prizeName: string
+  prizeImageFile: string
+  onWinnerCountChange: (winnerCount: number) => void
+  onPrizeChange: (selection: RafflePrizeSelection) => void
+}) {
+  const prizeOptions = getRafflePrizeOptions(state)
+  const selectedPrizeKey = getRafflePrizeOptionKey(prizeName, prizeImageFile)
+  const normalizedOptions = prizeOptions.some((option) => getRafflePrizeOptionKey(option.name, option.image) === selectedPrizeKey)
+    ? prizeOptions
+    : [
+        {
+          name: prizeName || getRafflePrizeInfo(state.copy, raffleRule).name,
+          image: prizeImageFile || getRafflePrizeInfo(state.copy, raffleRule).image,
+          label: '현재 선택 상품',
+        },
+        ...prizeOptions,
+      ]
+  const selectedIndex = Math.max(0, normalizedOptions.findIndex((option) => getRafflePrizeOptionKey(option.name, option.image) === selectedPrizeKey))
+
+  return (
+    <div className="raffle-config-stack" aria-label="추첨 조합 설정">
+      <label>
+        <span>선발 인원</span>
+        <input
+          type="number"
+          min={1}
+          max={10}
+          value={winnerCount}
+          onChange={(event) => onWinnerCountChange(clamp(Math.floor(Number(event.currentTarget.value) || 1), 1, 10))}
+        />
+      </label>
+      <label>
+        <span>상품</span>
+        <select
+          value={String(selectedIndex)}
+          onChange={(event) => {
+            const next = normalizedOptions[Number(event.currentTarget.value)]
+            if (next) onPrizeChange(next)
+          }}
+        >
+          {normalizedOptions.map((option, index) => (
+            <option key={getRafflePrizeOptionKey(option.name, option.image)} value={String(index)}>
+              {option.label} · {option.name}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  )
+}
+
 function RafflePanel({
   state,
   raffleRule,
@@ -6754,6 +6961,8 @@ function RafflePanel({
   onStart,
   onStop,
   onOpen,
+  onWinnerCountChange,
+  onPrizeChange,
 }: {
   state: EventState
   raffleRule: RaffleRule
@@ -6762,10 +6971,13 @@ function RafflePanel({
   onStart: () => void
   onStop: () => void
   onOpen: () => void
+  onWinnerCountChange: (winnerCount: number) => void
+  onPrizeChange: (selection: RafflePrizeSelection) => void
 }) {
   const previewCandidates = getRaffleCandidatesForRule(state, raffleRule)
   const previewNames = previewCandidates.slice(0, 10)
   const reelNames = previewNames
+  const drawConfig = getRaffleDrawConfig(state, raffleRule)
 
   return (
     <section className="raffle-panel" aria-label="행운권 추첨">
@@ -6791,6 +7003,15 @@ function RafflePanel({
             ))}
           </select>
         </label>
+        <RaffleDrawConfigControls
+          state={state}
+          raffleRule={raffleRule}
+          winnerCount={drawConfig.winnerCount}
+          prizeName={drawConfig.prizeName}
+          prizeImageFile={drawConfig.prizeImageFile}
+          onWinnerCountChange={onWinnerCountChange}
+          onPrizeChange={onPrizeChange}
+        />
         <div className="raffle-action-row">
           <button type="button" className={`draw-button start ${isDrawing ? 'drawing' : ''}`} onClick={onStart} disabled={isDrawing}>
             <Sparkles size={17} />
@@ -6851,6 +7072,8 @@ function RaffleDetailPanel({
   onRuleChange,
   onStart,
   onStop,
+  onWinnerCountChange,
+  onPrizeChange,
   publicMode = false,
   stageMode = publicMode,
 }: {
@@ -6860,6 +7083,8 @@ function RaffleDetailPanel({
   onRuleChange: (rule: RaffleRule) => void
   onStart: () => void
   onStop: () => void
+  onWinnerCountChange: (winnerCount: number) => void
+  onPrizeChange: (selection: RafflePrizeSelection) => void
   publicMode?: boolean
   stageMode?: boolean
 }) {
@@ -6870,12 +7095,18 @@ function RaffleDetailPanel({
   const winners = !isDrawing ? (state.lastRaffle?.winners ?? []) : []
   const hasWinners = winners.length > 0
   const displayRaffleRule = raffleRule
-  const selectedPrizeInfo = getRafflePrizeInfo(state.copy, displayRaffleRule)
-  const resultPrizeInfo = getRafflePrizeInfo(state.copy, hasWinners && state.lastRaffle ? state.lastRaffle.rule : displayRaffleRule)
+  const selectedPrizeInfo = getRaffleStagePrizeInfo(state, displayRaffleRule)
+  const resultDefaultPrizeInfo = getRafflePrizeInfo(state.copy, hasWinners && state.lastRaffle ? state.lastRaffle.rule : displayRaffleRule)
+  const resultPrizeInfo = hasWinners && state.lastRaffle
+    ? {
+        name: state.lastRaffle.prizeName || resultDefaultPrizeInfo.name,
+        image: state.lastRaffle.prizeImageFile || resultDefaultPrizeInfo.image,
+      }
+    : resultDefaultPrizeInfo
   const prizeImage = selectedPrizeInfo.image || defaultBrandLogoFile
   const configuredWinnerCount = hasWinners && state.lastRaffle?.rule === displayRaffleRule
     ? state.lastRaffle.winnerCount
-    : getRaffleWinnerCount(state, displayRaffleRule)
+    : getRaffleStageWinnerCount(state, displayRaffleRule)
   const displayCandidateCount = hasWinners && state.lastRaffle?.rule === displayRaffleRule
     ? state.lastRaffle.candidates
     : previewCandidates.length
@@ -7002,6 +7233,15 @@ function RaffleDetailPanel({
               ))}
             </select>
           </label>
+          <RaffleDrawConfigControls
+            state={state}
+            raffleRule={displayRaffleRule}
+            winnerCount={configuredWinnerCount}
+            prizeName={selectedPrizeInfo.name}
+            prizeImageFile={selectedPrizeInfo.image}
+            onWinnerCountChange={onWinnerCountChange}
+            onPrizeChange={onPrizeChange}
+          />
           <div className="raffle-action-row">
             <button type="button" className={`draw-button start ${isDrawing ? 'drawing' : ''}`} onClick={onStart} disabled={isDrawing}>
               <Sparkles size={17} />
@@ -7439,6 +7679,73 @@ function getRaffleWinnerCount(state: EventState, rule: RaffleRule | undefined) {
   const key = raffleWinnerCountKeyByRule[rule]
   const fallback = rule === 'all' || rule === 'cheer' ? 3 : 1
   return clamp(Math.floor(Number(state.copy[key]) || fallback), 1, 10)
+}
+
+function getRaffleStageWinnerCount(state: EventState, rule: RaffleRule | undefined) {
+  if (!rule) return 1
+
+  const stageValue = state.raffleStage.rule === rule ? state.raffleStage.winnerCount : undefined
+  if (stageValue !== undefined) {
+    const normalized = Math.floor(Number(stageValue))
+    if (Number.isFinite(normalized)) return clamp(normalized, 1, 10)
+  }
+
+  return getRaffleWinnerCount(state, rule)
+}
+
+function getRaffleStagePrizeInfo(state: EventState, rule: RaffleRule | undefined) {
+  const defaultPrize = getRafflePrizeInfo(state.copy, rule)
+  const stage = state.raffleStage.rule === rule ? state.raffleStage : null
+
+  return {
+    name: stage?.prizeName?.trim() || defaultPrize.name,
+    image: stage?.prizeImageFile?.trim() || defaultPrize.image,
+  }
+}
+
+function getRaffleDrawConfig(state: EventState, rule: RaffleRule) {
+  const prize = getRaffleStagePrizeInfo(state, rule)
+
+  return {
+    winnerCount: getRaffleStageWinnerCount(state, rule),
+    prizeName: prize.name,
+    prizeImageFile: prize.image,
+  }
+}
+
+function getDefaultRaffleDrawConfig(state: EventState, rule: RaffleRule) {
+  const prize = getRafflePrizeInfo(state.copy, rule)
+
+  return {
+    winnerCount: getRaffleWinnerCount(state, rule),
+    prizeName: prize.name,
+    prizeImageFile: prize.image,
+  }
+}
+
+function getRafflePrizeOptionKey(name: string, image: string) {
+  return `${name || '행운권 상품'}\u0000${image || ''}`
+}
+
+function getRafflePrizeOptions(state: EventState): RafflePrizeSelection[] {
+  const options = new Map<string, RafflePrizeSelection>()
+
+  for (const imageField of rafflePrizeImageFields) {
+    const nameField = rafflePrizeNameFields.find((field) => field.key.replace('Name', 'Image') === imageField.key)
+    const name = (nameField ? state.copy[nameField.key] : '') || imageField.label.replace(' 이미지', '')
+    const image = state.copy[imageField.key] || state.copy.rafflePrizeImageFile || ''
+    const key = getRafflePrizeOptionKey(name, image)
+
+    if (!options.has(key)) {
+      options.set(key, {
+        name,
+        image,
+        label: imageField.label.replace(' 이미지', ''),
+      })
+    }
+  }
+
+  return [...options.values()]
 }
 
 function getParticipantSummaries(state: EventState): ParticipantSummary[] {
@@ -8998,6 +9305,15 @@ function getRaffleCheerWeight(state: EventState) {
 
 function getQuizAnswerLimit(state: EventState) {
   return clamp(Math.floor(Number(state.settings.quizAnswerLimit) || DEFAULT_QUIZ_ANSWER_LIMIT), 1, MAX_QUIZ_ANSWER_LIMIT)
+}
+
+function getQuizInitialConfirmDelaySeconds(state: EventState) {
+  const rawValue = Number(state.settings.quizInitialConfirmDelaySeconds)
+  return clamp(
+    Math.floor(Number.isFinite(rawValue) ? rawValue : DEFAULT_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS),
+    0,
+    MAX_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS,
+  )
 }
 
 function getCheerNameMode(state: EventState): CheerNameMode {

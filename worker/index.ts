@@ -9,6 +9,8 @@ const defaultMinScore = 5
 const defaultRaffleCheerWeight = 0.2
 const defaultQuizAnswerLimit = 3
 const maxQuizAnswerLimit = 10
+const defaultQuizInitialConfirmDelaySeconds = 20
+const maxQuizInitialConfirmDelaySeconds = 60
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
 const maxStoredCheerMessages = 5000
@@ -28,7 +30,7 @@ const participantCookieMaxAge = 60 * 60 * 24 * 14
 const adminCookieName = 'vibe-vote-admin'
 const adminCookieMaxAge = 60 * 60 * 8
 const snapshotKey = 'event-state-v1'
-const settingsVersion = 5
+const settingsVersion = 6
 
 type Env = {
   ARENA_ROOM: DurableObjectNamespace
@@ -218,6 +220,8 @@ type QuizState = {
   winners: QuizAnswer[]
   introEndsAt: number
   opensAt: number
+  confirmReadyAt: number
+  confirmModeStartedAt: number
   settlementStartedAt: number
   settlementDeadlineAt: number
   createdAt: number
@@ -245,6 +249,7 @@ type Settings = {
   minScore: number
   raffleCheerWeight: number
   quizAnswerLimit: number
+  quizInitialConfirmDelaySeconds: number
   cheerNameMode: 'masked' | 'real'
   themeMode: 'light' | 'stage'
 }
@@ -278,6 +283,9 @@ type RaffleStageState = {
   active: boolean
   rule: RaffleRule
   drawing: boolean
+  winnerCount?: number
+  prizeImageFile?: string
+  prizeName?: string
   updatedAt: number
 }
 
@@ -295,6 +303,8 @@ const emptyQuizState: QuizState = {
   winners: [],
   introEndsAt: 0,
   opensAt: 0,
+  confirmReadyAt: 0,
+  confirmModeStartedAt: 0,
   settlementStartedAt: 0,
   settlementDeadlineAt: 0,
   createdAt: 0,
@@ -606,6 +616,7 @@ export class ArenaRoom {
     minScore: defaultMinScore,
     raffleCheerWeight: defaultRaffleCheerWeight,
     quizAnswerLimit: defaultQuizAnswerLimit,
+    quizInitialConfirmDelaySeconds: defaultQuizInitialConfirmDelaySeconds,
     cheerNameMode: 'masked',
     themeMode: 'stage',
   }
@@ -660,7 +671,7 @@ export class ArenaRoom {
 
   async alarm() {
     await this.loaded
-    if (!this.finalizeQuizSettlement(Date.now())) return
+    if (!this.advanceQuizPhase(Date.now())) return
 
     await this.commit({ audience: true })
   }
@@ -716,12 +727,19 @@ export class ArenaRoom {
         1,
         maxQuizAnswerLimit,
       ),
+      quizInitialConfirmDelaySeconds: clamp(
+        Math.floor(
+          Number.isFinite(Number(snapshot.settings?.quizInitialConfirmDelaySeconds))
+            ? Number(snapshot.settings?.quizInitialConfirmDelaySeconds)
+            : defaultQuizInitialConfirmDelaySeconds,
+        ),
+        0,
+        maxQuizInitialConfirmDelaySeconds,
+      ),
       cheerNameMode: normalizeCheerNameMode(snapshot.settings?.cheerNameMode),
       themeMode: normalizeThemeMode(snapshot.settings?.themeMode),
     }
-    if (this.quiz.mode === 'settling') {
-      await this.scheduleQuizSettlementAlarm()
-    }
+    await this.scheduleQuizAlarm()
   }
 
   private async persist() {
@@ -843,11 +861,12 @@ export class ArenaRoom {
 
     if (pathname === '/api/raffle') {
       const rule = isRaffleRule(body.rule) ? body.rule : 'all'
-      const winnerCount = this.getRaffleWinnerCount(rule, body.winnerCount)
+      const stageMatchesRule = this.raffleStage.rule === rule
+      const winnerCount = this.getRaffleWinnerCount(rule, body.winnerCount ?? (stageMatchesRule ? this.raffleStage.winnerCount : undefined))
       const candidates = this.getRaffleCandidates(rule)
       const createdAt = Date.now()
-      const prizeImageFile = this.getRafflePrizeImage(rule)
-      const prizeName = this.getRafflePrizeName(rule)
+      const prizeImageFile = this.getRafflePrizeImage(rule, body.prizeImageFile ?? (stageMatchesRule ? this.raffleStage.prizeImageFile : undefined))
+      const prizeName = this.getRafflePrizeName(rule, body.prizeName ?? (stageMatchesRule ? this.raffleStage.prizeName : undefined))
       const winners = (rule === 'longestCheer' ? candidates : this.pickWeightedRaffleWinners(candidates, winnerCount))
         .slice(0, Math.min(winnerCount, candidates.length))
         .map((person, index) => ({
@@ -894,12 +913,24 @@ export class ArenaRoom {
     if (pathname === '/api/raffle/stage') {
       const active = body.active === undefined ? true : Boolean(body.active)
       const rule = isRaffleRule(body.rule) ? body.rule : this.raffleStage.rule
-      const shouldClearResult = Boolean(body.clearResult) || Boolean(this.lastRaffle && rule !== this.lastRaffle.rule)
+      const stageMatchesRule = this.raffleStage.rule === rule
+      const winnerCount = this.getRaffleWinnerCount(rule, body.winnerCount ?? (stageMatchesRule ? this.raffleStage.winnerCount : undefined))
+      const prizeImageFile = this.getRafflePrizeImage(rule, body.prizeImageFile ?? (stageMatchesRule ? this.raffleStage.prizeImageFile : undefined))
+      const prizeName = this.getRafflePrizeName(rule, body.prizeName ?? (stageMatchesRule ? this.raffleStage.prizeName : undefined))
+      const shouldClearResult = Boolean(body.clearResult) || Boolean(this.lastRaffle && (
+        rule !== this.lastRaffle.rule ||
+        winnerCount !== this.lastRaffle.winnerCount ||
+        prizeImageFile !== (this.lastRaffle.prizeImageFile || '') ||
+        prizeName !== (this.lastRaffle.prizeName || '')
+      ))
       if (shouldClearResult) this.lastRaffle = null
       this.raffleStage = {
         active,
         rule,
         drawing: active ? Boolean(body.drawing) : false,
+        winnerCount,
+        prizeImageFile,
+        prizeName,
         updatedAt: Date.now(),
       }
 
@@ -916,6 +947,12 @@ export class ArenaRoom {
 
     if (pathname === '/api/quiz/prepare') {
       this.prepareQuiz()
+      await this.commit({ audience: true })
+      return json(this.getStateForRequest(request, { slimMedia: true }))
+    }
+
+    if (pathname === '/api/quiz/confirm-mode') {
+      this.activateQuizConfirmMode()
       await this.commit({ audience: true })
       return json(this.getStateForRequest(request, { slimMedia: true }))
     }
@@ -941,7 +978,7 @@ export class ArenaRoom {
         )
       }
 
-      await this.scheduleQuizSettlementAlarm()
+      await this.scheduleQuizAlarm()
       await this.commit({ audience: true })
       return json(
         {
@@ -1036,6 +1073,17 @@ export class ArenaRoom {
           1,
           maxQuizAnswerLimit,
         ),
+        quizInitialConfirmDelaySeconds: (() => {
+          const rawValue =
+            body.quizInitialConfirmDelaySeconds === undefined || body.quizInitialConfirmDelaySeconds === ''
+              ? this.settings.quizInitialConfirmDelaySeconds ?? defaultQuizInitialConfirmDelaySeconds
+              : Number(body.quizInitialConfirmDelaySeconds)
+          return clamp(
+            Math.floor(Number.isFinite(rawValue) ? rawValue : defaultQuizInitialConfirmDelaySeconds),
+            0,
+            maxQuizInitialConfirmDelaySeconds,
+          )
+        })(),
         cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, this.settings.cheerNameMode),
         themeMode: normalizeThemeMode(body.themeMode, this.settings.themeMode),
       }
@@ -1222,6 +1270,15 @@ export class ArenaRoom {
       minScore: clamp(Number(source.minScore ?? defaultMinScore), 0, 9.9),
       raffleCheerWeight: clamp(Number(source.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
       quizAnswerLimit: clamp(Math.floor(Number(source.quizAnswerLimit) || defaultQuizAnswerLimit), 1, maxQuizAnswerLimit),
+      quizInitialConfirmDelaySeconds: clamp(
+        Math.floor(
+          Number.isFinite(Number(source.quizInitialConfirmDelaySeconds))
+            ? Number(source.quizInitialConfirmDelaySeconds)
+            : defaultQuizInitialConfirmDelaySeconds,
+        ),
+        0,
+        maxQuizInitialConfirmDelaySeconds,
+      ),
       cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
       themeMode: normalizeThemeMode(source.themeMode, 'stage'),
     }
@@ -1319,6 +1376,7 @@ export class ArenaRoom {
 
   private async commit(options: { audience?: boolean; fullMedia?: boolean } = {}) {
     this.advanceQuizPhase()
+    await this.scheduleQuizAlarm()
     await this.persist()
     this.broadcast(options)
   }
@@ -1642,12 +1700,18 @@ export class ArenaRoom {
     this.awardHistory.splice(200)
   }
 
-  private getRafflePrizeImage(rule: RaffleRule) {
+  private getRafflePrizeImage(rule: RaffleRule, rawValue?: unknown) {
+    const override = sanitizeLogoPath(rawValue)
+    if (override) return override
+
     const imageKey = rafflePrizeImageKeyByRule[rule] || 'rafflePrizeImageFile'
     return this.copy[imageKey] || this.copy.rafflePrizeImageFile || ''
   }
 
-  private getRafflePrizeName(rule: RaffleRule) {
+  private getRafflePrizeName(rule: RaffleRule, rawValue?: unknown) {
+    const override = sanitizeText(rawValue, 80)
+    if (override) return override
+
     const nameKey = rafflePrizeNameKeyByRule[rule] || 'rafflePrizeNameFile'
     return this.copy[nameKey] || this.copy.rafflePrizeNameFile || '행운권 상품'
   }
@@ -1670,25 +1734,112 @@ export class ArenaRoom {
   }
 
   private advanceQuizPhase(now = Date.now()) {
+    let changed = false
+
     if (this.quiz.mode === 'countdown' && this.quiz.opensAt > 0 && now >= this.quiz.opensAt) {
       this.quiz = {
         ...this.quiz,
         mode: 'open',
         updatedAt: now,
       }
+      changed = true
     }
+
+    if (this.quiz.mode === 'open' && !this.quiz.confirmModeStartedAt && this.quiz.confirmReadyAt > 0 && now >= this.quiz.confirmReadyAt) {
+      this.quiz = {
+        ...this.quiz,
+        confirmModeStartedAt: now,
+        updatedAt: now,
+      }
+      changed = true
+
+      if (this.hasPendingCorrectQuizCandidate()) {
+        changed = this.startQuizSettlement(now) || changed
+      }
+    }
+
     if (this.quiz.mode === 'settling' && this.quiz.settlementDeadlineAt > 0 && now >= this.quiz.settlementDeadlineAt) {
-      this.finalizeQuizSettlement(now)
+      changed = this.finalizeQuizSettlement(now) || changed
     }
+
+    return changed
   }
 
-  private async scheduleQuizSettlementAlarm() {
-    if (this.quiz.mode !== 'settling' || !this.quiz.settlementDeadlineAt) {
+  private async scheduleQuizAlarm() {
+    const nextAt = this.getNextQuizTimerAt()
+    if (!nextAt) {
       await this.state.storage.deleteAlarm()
       return
     }
 
-    await this.state.storage.setAlarm(this.quiz.settlementDeadlineAt)
+    await this.state.storage.setAlarm(nextAt)
+  }
+
+  private getNextQuizTimerAt() {
+    if (this.quiz.mode === 'settling' && this.quiz.settlementDeadlineAt > 0) return this.quiz.settlementDeadlineAt
+    if (this.quiz.mode === 'countdown' && this.quiz.opensAt > 0) return this.quiz.opensAt
+    if (
+      this.quiz.mode === 'open' &&
+      !this.quiz.confirmModeStartedAt &&
+      this.quiz.confirmReadyAt > 0 &&
+      this.hasPendingCorrectQuizCandidate()
+    ) {
+      return this.quiz.confirmReadyAt
+    }
+
+    return 0
+  }
+
+  private hasQuizWinnerCapacity() {
+    return this.quiz.winners.length < this.quiz.winnerCount
+  }
+
+  private hasPendingCorrectQuizCandidate() {
+    if (!this.hasQuizWinnerCapacity()) return false
+
+    const existingParticipantIds = new Set(this.quiz.winners.map((winner) => winner.participantId))
+    return this.quiz.answers.some(
+      (answer) => answer.correct && !answer.rank && !existingParticipantIds.has(answer.participantId),
+    )
+  }
+
+  private isQuizConfirmModeActive(now = Date.now()) {
+    return Boolean(this.quiz.confirmModeStartedAt) || Boolean(this.quiz.confirmReadyAt && now >= this.quiz.confirmReadyAt)
+  }
+
+  private startQuizSettlement(now = Date.now()) {
+    if (this.quiz.mode !== 'open' || !this.hasPendingCorrectQuizCandidate()) return false
+
+    this.quiz = {
+      ...this.quiz,
+      mode: 'settling',
+      confirmModeStartedAt: this.quiz.confirmModeStartedAt || now,
+      settlementStartedAt: now,
+      settlementDeadlineAt: now + quizSettlementMs,
+      updatedAt: now,
+    }
+    return true
+  }
+
+  private activateQuizConfirmMode(now = Date.now()) {
+    this.advanceQuizPhase(now)
+    if (this.quiz.mode !== 'countdown' && this.quiz.mode !== 'open' && this.quiz.mode !== 'settling') return false
+
+    let changed = false
+    if (!this.quiz.confirmModeStartedAt) {
+      this.quiz = {
+        ...this.quiz,
+        confirmModeStartedAt: now,
+        updatedAt: now,
+      }
+      changed = true
+    }
+
+    if (this.quiz.mode === 'open' && this.hasPendingCorrectQuizCandidate()) {
+      changed = this.startQuizSettlement(now) || changed
+    }
+
+    return changed
   }
 
   private finalizeQuizSettlement(now = Date.now()) {
@@ -1789,6 +1940,7 @@ export class ArenaRoom {
     const winnerCount = clamp(Math.floor(Number(body.winnerCount ?? selectedQuiz?.winnerCount) || 2), 1, 10)
     const answerKeys = normalizeQuizAnswerKeys([answer, ...acceptedAnswers].join('\n'))
     const now = Date.now()
+    const opensAt = now + quizIntroMs + quizCountdownMs
 
     if (!question || !answerKeys.length) return false
 
@@ -1803,7 +1955,9 @@ export class ArenaRoom {
       answers: [],
       winners: [],
       introEndsAt: now + quizIntroMs,
-      opensAt: now + quizIntroMs + quizCountdownMs,
+      opensAt,
+      confirmReadyAt: opensAt + this.getQuizInitialConfirmDelayMs(),
+      confirmModeStartedAt: 0,
       settlementStartedAt: 0,
       settlementDeadlineAt: 0,
       createdAt: now,
@@ -1871,12 +2025,15 @@ export class ArenaRoom {
     this.quiz.answers.splice(maxStoredQuizAnswers)
 
     const alreadyWinner = this.quiz.winners.some((winner) => winner.participantId === person.id)
-    if (correct && this.quiz.mode === 'open' && this.quiz.winners.length < this.quiz.winnerCount && !alreadyWinner) {
-      this.quiz = {
-        ...this.quiz,
-        mode: 'settling',
-        settlementStartedAt: serverReceivedAt,
-        settlementDeadlineAt: serverReceivedAt + quizSettlementMs,
+    if (correct && this.quiz.mode === 'open' && this.hasQuizWinnerCapacity() && !alreadyWinner) {
+      if (this.isQuizConfirmModeActive(serverReceivedAt)) {
+        if (!this.quiz.confirmModeStartedAt) {
+          this.quiz = {
+            ...this.quiz,
+            confirmModeStartedAt: serverReceivedAt,
+          }
+        }
+        this.startQuizSettlement(serverReceivedAt)
       }
     }
 
@@ -1919,6 +2076,10 @@ export class ArenaRoom {
 
   private getQuizAnswerLimit() {
     return this.getRuntimeSettings().quizAnswerLimit
+  }
+
+  private getQuizInitialConfirmDelayMs() {
+    return this.getRuntimeSettings().quizInitialConfirmDelaySeconds * 1000
   }
 
   private recordVoteEvents(
@@ -2375,8 +2536,8 @@ function sanitizeSlug(value: unknown) {
     .slice(0, 40)
 }
 
-function sanitizeLogoPath(value: string) {
-  const pathValue = normalizeLogoSourceValue(value.trim())
+function sanitizeLogoPath(value: unknown) {
+  const pathValue = normalizeLogoSourceValue(String(value || '').trim())
   if (!pathValue) return ''
   if (isRemoteLogoUrl(pathValue)) return pathValue
   if (/^data:image\/(png|jpeg|jpg|webp|svg\+xml|x-icon);base64,[a-zA-Z0-9+/=]+$/i.test(pathValue) && pathValue.length < 600_000) {
@@ -2555,10 +2716,11 @@ function isAdminProtectedRequest(url: URL, method: string) {
     '/api/cheer/bulk',
     '/api/quiz/open',
     '/api/quiz/prepare',
-      '/api/quiz/close',
-      '/api/quiz/clear',
-      '/api/quiz/reset-history',
-      '/api/close',
+    '/api/quiz/confirm-mode',
+    '/api/quiz/close',
+    '/api/quiz/clear',
+    '/api/quiz/reset-history',
+    '/api/close',
     '/api/participant/reset',
     '/api/participant/delete',
     '/api/settings',
@@ -2622,10 +2784,14 @@ function isRaffleRule(value: unknown): value is RaffleRule {
 
 function normalizeRaffleStage(value: unknown): RaffleStageState {
   const source = value && typeof value === 'object' ? value as Partial<RaffleStageState> : {}
+  const winnerCount = source.winnerCount === undefined ? undefined : clamp(Math.floor(Number(source.winnerCount) || 1), 1, 10)
   return {
     active: Boolean(source.active),
     rule: isRaffleRule(source.rule) ? source.rule : 'all',
     drawing: Boolean(source.active && source.drawing),
+    ...(winnerCount !== undefined ? { winnerCount } : {}),
+    prizeImageFile: sanitizeLogoPath(source.prizeImageFile),
+    prizeName: sanitizeText(source.prizeName, 80),
     updatedAt: Number(source.updatedAt || Date.now()),
   }
 }
@@ -2737,6 +2903,8 @@ function normalizeQuizState(value: unknown): QuizState {
     winners: winners.slice(0, winnerCount),
     introEndsAt: Math.max(0, Number(source.introEndsAt) || 0),
     opensAt: Math.max(0, Number(source.opensAt) || 0),
+    confirmReadyAt: Math.max(0, Number(source.confirmReadyAt) || 0),
+    confirmModeStartedAt: Math.max(0, Number(source.confirmModeStartedAt) || 0),
     settlementStartedAt: Math.max(0, Number(source.settlementStartedAt) || 0),
     settlementDeadlineAt: Math.max(0, Number(source.settlementDeadlineAt) || 0),
     createdAt: Math.max(0, Number(source.createdAt) || 0),

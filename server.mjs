@@ -19,6 +19,8 @@ const defaultMinScore = 5
 const defaultRaffleCheerWeight = 0.2
 const defaultQuizAnswerLimit = 3
 const maxQuizAnswerLimit = 10
+const defaultQuizInitialConfirmDelaySeconds = 20
+const maxQuizInitialConfirmDelaySeconds = 60
 const raffleRules = new Set(['all', 'leader', 'top3', 'rank456', 'rank789Cheer', 'rank10Cheer', 'multi', 'big', 'longestCheer', 'cheer'])
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
@@ -357,6 +359,8 @@ const emptyQuizState = {
   winners: [],
   introEndsAt: 0,
   opensAt: 0,
+  confirmReadyAt: 0,
+  confirmModeStartedAt: 0,
   settlementStartedAt: 0,
   settlementDeadlineAt: 0,
   createdAt: 0,
@@ -390,6 +394,7 @@ let settings = {
   minScore: defaultMinScore,
   raffleCheerWeight: defaultRaffleCheerWeight,
   quizAnswerLimit: defaultQuizAnswerLimit,
+  quizInitialConfirmDelaySeconds: defaultQuizInitialConfirmDelaySeconds,
   cheerNameMode: 'masked',
   themeMode: 'stage',
 }
@@ -773,6 +778,15 @@ function getRuntimeSettings(source = settings) {
     minScore: clamp(Number(source.minScore ?? defaultMinScore), 0, 9.9),
     raffleCheerWeight: clamp(Number(source.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
     quizAnswerLimit: clamp(Math.floor(Number(source.quizAnswerLimit) || defaultQuizAnswerLimit), 1, maxQuizAnswerLimit),
+    quizInitialConfirmDelaySeconds: clamp(
+      Math.floor(
+        Number.isFinite(Number(source.quizInitialConfirmDelaySeconds))
+          ? Number(source.quizInitialConfirmDelaySeconds)
+          : defaultQuizInitialConfirmDelaySeconds,
+      ),
+      0,
+      maxQuizInitialConfirmDelaySeconds,
+    ),
     cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
     themeMode: normalizeThemeMode(source.themeMode, 'stage'),
   }
@@ -1176,12 +1190,18 @@ function addAwardRecord(record) {
   awardHistory.splice(200)
 }
 
-function getRafflePrizeImage(rule) {
+function getRafflePrizeImage(rule, rawValue) {
+  const override = sanitizeLogoPath(rawValue)
+  if (override) return override
+
   const imageKey = rafflePrizeImageKeyByRule[rule] || 'rafflePrizeImageFile'
   return copy[imageKey] || copy.rafflePrizeImageFile || ''
 }
 
-function getRafflePrizeName(rule) {
+function getRafflePrizeName(rule, rawValue) {
+  const override = sanitizeText(rawValue, 80)
+  if (override) return override
+
   const nameKey = rafflePrizeNameKeyByRule[rule] || 'rafflePrizeNameFile'
   return copy[nameKey] || copy.rafflePrizeNameFile || '행운권 상품'
 }
@@ -1260,16 +1280,36 @@ function sanitizeQuizState() {
 }
 
 function advanceQuizPhase(now = Date.now()) {
+  let changed = false
+
   if (quiz.mode === 'countdown' && quiz.opensAt > 0 && now >= quiz.opensAt) {
     quiz = {
       ...quiz,
       mode: 'open',
       updatedAt: now,
     }
+    changed = true
   }
+
+  if (quiz.mode === 'open' && !quiz.confirmModeStartedAt && quiz.confirmReadyAt > 0 && now >= quiz.confirmReadyAt) {
+    quiz = {
+      ...quiz,
+      confirmModeStartedAt: now,
+      updatedAt: now,
+    }
+    changed = true
+
+    if (hasPendingCorrectQuizCandidate()) {
+      changed = startQuizSettlement(now) || changed
+    }
+  }
+
   if (quiz.mode === 'settling' && quiz.settlementDeadlineAt > 0 && now >= quiz.settlementDeadlineAt) {
-    finalizeQuizSettlement(now)
+    changed = finalizeQuizSettlement(now) || changed
   }
+
+  if (changed) scheduleQuizTimer()
+  return changed
 }
 
 function clearQuizSettlementTimer() {
@@ -1279,16 +1319,85 @@ function clearQuizSettlementTimer() {
   quizSettlementTimer = null
 }
 
-function scheduleQuizSettlement() {
+function scheduleQuizTimer() {
   clearQuizSettlementTimer()
-  if (quiz.mode !== 'settling' || !quiz.settlementDeadlineAt) return
+  const nextAt = getNextQuizTimerAt()
+  if (!nextAt) return
 
-  const delay = Math.max(0, quiz.settlementDeadlineAt - Date.now())
+  const delay = Math.max(0, nextAt - Date.now())
   quizSettlementTimer = setTimeout(() => {
     quizSettlementTimer = null
-    if (!finalizeQuizSettlement(Date.now())) return
+    if (!advanceQuizPhase(Date.now())) return
     broadcast({ audience: true })
   }, delay)
+}
+
+function getNextQuizTimerAt() {
+  if (quiz.mode === 'settling' && quiz.settlementDeadlineAt > 0) return quiz.settlementDeadlineAt
+  if (quiz.mode === 'countdown' && quiz.opensAt > 0) return quiz.opensAt
+  if (
+    quiz.mode === 'open' &&
+    !quiz.confirmModeStartedAt &&
+    quiz.confirmReadyAt > 0 &&
+    hasPendingCorrectQuizCandidate()
+  ) {
+    return quiz.confirmReadyAt
+  }
+
+  return 0
+}
+
+function hasQuizWinnerCapacity() {
+  return quiz.winners.length < quiz.winnerCount
+}
+
+function hasPendingCorrectQuizCandidate() {
+  if (!hasQuizWinnerCapacity()) return false
+
+  const existingParticipantIds = new Set(quiz.winners.map((winner) => winner.participantId))
+  return quiz.answers.some(
+    (answer) => answer.correct && !answer.rank && !existingParticipantIds.has(answer.participantId),
+  )
+}
+
+function isQuizConfirmModeActive(now = Date.now()) {
+  return Boolean(quiz.confirmModeStartedAt) || Boolean(quiz.confirmReadyAt && now >= quiz.confirmReadyAt)
+}
+
+function startQuizSettlement(now = Date.now()) {
+  if (quiz.mode !== 'open' || quiz.mode === 'settling' || !hasPendingCorrectQuizCandidate()) return false
+
+  quiz = {
+    ...quiz,
+    mode: 'settling',
+    confirmModeStartedAt: quiz.confirmModeStartedAt || now,
+    settlementStartedAt: now,
+    settlementDeadlineAt: now + quizSettlementMs,
+    updatedAt: now,
+  }
+  return true
+}
+
+function activateQuizConfirmMode(now = Date.now()) {
+  advanceQuizPhase(now)
+  if (quiz.mode !== 'countdown' && quiz.mode !== 'open' && quiz.mode !== 'settling') return false
+
+  let changed = false
+  if (!quiz.confirmModeStartedAt) {
+    quiz = {
+      ...quiz,
+      confirmModeStartedAt: now,
+      updatedAt: now,
+    }
+    changed = true
+  }
+
+  if (quiz.mode === 'open' && hasPendingCorrectQuizCandidate()) {
+    changed = startQuizSettlement(now) || changed
+  }
+
+  scheduleQuizTimer()
+  return changed
 }
 
 function finalizeQuizSettlement(now = Date.now()) {
@@ -1401,6 +1510,7 @@ function openQuiz(body) {
   const winnerCount = Math.max(1, Math.min(10, Math.floor(Number(body.winnerCount ?? selectedQuiz?.winnerCount) || 2)))
   const answerKeys = normalizeQuizAnswerKeys([answer, ...acceptedAnswers].join('\n'))
   const now = Date.now()
+  const opensAt = now + quizIntroMs + quizCountdownMs
 
   if (!question || !answerKeys.length) return false
 
@@ -1415,7 +1525,9 @@ function openQuiz(body) {
     answers: [],
     winners: [],
     introEndsAt: now + quizIntroMs,
-    opensAt: now + quizIntroMs + quizCountdownMs,
+    opensAt,
+    confirmReadyAt: opensAt + getQuizInitialConfirmDelayMs(),
+    confirmModeStartedAt: 0,
     settlementStartedAt: 0,
     settlementDeadlineAt: 0,
     createdAt: now,
@@ -1423,6 +1535,7 @@ function openQuiz(body) {
   }
   quizAnswerKeys = answerKeys
   quizAnswerId = 1
+  scheduleQuizTimer()
   return true
 }
 
@@ -1468,20 +1581,25 @@ function submitQuizAnswer(person, textValue, body = {}) {
   quiz.answers.splice(maxStoredQuizAnswers)
 
   const alreadyWinner = quiz.winners.some((winner) => winner.participantId === person.id)
-  if (correct && quiz.mode === 'open' && quiz.winners.length < quiz.winnerCount && !alreadyWinner) {
-    quiz = {
-      ...quiz,
-      mode: 'settling',
-      settlementStartedAt: serverReceivedAt,
-      settlementDeadlineAt: serverReceivedAt + quizSettlementMs,
+  if (correct && quiz.mode === 'open' && hasQuizWinnerCapacity() && !alreadyWinner) {
+    if (!isQuizConfirmModeActive(serverReceivedAt)) {
+      scheduleQuizTimer()
+    } else {
+      if (!quiz.confirmModeStartedAt) {
+        quiz = {
+          ...quiz,
+          confirmModeStartedAt: serverReceivedAt,
+        }
+      }
+      startQuizSettlement(serverReceivedAt)
     }
-    scheduleQuizSettlement()
   }
 
   quiz = {
     ...quiz,
     updatedAt: Date.now(),
   }
+  scheduleQuizTimer()
 
   return answer
 }
@@ -1517,6 +1635,10 @@ function getQuizAnswerRejectionReason(person, textValue, body = {}) {
 
 function getQuizAnswerLimit() {
   return getRuntimeSettings().quizAnswerLimit
+}
+
+function getQuizInitialConfirmDelayMs() {
+  return getRuntimeSettings().quizInitialConfirmDelaySeconds * 1000
 }
 
 function normalizeQuizAnswerKeys(value) {
@@ -1807,6 +1929,7 @@ function isAdminProtectedPath(pathname) {
     '/api/cheer/bulk',
     '/api/quiz/open',
     '/api/quiz/prepare',
+    '/api/quiz/confirm-mode',
     '/api/quiz/close',
     '/api/quiz/clear',
     '/api/quiz/reset-history',
@@ -2309,11 +2432,12 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/raffle') {
     const rule = raffleRules.has(body.rule) ? body.rule : 'all'
-    const winnerCount = getRaffleWinnerCount(rule, body.winnerCount)
+    const stageMatchesRule = raffleStage.rule === rule
+    const winnerCount = getRaffleWinnerCount(rule, body.winnerCount ?? (stageMatchesRule ? raffleStage.winnerCount : undefined))
     const candidates = getRaffleCandidates(rule)
     const createdAt = Date.now()
-    const prizeImageFile = getRafflePrizeImage(rule)
-    const prizeName = getRafflePrizeName(rule)
+    const prizeImageFile = getRafflePrizeImage(rule, body.prizeImageFile ?? (stageMatchesRule ? raffleStage.prizeImageFile : undefined))
+    const prizeName = getRafflePrizeName(rule, body.prizeName ?? (stageMatchesRule ? raffleStage.prizeName : undefined))
     const winners = (rule === 'longestCheer' ? candidates : pickWeightedRaffleWinners(candidates, winnerCount))
       .slice(0, Math.min(winnerCount, candidates.length))
       .map((person, index) => ({
@@ -2361,12 +2485,24 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/raffle/stage') {
     const active = body.active === undefined ? true : Boolean(body.active)
     const rule = raffleRules.has(body.rule) ? body.rule : raffleStage.rule
-    const shouldClearResult = Boolean(body.clearResult) || Boolean(lastRaffle && rule !== lastRaffle.rule)
+    const stageMatchesRule = raffleStage.rule === rule
+    const winnerCount = getRaffleWinnerCount(rule, body.winnerCount ?? (stageMatchesRule ? raffleStage.winnerCount : undefined))
+    const prizeImageFile = getRafflePrizeImage(rule, body.prizeImageFile ?? (stageMatchesRule ? raffleStage.prizeImageFile : undefined))
+    const prizeName = getRafflePrizeName(rule, body.prizeName ?? (stageMatchesRule ? raffleStage.prizeName : undefined))
+    const shouldClearResult = Boolean(body.clearResult) || Boolean(lastRaffle && (
+      rule !== lastRaffle.rule ||
+      winnerCount !== lastRaffle.winnerCount ||
+      prizeImageFile !== (lastRaffle.prizeImageFile || '') ||
+      prizeName !== (lastRaffle.prizeName || '')
+    ))
     if (shouldClearResult) lastRaffle = null
     raffleStage = {
       active,
       rule,
       drawing: active ? Boolean(body.drawing) : false,
+      winnerCount,
+      prizeImageFile,
+      prizeName,
       updatedAt: Date.now(),
     }
     broadcast({ audience: true })
@@ -2387,6 +2523,13 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/quiz/prepare') {
     prepareQuiz()
+    broadcast({ audience: true })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
+    return
+  }
+
+  if (url.pathname === '/api/quiz/confirm-mode') {
+    activateQuizConfirmMode()
     broadcast({ audience: true })
     sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
@@ -2526,6 +2669,15 @@ async function handleApi(request, response, url) {
       1,
       maxQuizAnswerLimit,
     )
+    const rawQuizInitialConfirmDelay =
+      body.quizInitialConfirmDelaySeconds === undefined || body.quizInitialConfirmDelaySeconds === ''
+        ? settings.quizInitialConfirmDelaySeconds ?? defaultQuizInitialConfirmDelaySeconds
+        : Number(body.quizInitialConfirmDelaySeconds)
+    const nextQuizInitialConfirmDelaySeconds = clamp(
+      Math.floor(Number.isFinite(rawQuizInitialConfirmDelay) ? rawQuizInitialConfirmDelay : defaultQuizInitialConfirmDelaySeconds),
+      0,
+      maxQuizInitialConfirmDelaySeconds,
+    )
     const nextTimerMode = normalizeTimerMode(body.timerMode, settings.timerMode)
     const rawDurationMinutes = normalizeDurationMinutes(body.durationMinutes, settings.durationMinutes)
     const rawTargetTime = normalizeTargetTime(body.targetTime, settings.targetTime)
@@ -2548,6 +2700,7 @@ async function handleApi(request, response, url) {
       minScore: nextMinScore,
       raffleCheerWeight: nextRaffleCheerWeight,
       quizAnswerLimit: nextQuizAnswerLimit,
+      quizInitialConfirmDelaySeconds: nextQuizInitialConfirmDelaySeconds,
       cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, settings.cheerNameMode),
       themeMode: normalizeThemeMode(body.themeMode, settings.themeMode),
     }
