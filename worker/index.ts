@@ -796,7 +796,7 @@ export class ArenaRoom {
         hidden: false,
       })
       this.cheers.splice(maxStoredCheerMessages)
-      await this.commit()
+      await this.commit({ audience: true })
       return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
@@ -835,6 +835,12 @@ export class ArenaRoom {
       return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
+    if (pathname === '/api/raffle/reset') {
+      this.resetRaffleHistory()
+      await this.commit({ audience: true })
+      return json(this.getStateForRequest(request, { slimMedia: true }))
+    }
+
     if (pathname === '/api/raffle') {
       const rule = isRaffleRule(body.rule) ? body.rule : 'all'
       const winnerCount = this.getRaffleWinnerCount(rule, body.winnerCount)
@@ -842,7 +848,7 @@ export class ArenaRoom {
       const createdAt = Date.now()
       const prizeImageFile = this.getRafflePrizeImage(rule)
       const prizeName = this.getRafflePrizeName(rule)
-      const winners = this.pickWeightedRaffleWinners(candidates, winnerCount)
+      const winners = (rule === 'longestCheer' ? candidates : this.pickWeightedRaffleWinners(candidates, winnerCount))
         .slice(0, Math.min(winnerCount, candidates.length))
         .map((person, index) => ({
           id: person.id,
@@ -888,6 +894,8 @@ export class ArenaRoom {
     if (pathname === '/api/raffle/stage') {
       const active = body.active === undefined ? true : Boolean(body.active)
       const rule = isRaffleRule(body.rule) ? body.rule : this.raffleStage.rule
+      const shouldClearResult = Boolean(body.clearResult) || Boolean(this.lastRaffle && rule !== this.lastRaffle.rule)
+      if (shouldClearResult) this.lastRaffle = null
       this.raffleStage = {
         active,
         rule,
@@ -959,6 +967,12 @@ export class ArenaRoom {
 
     if (pathname === '/api/quiz/clear') {
       this.clearQuiz()
+      await this.commit({ audience: true })
+      return json(this.getStateForRequest(request, { slimMedia: true }))
+    }
+
+    if (pathname === '/api/quiz/reset-history') {
+      this.resetQuizHistory()
       await this.commit({ audience: true })
       return json(this.getStateForRequest(request, { slimMedia: true }))
     }
@@ -1509,9 +1523,7 @@ export class ArenaRoom {
       }
     }
 
-    const longestCheerLength = rule === 'longestCheer' ? Math.max(0, ...longestCheerByParticipant.values()) : 0
-
-    return state.participants.filter((person: ParticipantState) => {
+    const candidates = state.participants.filter((person: ParticipantState) => {
       if (raffleAwardedParticipantIds.has(person.id)) return false
       const spent = sumStars(person.allocations)
       if (spent <= 0) return false
@@ -1525,10 +1537,20 @@ export class ArenaRoom {
       if (rule === 'rank10Cheer') return Boolean(rank10Id && cheeredTeamIdsByParticipant.get(person.id)?.has(rank10Id))
       if (rule === 'multi') return allocationValues.length >= 5
       if (rule === 'big') return allocationValues.some((value) => value >= bigThreshold)
-      if (rule === 'longestCheer') return longestCheerLength > 0 && (longestCheerByParticipant.get(person.id) ?? 0) === longestCheerLength
+      if (rule === 'longestCheer') return (longestCheerByParticipant.get(person.id) ?? 0) > 0
       if (rule === 'cheer') return person.cheered
       return true
     })
+
+    if (rule === 'longestCheer') {
+      return candidates.sort((left, right) => {
+        const lengthDelta = (longestCheerByParticipant.get(right.id) ?? 0) - (longestCheerByParticipant.get(left.id) ?? 0)
+        if (lengthDelta) return lengthDelta
+        return left.name.localeCompare(right.name, 'ko')
+      })
+    }
+
+    return candidates
   }
 
   private getRaffleSupportDetails(person: ParticipantState): RaffleSupportDetail[] {
@@ -1672,11 +1694,25 @@ export class ArenaRoom {
   private finalizeQuizSettlement(now = Date.now()) {
     if (this.quiz.mode !== 'settling') return false
 
-    const rankedWinners = this.quiz.answers
-      .filter((answer) => answer.correct)
-      .sort(compareQuizAnswerPriority)
-      .slice(0, this.quiz.winnerCount)
-      .map((answer, index) => ({ ...answer, rank: index + 1 }))
+    const existingWinners = [...this.quiz.winners].sort((left, right) => (left.rank ?? 999) - (right.rank ?? 999))
+    const existingParticipantIds = new Set(existingWinners.map((winner) => winner.participantId))
+    const remainingSlots = Math.max(0, this.quiz.winnerCount - existingWinners.length)
+    const nextRank = existingWinners.reduce((maxRank, winner) => Math.max(maxRank, winner.rank || 0), 0) + 1
+    const seenParticipantIds = new Set(existingParticipantIds)
+    const newWinners: QuizAnswer[] = []
+
+    if (remainingSlots > 0) {
+      for (const answer of this.quiz.answers
+        .filter((candidate) => candidate.correct && !candidate.rank)
+        .sort(compareQuizAnswerPriority)) {
+        if (seenParticipantIds.has(answer.participantId)) continue
+        newWinners.push({ ...answer, rank: nextRank + newWinners.length })
+        seenParticipantIds.add(answer.participantId)
+        if (newWinners.length >= remainingSlots) break
+      }
+    }
+
+    const rankedWinners = [...existingWinners, ...newWinners]
     const winnerRankById = new Map(rankedWinners.map((answer) => [answer.id, answer.rank]))
 
     this.quiz = {
@@ -1692,7 +1728,7 @@ export class ArenaRoom {
       updatedAt: now,
     }
 
-    for (const winner of rankedWinners) {
+    for (const winner of newWinners) {
       this.addAwardRecord({
         id: `quiz-${winner.quizId}-${winner.id}-${winner.participantId}`,
         participantId: winner.participantId,
@@ -1788,6 +1824,20 @@ export class ArenaRoom {
     this.resetQuizTo('idle')
   }
 
+  private resetQuizHistory() {
+    this.awardHistory = this.awardHistory.filter((record) => record.kind !== 'quiz')
+    this.quiz = {
+      ...this.quiz,
+      mode: this.quiz.mode === 'settling' ? 'open' : this.quiz.mode,
+      answers: [],
+      winners: [],
+      settlementStartedAt: 0,
+      settlementDeadlineAt: 0,
+      updatedAt: Date.now(),
+    }
+    this.quizAnswerId = 1
+  }
+
   private submitQuizAnswer(person: Participant | null, textValue: unknown, body: RequestBody = {}) {
     const text = sanitizeText(textValue, quizAnswerMaxLength)
     const serverReceivedAt = Date.now()
@@ -1820,7 +1870,8 @@ export class ArenaRoom {
     this.quiz.answers.unshift(answer)
     this.quiz.answers.splice(maxStoredQuizAnswers)
 
-    if (correct && this.quiz.mode === 'open' && this.quiz.winners.length === 0) {
+    const alreadyWinner = this.quiz.winners.some((winner) => winner.participantId === person.id)
+    if (correct && this.quiz.mode === 'open' && this.quiz.winners.length < this.quiz.winnerCount && !alreadyWinner) {
       this.quiz = {
         ...this.quiz,
         mode: 'settling',
@@ -1963,6 +2014,17 @@ export class ArenaRoom {
 
     if (seed) {
       this.seedTestData()
+    }
+  }
+
+  private resetRaffleHistory() {
+    this.awardHistory = this.awardHistory.filter((record) => record.kind !== 'raffle')
+    this.lastRaffle = null
+    this.raffleStage = {
+      active: false,
+      rule: this.raffleStage.rule || 'all',
+      drawing: false,
+      updatedAt: Date.now(),
     }
   }
 
@@ -2472,8 +2534,14 @@ function parseCookies(cookieHeader = '') {
 }
 
 function isAdminProtectedRequest(url: URL, method: string) {
+  if (method === 'GET' && url.pathname === '/api/state') {
+    const role = url.searchParams.get('role')
+    return role === 'admin' || role === 'wall'
+  }
+
   if (method === 'GET' && url.pathname === '/events') {
-    return url.searchParams.get('role') === 'admin'
+    const role = url.searchParams.get('role')
+    return role === 'admin' || role === 'wall'
   }
 
   if (method === 'GET' && url.pathname === '/api/team-config/apply') {
@@ -2487,13 +2555,17 @@ function isAdminProtectedRequest(url: URL, method: string) {
     '/api/cheer/bulk',
     '/api/quiz/open',
     '/api/quiz/prepare',
-    '/api/quiz/close',
-    '/api/quiz/clear',
-    '/api/close',
+      '/api/quiz/close',
+      '/api/quiz/clear',
+      '/api/quiz/reset-history',
+      '/api/close',
     '/api/participant/reset',
     '/api/participant/delete',
     '/api/settings',
     '/api/team-config',
+    '/api/raffle',
+    '/api/raffle/stage',
+    '/api/raffle/reset',
     '/api/reset',
   ]).has(url.pathname)
 }

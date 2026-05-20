@@ -3,6 +3,7 @@ import type {
   CSSProperties,
   FormEvent as ReactFormEvent,
   KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
   ReactNode,
@@ -1405,9 +1406,11 @@ const messageTimeFormatter = new Intl.DateTimeFormat('ko-KR', {
 function App() {
   const mode = getAppMode()
   const [participantId, setParticipantId] = useState(getOrCreateParticipantId)
-  const adminSession = useAdminSession(mode === 'admin')
-  const allowProtectedRealtime = mode !== 'admin' || adminSession.authenticated
-  const { state, connection, post } = useEventState(mode, participantId, true, allowProtectedRealtime)
+  const protectedDisplayMode = mode === 'admin' || mode === 'wall'
+  const adminSession = useAdminSession(protectedDisplayMode)
+  const allowProtectedRealtime = !protectedDisplayMode || adminSession.authenticated
+  const eventStateEnabled = !protectedDisplayMode || adminSession.authenticated
+  const { state, connection, post } = useEventState(mode, participantId, eventStateEnabled, allowProtectedRealtime)
   const themeMode = getThemeMode(state)
   const [name, setName] = useState(() => getStoredValue(nameKey))
   const [group, setGroup] = useState(() => getStoredValue(groupKey))
@@ -1473,7 +1476,7 @@ function App() {
     setDepartment('')
   }
 
-  if (mode === 'admin' && (!adminSession.ready || (adminSession.required && !adminSession.authenticated))) {
+  if (protectedDisplayMode && (!adminSession.ready || (adminSession.required && !adminSession.authenticated))) {
     return (
       <main className={`app-shell theme-${themeMode}`}>
         <AdminLoginView session={adminSession} />
@@ -1506,7 +1509,7 @@ function App() {
           if (mode === 'admin' || mode === 'wall') return post('/api/quiz/clear', {})
           return null
         }}
-        adminSession={mode === 'admin' ? adminSession : undefined}
+        adminSession={protectedDisplayMode ? adminSession : undefined}
         onVoteLogout={mode === 'vote' ? switchVoteParticipant : undefined}
       />
       {mode === 'admin' ? (
@@ -1717,6 +1720,18 @@ function Header({
   const adminOverviewActive = state.quiz.mode === 'idle' && (!adminPanel || adminPanel === 'arena')
   const adminQuizActive = adminPanel === 'quiz' || state.quiz.mode !== 'idle'
   const adminRaffleActive = adminPanel === 'raffle' || state.raffleStage.active
+  const endRaffleBeforeNavigation = async () => {
+    if (!state.raffleStage.active) return true
+    const nextState = await onEndRaffle?.()
+    return Boolean(nextState && !nextState.raffleStage.active)
+  }
+  const navigateAdminAfterRaffle = (event: ReactMouseEvent<HTMLAnchorElement>, href: string) => {
+    if (!state.raffleStage.active) return
+    event.preventDefault()
+    void (async () => {
+      if (await endRaffleBeforeNavigation()) window.location.assign(href)
+    })()
+  }
 
   return (
     <header className={`topbar ${mode === 'admin' ? 'admin-topbar' : 'audience-topbar'} ${mode === 'wall' ? 'wall-topbar' : ''}`} aria-label="행사 상태">
@@ -1734,23 +1749,23 @@ function Header({
       <div className="event-controls">
         {mode === 'admin' ? (
           <>
-            <a className={`role-nav-link ${adminOverviewActive ? 'active' : ''}`} href="/admin">
+            <a className={`role-nav-link ${adminOverviewActive ? 'active' : ''}`} href="/admin" onClick={(event) => navigateAdminAfterRaffle(event, '/admin')}>
               <RadioTower size={15} />
               실시간 현황
             </a>
-            <a className={`role-nav-link ${adminPanel === 'teams' ? 'active' : ''}`} href="/admin?panel=teams">
+            <a className={`role-nav-link ${adminPanel === 'teams' ? 'active' : ''}`} href="/admin?panel=teams" onClick={(event) => navigateAdminAfterRaffle(event, '/admin?panel=teams')}>
               <Settings2 size={15} />
               운영 콘텐츠
             </a>
-            <a className={`role-nav-link ${adminPanel === 'messages' ? 'active' : ''}`} href="/admin?panel=messages">
+            <a className={`role-nav-link ${adminPanel === 'messages' ? 'active' : ''}`} href="/admin?panel=messages" onClick={(event) => navigateAdminAfterRaffle(event, '/admin?panel=messages')}>
               <MessageCircle size={15} />
               메시지 관리
             </a>
-            <a className={`role-nav-link ${adminPanel === 'participants' ? 'active' : ''}`} href="/admin?panel=participants">
+            <a className={`role-nav-link ${adminPanel === 'participants' ? 'active' : ''}`} href="/admin?panel=participants" onClick={(event) => navigateAdminAfterRaffle(event, '/admin?panel=participants')}>
               <Users size={15} />
               참여자 리스트
             </a>
-            <a className={`role-nav-link ${adminPanel === 'export' ? 'active' : ''}`} href="/admin?panel=export">
+            <a className={`role-nav-link ${adminPanel === 'export' ? 'active' : ''}`} href="/admin?panel=export" onClick={(event) => navigateAdminAfterRaffle(event, '/admin?panel=export')}>
               <FileSpreadsheet size={15} />
               결과 내보내기
             </a>
@@ -1760,9 +1775,11 @@ function Header({
               onClick={(event) => {
                 if (!onPrepareQuiz) return
                 event.preventDefault()
-                window.history.pushState(null, '', '/admin?panel=quiz')
-                if (state.raffleStage.active) void onEndRaffle?.()
-                void onPrepareQuiz()
+                void (async () => {
+                  if (!(await endRaffleBeforeNavigation())) return
+                  window.history.pushState(null, '', '/admin?panel=quiz')
+                  await onPrepareQuiz()
+                })()
               }}
             >
               <CircleHelp size={15} />
@@ -1781,7 +1798,7 @@ function Header({
               <Ticket size={15} />
               행운권추첨
             </a>
-            <a className="role-nav-link" href="/admin?showCheer=1">
+            <a className="role-nav-link" href="/admin?showCheer=1" onClick={(event) => navigateAdminAfterRaffle(event, '/admin?showCheer=1')}>
               <Sparkles size={15} />
               Showup
             </a>
@@ -1842,9 +1859,11 @@ function Header({
                 type="button"
                 className={wallPanel === 'overview' ? 'active' : ''}
                 onClick={() => {
-                  if (state.quiz.mode !== 'idle') onEndQuiz?.()
-                  if (state.raffleStage.active) onEndRaffle?.()
-                  onWallPanelChange('overview')
+                  void (async () => {
+                    if (state.quiz.mode !== 'idle') await onEndQuiz?.()
+                    if (!(await endRaffleBeforeNavigation())) return
+                    onWallPanelChange('overview')
+                  })()
                 }}
               >
                 <RadioTower size={16} />
@@ -1870,9 +1889,11 @@ function Header({
                 type="button"
                 className={wallPanel === 'quiz' ? 'active' : ''}
                 onClick={() => {
-                  if (state.raffleStage.active) void onEndRaffle?.()
-                  onWallPanelChange('quiz')
-                  void onPrepareQuiz?.()
+                  void (async () => {
+                    if (!(await endRaffleBeforeNavigation())) return
+                    onWallPanelChange('quiz')
+                    await onPrepareQuiz?.()
+                  })()
                 }}
               >
                 <CircleHelp size={16} />
@@ -3071,11 +3092,6 @@ function AdminView({
     document.title = visiblePanel ? `vibe-compete/admin/${visiblePanel}` : 'vibe-compete/admin'
   }, [visiblePanel])
 
-  useEffect(() => {
-    if (activePanel !== 'raffle' || state.raffleStage.active) return
-    void post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false })
-  }, [activePanel, post, raffleRule, state.raffleStage.active])
-
   const openQuizPanel = () => {
     openAdminPanel('quiz')
     void post('/api/quiz/prepare', {})
@@ -3086,14 +3102,20 @@ function AdminView({
     openAdminPanel(null)
   }
 
-  const closeDetailPanel = () => {
+  const openRafflePanel = () => {
+    openAdminPanel('raffle')
+    void post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false })
+  }
+
+  const closeDetailPanel = async () => {
     if (visiblePanel === 'quiz' && state.quiz.mode !== 'idle') {
       void endQuizAndClosePanel()
       return
     }
 
     if (visiblePanel === 'raffle' && state.raffleStage.active) {
-      void post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false })
+      const nextState = await post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false })
+      if (!nextState || nextState.raffleStage.active) return
     }
 
     openAdminPanel(null)
@@ -3112,7 +3134,7 @@ function AdminView({
   }
 
   const changeRaffleRule = (rule: RaffleRule) => {
-    post('/api/raffle/stage', { active: true, rule, drawing: isDrawing })
+    post('/api/raffle/stage', { active: true, rule, drawing: false, clearResult: true })
   }
 
   const closeVote = () => {
@@ -3164,6 +3186,16 @@ function AdminView({
 
   const resetVotesOnly = () => {
     post('/api/reset', { seed: false, keepParticipants: true })
+  }
+
+  const resetRaffleHistory = () => {
+    if (!window.confirm('행운권 추첨 이력과 마지막 당첨 결과를 초기화할까요? 퀴즈 정답 이력은 유지됩니다.')) return
+    post('/api/raffle/reset', {})
+  }
+
+  const resetQuizHistory = () => {
+    if (!window.confirm('퀴즈 정답 이력과 현재 표시된 답변 기록을 초기화할까요? 퀴즈 문제 목록은 유지됩니다.')) return
+    post('/api/quiz/reset-history', {})
   }
 
   const resetAll = () => {
@@ -3408,6 +3440,12 @@ function AdminView({
           <button type="button" className="secondary-control" onClick={resetVotesOnly}>
             투표만 Reset
           </button>
+          <button type="button" className="secondary-control" onClick={resetRaffleHistory}>
+            행운권 이력 Reset
+          </button>
+          <button type="button" className="secondary-control" onClick={resetQuizHistory}>
+            퀴즈 이력 Reset
+          </button>
           <button type="button" className="secondary-control danger-control" onClick={resetAll}>
             전체 Reset
           </button>
@@ -3465,7 +3503,7 @@ function AdminView({
             onRuleChange={changeRaffleRule}
             onStart={startDrawing}
             onStop={stopDrawing}
-            onOpen={() => openAdminPanel('raffle')}
+            onOpen={openRafflePanel}
           />
         </aside>
       </section>
@@ -3502,11 +3540,6 @@ function PublicWallView({
   const wallSplitMin = 54
   const wallSplitMax = 82
 
-  useEffect(() => {
-    if (wallPanel !== 'raffle' || state.raffleStage.active) return
-    void post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false })
-  }, [post, raffleRule, state.raffleStage.active, wallPanel])
-
   const startDrawing = () => {
     setWallPanel('raffle')
     post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: true })
@@ -3520,14 +3553,17 @@ function PublicWallView({
   }
 
   const changeRaffleRule = (rule: RaffleRule) => {
-    post('/api/raffle/stage', { active: true, rule, drawing: isDrawing })
+    post('/api/raffle/stage', { active: true, rule, drawing: false, clearResult: true })
   }
 
   const selectTeamMessages = (teamId: string) => {
     setSelectedTeamId((current) => (current === teamId ? 'all' : teamId))
     if (wallPanel === 'raffle') {
-      post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false })
-      setWallPanel('overview')
+      void (async () => {
+        const nextState = await post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false })
+        if (!nextState || nextState.raffleStage.active) return
+        setWallPanel('overview')
+      })()
     }
   }
 
@@ -3584,8 +3620,11 @@ function PublicWallView({
               <button
                 type="button"
                 onClick={() => {
-                  post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false })
-                  setWallPanel('overview')
+                  void (async () => {
+                    const nextState = await post('/api/raffle/stage', { active: false, rule: raffleRule, drawing: false })
+                    if (!nextState || nextState.raffleStage.active) return
+                    setWallPanel('overview')
+                  })()
                 }}
               >
                 <X size={16} />
@@ -6837,6 +6876,9 @@ function RaffleDetailPanel({
   const configuredWinnerCount = hasWinners && state.lastRaffle?.rule === displayRaffleRule
     ? state.lastRaffle.winnerCount
     : getRaffleWinnerCount(state, displayRaffleRule)
+  const displayCandidateCount = hasWinners && state.lastRaffle?.rule === displayRaffleRule
+    ? state.lastRaffle.candidates
+    : previewCandidates.length
   const ruleOptions = raffleRuleOptions.map((option, index) => ({
     ...option,
     displayLabel: publicMode ? getRaffleRulePublicLabel(option.value, index) : getRaffleRuleLabel(option.value, state),
@@ -6895,8 +6937,6 @@ function RaffleDetailPanel({
               const details = getRaffleWinnerDetails(state, winner)
               const visibleSupports = details.supports.slice(0, 3)
               const hiddenSupportCount = Math.max(0, details.supports.length - visibleSupports.length)
-              const visibleCheers = details.cheers.slice(0, 1)
-              const hiddenCheerCount = Math.max(0, details.cheers.length - visibleCheers.length)
               const styleVariant = Math.floor(hashToUnit(`${winner.id}:${state.lastRaffle?.createdAt ?? 0}`) * 3)
               const winnerNameCharacters = Array.from(winner.name)
               return (
@@ -6939,17 +6979,7 @@ function RaffleDetailPanel({
                         {hiddenSupportCount > 0 ? <em>+{hiddenSupportCount}</em> : null}
                       </div>
                     ) : null}
-                    {visibleCheers.length ? (
-                      <div className="winner-message-quotes" aria-label="응원 메시지">
-                        {visibleCheers.map((message, messageIndex) => (
-                          <p key={`${message.teamId}-${message.createdAt}-${messageIndex}`}>
-                            <span>{message.teamName}</span>
-                            <q>{message.text}</q>
-                          </p>
-                        ))}
-                        {hiddenCheerCount > 0 ? <small>외 {hiddenCheerCount}개 메시지</small> : null}
-                      </div>
-                    ) : null}
+                    <RaffleWinnerMessageDetails supports={details.supports} cheers={details.cheers} />
                   </div>
                 </article>
               )
@@ -6992,7 +7022,7 @@ function RaffleDetailPanel({
         <div className={`draw-stage compact ${isDrawing ? 'drawing' : ''}`}>
           <div>
             <span>후보</span>
-            <strong>{previewCandidates.length}명</strong>
+            <strong>{displayCandidateCount}명</strong>
           </div>
           <div>
             <span>선발</span>
@@ -7011,6 +7041,53 @@ function RaffleDetailPanel({
         </details>
       </aside>
     </div>
+  )
+}
+
+function RaffleWinnerMessageDetails({
+  supports,
+  cheers,
+}: {
+  supports: RaffleSupportDetail[]
+  cheers: RaffleCheerDetail[]
+}) {
+  if (!cheers.length) return null
+
+  const previewMessage = cheers[0]
+  const hiddenCheerCount = Math.max(0, cheers.length - 1)
+
+  return (
+    <details className="winner-message-quotes winner-message-details">
+      <summary>
+        <span className="winner-message-preview">
+          <span>{previewMessage.teamName}</span>
+          <q>{previewMessage.text}</q>
+        </span>
+        <small>{hiddenCheerCount > 0 ? `외 ${hiddenCheerCount}개 메시지 보기` : '응원 기록 보기'}</small>
+      </summary>
+      <div className="winner-detail-scroll">
+        {supports.length ? (
+          <div className="winner-support-list">
+            <b>응원한 팀</b>
+            {supports.map((item) => (
+              <em key={item.teamId}>
+                {item.rank ? `${item.rank}위 ` : ''}
+                {item.teamName} · {item.stars}★
+              </em>
+            ))}
+          </div>
+        ) : null}
+        <div className="winner-cheer-log">
+          <b>응원 메시지</b>
+          {cheers.map((message, index) => (
+            <p key={`${message.teamId}-${message.createdAt}-${index}`}>
+              <span>{message.teamName}</span>
+              <q>{message.text}</q>
+            </p>
+          ))}
+        </div>
+      </div>
+    </details>
   )
 }
 
@@ -7196,16 +7273,7 @@ function getRaffleCandidatesForRule(state: EventState, rule: RaffleRule) {
     )
   }
 
-  const longestCheerLength = rule === 'longestCheer'
-    ? Math.max(
-        0,
-        ...state.participants
-          .filter((person) => !raffleAwardedParticipantIds.has(person.id) && sumStars(person.allocations) > 0 && person.cheered)
-          .map((person) => longestCheerByParticipant.get(person.id) ?? 0),
-      )
-    : 0
-
-  return state.participants.filter((person) => {
+  const candidates = state.participants.filter((person) => {
     if (raffleAwardedParticipantIds.has(person.id)) return false
     const spent = sumStars(person.allocations)
     if (spent <= 0) return false
@@ -7222,11 +7290,21 @@ function getRaffleCandidatesForRule(state: EventState, rule: RaffleRule) {
     if (rule === 'big') return allocationValues.some((value) => value >= bigThreshold)
     if (rule === 'longestCheer') {
       const length = longestCheerByParticipant.get(person.id) ?? 0
-      return longestCheerLength > 0 && length === longestCheerLength
+      return length > 0
     }
     if (rule === 'cheer') return person.cheered
     return true
   })
+
+  if (rule === 'longestCheer') {
+    return candidates.sort((left, right) => {
+      const lengthDelta = (longestCheerByParticipant.get(right.id) ?? 0) - (longestCheerByParticipant.get(left.id) ?? 0)
+      if (lengthDelta) return lengthDelta
+      return left.name.localeCompare(right.name, 'ko')
+    })
+  }
+
+  return candidates
 }
 
 function getRaffleWinnerDetails(state: EventState, winner: RaffleWinner) {

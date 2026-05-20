@@ -1105,9 +1105,7 @@ function getRaffleCandidates(rule) {
     }
   }
 
-  const longestCheerLength = rule === 'longestCheer' ? Math.max(0, ...longestCheerByParticipant.values()) : 0
-
-  return state.participants.filter((person) => {
+  const candidates = state.participants.filter((person) => {
     if (raffleAwardedParticipantIds.has(person.id)) return false
     const spent = sumStars(person.allocations)
     if (spent <= 0) return false
@@ -1121,10 +1119,20 @@ function getRaffleCandidates(rule) {
     if (rule === 'rank10Cheer') return Boolean(rank10Id && cheeredTeamIdsByParticipant.get(person.id)?.has(rank10Id))
     if (rule === 'multi') return allocationValues.length >= 5
     if (rule === 'big') return allocationValues.some((value) => value >= bigThreshold)
-    if (rule === 'longestCheer') return longestCheerLength > 0 && (longestCheerByParticipant.get(person.id) || 0) === longestCheerLength
+    if (rule === 'longestCheer') return (longestCheerByParticipant.get(person.id) || 0) > 0
     if (rule === 'cheer') return person.cheered
     return true
   })
+
+  if (rule === 'longestCheer') {
+    return candidates.sort((left, right) => {
+      const lengthDelta = (longestCheerByParticipant.get(right.id) || 0) - (longestCheerByParticipant.get(left.id) || 0)
+      if (lengthDelta) return lengthDelta
+      return left.name.localeCompare(right.name, 'ko')
+    })
+  }
+
+  return candidates
 }
 
 function getRaffleSupportDetails(person) {
@@ -1286,11 +1294,25 @@ function scheduleQuizSettlement() {
 function finalizeQuizSettlement(now = Date.now()) {
   if (quiz.mode !== 'settling') return false
 
-  const rankedWinners = quiz.answers
-    .filter((answer) => answer.correct)
-    .sort(compareQuizAnswerPriority)
-    .slice(0, quiz.winnerCount)
-    .map((answer, index) => ({ ...answer, rank: index + 1 }))
+  const existingWinners = [...quiz.winners].sort((left, right) => (left.rank ?? 999) - (right.rank ?? 999))
+  const existingParticipantIds = new Set(existingWinners.map((winner) => winner.participantId))
+  const remainingSlots = Math.max(0, quiz.winnerCount - existingWinners.length)
+  const nextRank = existingWinners.reduce((maxRank, winner) => Math.max(maxRank, winner.rank || 0), 0) + 1
+  const seenParticipantIds = new Set(existingParticipantIds)
+  const newWinners = []
+
+  if (remainingSlots > 0) {
+    for (const answer of quiz.answers
+      .filter((candidate) => candidate.correct && !candidate.rank)
+      .sort(compareQuizAnswerPriority)) {
+      if (seenParticipantIds.has(answer.participantId)) continue
+      newWinners.push({ ...answer, rank: nextRank + newWinners.length })
+      seenParticipantIds.add(answer.participantId)
+      if (newWinners.length >= remainingSlots) break
+    }
+  }
+
+  const rankedWinners = [...existingWinners, ...newWinners]
   const winnerRankById = new Map(rankedWinners.map((answer) => [answer.id, answer.rank]))
 
   quiz = {
@@ -1306,7 +1328,7 @@ function finalizeQuizSettlement(now = Date.now()) {
     updatedAt: now,
   }
 
-  for (const winner of rankedWinners) {
+  for (const winner of newWinners) {
     addAwardRecord({
       id: `quiz-${winner.quizId}-${winner.id}-${winner.participantId}`,
       participantId: winner.participantId,
@@ -1445,7 +1467,8 @@ function submitQuizAnswer(person, textValue, body = {}) {
   quiz.answers.unshift(answer)
   quiz.answers.splice(maxStoredQuizAnswers)
 
-  if (correct && quiz.mode === 'open' && quiz.winners.length === 0) {
+  const alreadyWinner = quiz.winners.some((winner) => winner.participantId === person.id)
+  if (correct && quiz.mode === 'open' && quiz.winners.length < quiz.winnerCount && !alreadyWinner) {
     quiz = {
       ...quiz,
       mode: 'settling',
@@ -1786,17 +1809,22 @@ function isAdminProtectedPath(pathname) {
     '/api/quiz/prepare',
     '/api/quiz/close',
     '/api/quiz/clear',
+    '/api/quiz/reset-history',
     '/api/close',
     '/api/participant/reset',
     '/api/participant/delete',
     '/api/settings',
     '/api/team-config',
+    '/api/raffle',
+    '/api/raffle/stage',
+    '/api/raffle/reset',
     '/api/reset',
   ]).has(pathname)
 }
 
-function isAdminEventRequest(url) {
-  return url.searchParams.get('role') === 'admin'
+function isProtectedRealtimeRequest(url) {
+  const role = url.searchParams.get('role')
+  return role === 'admin' || role === 'wall'
 }
 
 function adminSessionToken() {
@@ -1861,6 +1889,36 @@ function resetRuntimeState({ seed = false, keepParticipants = false } = {}) {
   if (seed) {
     seedTestData()
   }
+}
+
+function resetRaffleHistory() {
+  for (let index = awardHistory.length - 1; index >= 0; index -= 1) {
+    if (awardHistory[index].kind === 'raffle') awardHistory.splice(index, 1)
+  }
+  lastRaffle = null
+  raffleStage = {
+    active: false,
+    rule: raffleStage.rule || 'all',
+    drawing: false,
+    updatedAt: Date.now(),
+  }
+}
+
+function resetQuizHistory() {
+  clearQuizSettlementTimer()
+  for (let index = awardHistory.length - 1; index >= 0; index -= 1) {
+    if (awardHistory[index].kind === 'quiz') awardHistory.splice(index, 1)
+  }
+  quiz = {
+    ...quiz,
+    mode: quiz.mode === 'settling' ? 'open' : quiz.mode,
+    answers: [],
+    winners: [],
+    settlementStartedAt: 0,
+    settlementDeadlineAt: 0,
+    updatedAt: Date.now(),
+  }
+  quizAnswerId = 1
 }
 
 function seedTestData() {
@@ -2062,13 +2120,18 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === 'GET' && url.pathname === '/api/state') {
+    if (isProtectedRealtimeRequest(url) && !isAdminAuthenticated(request)) {
+      sendJson(response, 401, { error: 'admin authentication required' })
+      return
+    }
+
     const role = getEventRole(url)
     sendJson(response, 200, getState({ slimMedia: url.searchParams.get('media') === 'slim', role, participantId: getRequestParticipantCookie(request) }))
     return
   }
 
   if (request.method === 'GET' && url.pathname === '/events') {
-    if (isAdminEventRequest(url) && !isAdminAuthenticated(request)) {
+    if (isProtectedRealtimeRequest(url) && !isAdminAuthenticated(request)) {
       sendJson(response, 401, { error: 'admin authentication required' })
       return
     }
@@ -2187,7 +2250,7 @@ async function handleApi(request, response, url) {
       hidden: false,
     })
     cheers.splice(maxStoredCheerMessages)
-    broadcast()
+    broadcast({ audience: true })
     sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
@@ -2237,6 +2300,13 @@ async function handleApi(request, response, url) {
     return
   }
 
+  if (url.pathname === '/api/raffle/reset') {
+    resetRaffleHistory()
+    broadcast({ audience: true })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
+    return
+  }
+
   if (url.pathname === '/api/raffle') {
     const rule = raffleRules.has(body.rule) ? body.rule : 'all'
     const winnerCount = getRaffleWinnerCount(rule, body.winnerCount)
@@ -2244,7 +2314,7 @@ async function handleApi(request, response, url) {
     const createdAt = Date.now()
     const prizeImageFile = getRafflePrizeImage(rule)
     const prizeName = getRafflePrizeName(rule)
-    const winners = pickWeightedRaffleWinners(candidates, winnerCount)
+    const winners = (rule === 'longestCheer' ? candidates : pickWeightedRaffleWinners(candidates, winnerCount))
       .slice(0, Math.min(winnerCount, candidates.length))
       .map((person, index) => ({
         id: person.id,
@@ -2291,6 +2361,8 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/raffle/stage') {
     const active = body.active === undefined ? true : Boolean(body.active)
     const rule = raffleRules.has(body.rule) ? body.rule : raffleStage.rule
+    const shouldClearResult = Boolean(body.clearResult) || Boolean(lastRaffle && rule !== lastRaffle.rule)
+    if (shouldClearResult) lastRaffle = null
     raffleStage = {
       active,
       rule,
@@ -2374,6 +2446,13 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/quiz/clear') {
     clearQuiz()
+    broadcast({ audience: true })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
+    return
+  }
+
+  if (url.pathname === '/api/quiz/reset-history') {
+    resetQuizHistory()
     broadcast({ audience: true })
     sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return

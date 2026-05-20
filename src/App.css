@@ -6457,7 +6457,7 @@ body.is-wall-resizing * {
 }
 
 .raffle-detail.public-mode .winner-spotlight-card.compact-winner .winner-message-quotes {
-  max-height: 78px;
+  max-height: 122px;
 }
 
 .raffle-detail.public-mode .winner-crown {
@@ -6468,6 +6468,14 @@ body.is-wall-resizing * {
 
 .raffle-detail.public-mode .winner-message-quotes {
   max-height: min(12vh, 92px);
+}
+
+.raffle-detail.public-mode .winner-message-details[open] {
+  max-height: min(28vh, 260px);
+}
+
+.raffle-detail.public-mode .winner-spotlight-card.compact-winner .winner-message-details[open] {
+  max-height: min(22vh, 190px);
 }
 
 .raffle-detail.public-mode .gift-agent {
@@ -7404,6 +7412,25 @@ body.is-wall-resizing * {
   padding-right: 4px;
 }
 
+.winner-message-details {
+  cursor: pointer;
+}
+
+.winner-message-details[open] {
+  max-height: min(36vh, 320px);
+}
+
+.winner-message-details summary {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+}
+
+.winner-message-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.winner-message-preview,
 .winner-message-quotes p {
   margin: 0;
   display: grid;
@@ -7418,6 +7445,7 @@ body.is-wall-resizing * {
   overflow-wrap: break-word;
 }
 
+.winner-message-preview span,
 .winner-message-quotes p span,
 .winner-message-quotes small {
   color: rgba(220, 232, 255, 0.72);
@@ -7425,10 +7453,25 @@ body.is-wall-resizing * {
   font-weight: 880;
 }
 
+.winner-message-quotes small {
+  width: fit-content;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 183, 202, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 122, 160, 0.08);
+}
+
+.winner-message-details[open] small {
+  color: rgba(255, 218, 229, 0.96);
+}
+
+.winner-message-preview q,
 .winner-message-quotes q {
   quotes: none;
 }
 
+.winner-message-preview q::before,
+.winner-message-preview q::after,
 .winner-message-quotes q::before,
 .winner-message-quotes q::after {
   content: '';
@@ -7482,6 +7525,15 @@ body.is-wall-resizing * {
   font-size: 13px;
   line-height: 1.45;
   overflow-wrap: break-word;
+}
+
+.winner-cheer-log q {
+  quotes: none;
+}
+
+.winner-cheer-log q::before,
+.winner-cheer-log q::after {
+  content: '';
 }
 
 .winner-cheer-log p span {
@@ -8647,6 +8699,7 @@ body.is-wall-resizing * {
 
 .theme-stage .winner-crown,
 .theme-stage .winner-support-ribbon em,
+.theme-stage .winner-message-preview,
 .theme-stage .winner-message-quotes p {
   border-color: rgba(255, 183, 202, 0.26);
   background:
@@ -8664,6 +8717,7 @@ body.is-wall-resizing * {
   color: var(--stage-ink);
 }
 
+.theme-stage .winner-message-preview span,
 .theme-stage .winner-message-quotes p span,
 .theme-stage .winner-message-quotes small {
   color: var(--stage-muted);
