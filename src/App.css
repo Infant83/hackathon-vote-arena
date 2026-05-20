@@ -3536,6 +3536,16 @@ body.is-wall-resizing * {
   line-height: 1.35;
 }
 
+.quiz-accepted-answer-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.quiz-accepted-answer-editor textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
 .quiz-control-panel input,
 .quiz-control-panel select {
   min-height: 34px;
@@ -6353,7 +6363,7 @@ body.is-wall-resizing * {
 .raffle-detail.public-mode .raffle-showcase {
   min-height: 0;
   height: 100%;
-  grid-template-columns: minmax(360px, 0.56fr) minmax(300px, 0.44fr);
+  grid-template-columns: minmax(340px, 0.52fr) minmax(340px, 0.48fr);
   align-content: center;
   align-items: center;
   justify-items: center;
@@ -6364,8 +6374,8 @@ body.is-wall-resizing * {
 
 .raffle-detail.public-mode .raffle-detail-desk {
   max-height: 100%;
-  gap: 12px;
-  padding: 14px;
+  gap: clamp(8px, 1vh, 12px);
+  padding: clamp(10px, 1vh, 14px);
   overflow: hidden;
 }
 
@@ -6411,17 +6421,43 @@ body.is-wall-resizing * {
   grid-column: 2;
   align-self: center;
   justify-self: center;
-  width: min(560px, 100%);
+  width: min(620px, 100%);
   max-height: none;
   overflow: visible;
   margin-top: clamp(-20px, -1vh, 0px);
   padding-right: 0;
-  transform: translateX(clamp(-72px, -3vw, -26px));
+  transform: translateX(clamp(-112px, -4.2vw, -38px));
 }
 
 .raffle-detail.public-mode .raffle-winner-showcase article {
   gap: 12px;
   padding: clamp(18px, 1.5vw, 24px);
+}
+
+.raffle-detail.public-mode .raffle-winner-showcase.multi-winners {
+  width: min(760px, 100%);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-content: center;
+}
+
+.raffle-detail.public-mode .winner-spotlight-card.compact-winner {
+  gap: 10px;
+  padding: clamp(14px, 1.1vw, 18px);
+  border-radius: 20px;
+}
+
+.raffle-detail.public-mode .winner-spotlight-card.compact-winner .winner-crown {
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+}
+
+.raffle-detail.public-mode .winner-spotlight-card.compact-winner .winner-name-slam {
+  font-size: clamp(32px, 2.8vw, 56px);
+}
+
+.raffle-detail.public-mode .winner-spotlight-card.compact-winner .winner-message-quotes {
+  max-height: 78px;
 }
 
 .raffle-detail.public-mode .winner-crown {
@@ -6444,9 +6480,9 @@ body.is-wall-resizing * {
 .raffle-detail.public-mode .lotto-machine,
 .raffle-detail.public-mode .target-showcase {
   grid-column: 1;
-  width: min(680px, 100%);
+  width: min(620px, 100%);
   min-height: 0;
-  height: min(100%, 640px);
+  height: min(100%, 560px);
   grid-template-rows: auto auto auto;
   align-content: center;
   transform: none;
@@ -6493,26 +6529,26 @@ body.is-wall-resizing * {
 }
 
 .raffle-detail.public-mode .lotto-bowl {
-  width: clamp(300px, min(28vw, 41dvh), 480px);
-  height: clamp(300px, min(28vw, 41dvh), 480px);
+  width: clamp(280px, min(26vw, 36dvh), 430px);
+  height: clamp(280px, min(26vw, 36dvh), 430px);
   max-width: none;
   max-height: none;
 }
 
 .raffle-detail.public-mode .lotto-ball {
-  width: clamp(58px, 3.8vw, 78px);
-  height: clamp(58px, 3.8vw, 78px);
+  width: clamp(52px, 3.3vw, 70px);
+  height: clamp(52px, 3.3vw, 70px);
 }
 
 .raffle-detail.public-mode .lotto-result-ball {
-  width: clamp(120px, 7vw, 160px);
-  height: clamp(120px, 7vw, 160px);
+  width: clamp(112px, 6.4vw, 148px);
+  height: clamp(112px, 6.4vw, 148px);
 }
 
 .raffle-detail.public-mode .lotto-result-tray {
-  min-width: clamp(220px, 16vw, 300px);
-  min-height: clamp(92px, 9.5vh, 122px);
-  margin-top: clamp(4px, 0.8vh, 10px);
+  min-width: clamp(210px, 14vw, 280px);
+  min-height: clamp(78px, 7.8vh, 108px);
+  margin-top: clamp(0px, 0.6vh, 8px);
 }
 
 .raffle-detail.public-mode .lotto-result-ball strong {
@@ -7673,7 +7709,7 @@ body.is-wall-resizing * {
 
 .raffle-prize-media {
   width: 100%;
-  min-height: clamp(116px, 11vw, 174px);
+  min-height: clamp(108px, 10vw, 162px);
   aspect-ratio: 6 / 4;
   display: grid;
   place-items: center;
@@ -7689,8 +7725,9 @@ body.is-wall-resizing * {
 
 .raffle-prize-summary img,
 .raffle-prize-summary svg {
-  width: 100%;
+  width: auto;
   height: auto;
+  max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   object-position: center;
@@ -7715,15 +7752,26 @@ body.is-wall-resizing * {
 }
 
 .raffle-detail.public-mode .raffle-prize-summary {
-  gap: 10px;
+  gap: 8px;
   overflow: hidden;
-  padding: 12px;
+  padding: clamp(8px, 0.9vh, 12px);
 }
 
 .raffle-detail.public-mode .raffle-prize-media {
-  height: clamp(118px, 18vh, 210px);
+  height: clamp(128px, 15vh, 174px);
   min-height: 0;
-  max-height: 210px;
+  max-height: 174px;
+  aspect-ratio: 16 / 9;
+  margin-top: 8px;
+}
+
+.raffle-detail.public-mode .raffle-prize-summary img,
+.raffle-detail.public-mode .raffle-prize-summary svg {
+  width: auto;
+  height: clamp(112px, 13vh, 148px);
+  max-width: 100%;
+  max-height: calc(100% - 6px);
+  object-fit: contain;
 }
 
 .raffle-detail.public-mode .draw-stage {

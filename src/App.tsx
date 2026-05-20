@@ -100,6 +100,8 @@ type Participant = {
   cheerSubmitted?: boolean
   visibleCheerCount?: number
   hiddenCheerCount?: number
+  cheeredTeamIds?: string[]
+  longestCheerLength?: number
   updatedAt: number
 }
 
@@ -356,6 +358,15 @@ type EventCopy = {
   rafflePrizeNameMulti: string
   rafflePrizeNameBig: string
   rafflePrizeNameLongestCheer: string
+  raffleWinnerCountAll: string
+  raffleWinnerCountLeader: string
+  raffleWinnerCountTop3: string
+  raffleWinnerCountRank456: string
+  raffleWinnerCountLowerPack: string
+  raffleWinnerCountRank10: string
+  raffleWinnerCountMulti: string
+  raffleWinnerCountBig: string
+  raffleWinnerCountLongestCheer: string
   raffleRuleLabelAll: string
   raffleRuleLabelLeader: string
   raffleRuleLabelTop3: string
@@ -394,6 +405,16 @@ type RafflePrizeNameKey =
   | 'rafflePrizeNameMulti'
   | 'rafflePrizeNameBig'
   | 'rafflePrizeNameLongestCheer'
+type RaffleWinnerCountKey =
+  | 'raffleWinnerCountAll'
+  | 'raffleWinnerCountLeader'
+  | 'raffleWinnerCountTop3'
+  | 'raffleWinnerCountRank456'
+  | 'raffleWinnerCountLowerPack'
+  | 'raffleWinnerCountRank10'
+  | 'raffleWinnerCountMulti'
+  | 'raffleWinnerCountBig'
+  | 'raffleWinnerCountLongestCheer'
 
 type CheerNameMode = 'masked' | 'real'
 type RaffleRule = 'all' | 'leader' | 'top3' | 'rank456' | 'rank789Cheer' | 'rank10Cheer' | 'multi' | 'big' | 'longestCheer' | 'cheer'
@@ -454,6 +475,19 @@ const rafflePrizeNameKeyByRule: Record<RaffleRule, RafflePrizeNameKey> = {
   big: 'rafflePrizeNameBig',
   longestCheer: 'rafflePrizeNameLongestCheer',
   cheer: 'rafflePrizeNameAll',
+}
+
+const raffleWinnerCountKeyByRule: Record<RaffleRule, RaffleWinnerCountKey> = {
+  all: 'raffleWinnerCountAll',
+  leader: 'raffleWinnerCountLeader',
+  top3: 'raffleWinnerCountTop3',
+  rank456: 'raffleWinnerCountRank456',
+  rank789Cheer: 'raffleWinnerCountLowerPack',
+  rank10Cheer: 'raffleWinnerCountRank10',
+  multi: 'raffleWinnerCountMulti',
+  big: 'raffleWinnerCountBig',
+  longestCheer: 'raffleWinnerCountLongestCheer',
+  cheer: 'raffleWinnerCountAll',
 }
 
 type RaffleRuleLabelKey = Extract<keyof EventCopy, `raffleRuleLabel${string}`>
@@ -574,6 +608,63 @@ const rafflePrizeNameFields: Array<{ key: RafflePrizeNameKey; label: string; des
     key: 'rafflePrizeNameLongestCheer',
     label: '가장 긴 응원 메시지 참여자 상품 이름',
     description: '추첨룰 9의 상품명입니다.',
+  },
+]
+
+const raffleWinnerCountFields: Array<{ key: RaffleWinnerCountKey; rule: RaffleRule; label: string; description: string }> = [
+  {
+    key: 'raffleWinnerCountAll',
+    rule: 'all',
+    label: '공개 응원 메시지 참여자',
+    description: '기본 3명',
+  },
+  {
+    key: 'raffleWinnerCountLeader',
+    rule: 'leader',
+    label: '현재 1위 팀 참여자',
+    description: '기본 1명',
+  },
+  {
+    key: 'raffleWinnerCountTop3',
+    rule: 'top3',
+    label: '1·2·3위 팀 참여자',
+    description: '기본 1명',
+  },
+  {
+    key: 'raffleWinnerCountRank456',
+    rule: 'rank456',
+    label: '4·5·6위 팀 참여자',
+    description: '기본 1명',
+  },
+  {
+    key: 'raffleWinnerCountLowerPack',
+    rule: 'rank789Cheer',
+    label: '7·8·9위 응원 메시지 참여자',
+    description: '기본 1명',
+  },
+  {
+    key: 'raffleWinnerCountRank10',
+    rule: 'rank10Cheer',
+    label: '10위 응원 메시지 참여자',
+    description: '기본 1명',
+  },
+  {
+    key: 'raffleWinnerCountMulti',
+    rule: 'multi',
+    label: '5개 이상 팀 참여자',
+    description: '기본 1명',
+  },
+  {
+    key: 'raffleWinnerCountBig',
+    rule: 'big',
+    label: '한 팀 최대 별 참여자',
+    description: '기본 1명',
+  },
+  {
+    key: 'raffleWinnerCountLongestCheer',
+    rule: 'longestCheer',
+    label: '가장 긴 응원 메시지 참여자',
+    description: '기본 1명',
   },
 ]
 
@@ -751,6 +842,15 @@ const copyLabels: Record<keyof EventCopy, string> = {
   rafflePrizeNameMulti: '5개 이상 팀 참여자 상품 이름',
   rafflePrizeNameBig: '한 팀 최대 별 참여자 상품 이름',
   rafflePrizeNameLongestCheer: '가장 긴 응원 메시지 참여자 상품 이름',
+  raffleWinnerCountAll: '선발 인원: 공개 응원 메시지',
+  raffleWinnerCountLeader: '선발 인원: 현재 1위 팀',
+  raffleWinnerCountTop3: '선발 인원: 현재 1·2·3위 팀',
+  raffleWinnerCountRank456: '선발 인원: 현재 4·5·6위 팀',
+  raffleWinnerCountLowerPack: '선발 인원: 7·8·9위 응원 메시지',
+  raffleWinnerCountRank10: '선발 인원: 10위 응원 메시지',
+  raffleWinnerCountMulti: '선발 인원: 5개 이상 팀',
+  raffleWinnerCountBig: '선발 인원: 한 팀 최대 별',
+  raffleWinnerCountLongestCheer: '선발 인원: 가장 긴 응원 메시지',
   raffleRuleLabelAll: '추첨룰 문구: 공개 응원 메시지',
   raffleRuleLabelLeader: '추첨룰 문구: 현재 1위 팀',
   raffleRuleLabelTop3: '추첨룰 문구: 현재 1·2·3위 팀',
@@ -1018,6 +1118,15 @@ const fallbackCopy: EventCopy = {
   rafflePrizeNameMulti: '',
   rafflePrizeNameBig: '',
   rafflePrizeNameLongestCheer: '',
+  raffleWinnerCountAll: '3',
+  raffleWinnerCountLeader: '1',
+  raffleWinnerCountTop3: '1',
+  raffleWinnerCountRank456: '1',
+  raffleWinnerCountLowerPack: '1',
+  raffleWinnerCountRank10: '1',
+  raffleWinnerCountMulti: '1',
+  raffleWinnerCountBig: '1',
+  raffleWinnerCountLongestCheer: '1',
   raffleRuleLabelAll: '공개 응원 메시지 참여자',
   raffleRuleLabelLeader: '현재 1위 팀에 별을 준 참여자',
   raffleRuleLabelTop3: '현재 1·2·3위 팀 모두에 별을 준 참여자',
@@ -1308,7 +1417,12 @@ function App() {
     () => new URLSearchParams(window.location.search).get('showCheer') === '1',
   )
   const visibleWallPanel: WallPanel = mode === 'wall' && state.quiz.mode !== 'idle' ? 'quiz' : wallPanel
-  const syncedWallPanel: WallPanel = mode === 'wall' && state.raffleStage.active ? 'raffle' : visibleWallPanel
+  const syncedWallPanel: WallPanel =
+    mode === 'wall' && state.quiz.mode !== 'idle'
+      ? 'quiz'
+      : mode === 'wall' && state.raffleStage.active
+        ? 'raffle'
+        : visibleWallPanel
 
   const participant = state.participants.find((person) => isSameParticipantDevice(person, participantId))
   const allocations = participant?.allocations ?? {}
@@ -1646,6 +1760,8 @@ function Header({
               onClick={(event) => {
                 if (!onPrepareQuiz) return
                 event.preventDefault()
+                window.history.pushState(null, '', '/admin?panel=quiz')
+                if (state.raffleStage.active) void onEndRaffle?.()
                 void onPrepareQuiz()
               }}
             >
@@ -1754,8 +1870,9 @@ function Header({
                 type="button"
                 className={wallPanel === 'quiz' ? 'active' : ''}
                 onClick={() => {
-                  onWallPanelChange('overview')
-                  onPrepareQuiz?.()
+                  if (state.raffleStage.active) void onEndRaffle?.()
+                  onWallPanelChange('quiz')
+                  void onPrepareQuiz?.()
                 }}
               >
                 <CircleHelp size={16} />
@@ -2990,7 +3107,7 @@ function AdminView({
   const stopDrawing = async () => {
     if (!isDrawing) await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: true })
     await new Promise((resolve) => window.setTimeout(resolve, isDrawing ? 320 : 900))
-    await post('/api/raffle', { rule: raffleRule, winnerCount: 1 })
+    await post('/api/raffle', { rule: raffleRule, winnerCount: getRaffleWinnerCount(state, raffleRule) })
     await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false })
   }
 
@@ -3398,7 +3515,7 @@ function PublicWallView({
   const stopDrawing = async () => {
     if (!isDrawing) await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: true })
     await new Promise((resolve) => window.setTimeout(resolve, isDrawing ? 320 : 900))
-    await post('/api/raffle', { rule: raffleRule, winnerCount: 1 })
+    await post('/api/raffle', { rule: raffleRule, winnerCount: getRaffleWinnerCount(state, raffleRule) })
     await post('/api/raffle/stage', { active: true, rule: raffleRule, drawing: false })
   }
 
@@ -3814,6 +3931,7 @@ function QuizAdminPanel({
   const selectedQuiz = availableQuizzes.find((quiz) => quiz.id === selectedQuizId) || initialQuiz
   const [question, setQuestion] = useState(selectedQuiz.question)
   const [answer, setAnswer] = useState(selectedQuiz.answer)
+  const [acceptedAnswersText, setAcceptedAnswersText] = useState(selectedQuiz.acceptedAnswers.join('\n'))
   const [prizeImageFile, setPrizeImageFile] = useState(selectedQuiz.prizeImageFile)
   const [winnerCount, setWinnerCount] = useState(selectedQuiz.winnerCount)
   const [prizeStatus, setPrizeStatus] = useState('')
@@ -3829,6 +3947,7 @@ function QuizAdminPanel({
     setSelectedQuizId(nextQuiz.id)
     setQuestion(nextQuiz.question)
     setAnswer(nextQuiz.answer)
+    setAcceptedAnswersText(nextQuiz.acceptedAnswers.join('\n'))
     setPrizeImageFile(nextQuiz.prizeImageFile)
     setWinnerCount(nextQuiz.winnerCount)
   }
@@ -3854,7 +3973,7 @@ function QuizAdminPanel({
       quizId: selectedQuiz.id,
       question,
       answer,
-      acceptedAnswers: selectedQuiz.acceptedAnswers,
+      acceptedAnswers: parseAcceptedAnswersText(acceptedAnswersText),
       prizeImageFile,
       winnerCount,
     })
@@ -3945,6 +4064,17 @@ function QuizAdminPanel({
             />
           </label>
         </div>
+        <label className="quiz-accepted-answer-editor">
+          <span>추가 인정 답</span>
+          <textarea
+            value={acceptedAnswersText}
+            placeholder={'한 줄에 하나씩 입력하세요. 예: *10* 또는 *10만*'}
+            onChange={(event) => setAcceptedAnswersText(event.target.value)}
+          />
+        </label>
+        <p className="quiz-accepted-answers">
+          <code>*10*</code>처럼 앞뒤에 *를 붙이면 “10”이 포함된 답변을 정답으로 인정합니다.
+        </p>
         <ImageSourceField
           label="이번 퀴즈 상품 이미지"
           description="준비된 퀴즈 상품을 바꾸거나, 현장에서 바로 다른 상품 이미지를 지정할 수 있습니다."
@@ -3956,9 +4086,6 @@ function QuizAdminPanel({
           onClear={() => setPrizeImageFile('')}
         />
         {prizeStatus ? <p className="quiz-accepted-answers">{prizeStatus}</p> : null}
-        {selectedQuiz.acceptedAnswers.length ? (
-          <p className="quiz-accepted-answers">추가 인정 답: {selectedQuiz.acceptedAnswers.join(', ')}</p>
-        ) : null}
         <div className="quiz-actions">
           <button type="button" className="primary-action" onClick={openQuiz} disabled={!question.trim() || !answer.trim()}>
             출제 / 다음 문제
@@ -5177,6 +5304,27 @@ function TeamConfigDetail({
                     value={draftCopy[field.key]}
                     placeholder={field.description}
                     onChange={(event) => updateCopy(field.key, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="prize-name-config raffle-winner-count-config">
+            <div className="logo-source-head">
+              <span>행운권 선발 인원</span>
+              <small>추첨룰별로 한 번에 뽑을 인원을 정합니다. 공개 응원 메시지는 기본 3명, 나머지는 기본 1명입니다.</small>
+            </div>
+            <div className="prize-name-grid">
+              {raffleWinnerCountFields.map((field) => (
+                <label key={field.key}>
+                  <span>{field.label}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={draftCopy[field.key]}
+                    placeholder={field.description}
+                    onChange={(event) => updateCopy(field.key, String(clamp(Math.floor(Number(event.target.value) || 1), 1, 10)))}
                   />
                 </label>
               ))}
@@ -6686,6 +6834,9 @@ function RaffleDetailPanel({
   const selectedPrizeInfo = getRafflePrizeInfo(state.copy, displayRaffleRule)
   const resultPrizeInfo = getRafflePrizeInfo(state.copy, hasWinners && state.lastRaffle ? state.lastRaffle.rule : displayRaffleRule)
   const prizeImage = selectedPrizeInfo.image || defaultBrandLogoFile
+  const configuredWinnerCount = hasWinners && state.lastRaffle?.rule === displayRaffleRule
+    ? state.lastRaffle.winnerCount
+    : getRaffleWinnerCount(state, displayRaffleRule)
   const ruleOptions = raffleRuleOptions.map((option, index) => ({
     ...option,
     displayLabel: publicMode ? getRaffleRulePublicLabel(option.value, index) : getRaffleRuleLabel(option.value, state),
@@ -6729,14 +6880,17 @@ function RaffleDetailPanel({
           <div className={`lotto-result-tray ${isDrawing || hasWinners ? 'has-result' : 'is-empty'}`}>
             {isDrawing || hasWinners ? (
               <div className="lotto-result-ball">
-                <strong>{hasWinners ? winners[0]?.name : '선정 중'}</strong>
+                <strong>{hasWinners ? (winners.length > 1 ? `${winners.length}명` : winners[0]?.name) : '선정 중'}</strong>
               </div>
             ) : null}
           </div>
         </div>
 
         {hasWinners ? (
-          <div className="raffle-winner-showcase">
+          <div
+            className={`raffle-winner-showcase ${winners.length > 1 ? 'multi-winners' : ''}`}
+            style={{ '--winner-count': winners.length } as CSSProperties}
+          >
             {winners.map((winner, index) => {
               const details = getRaffleWinnerDetails(state, winner)
               const visibleSupports = details.supports.slice(0, 3)
@@ -6747,7 +6901,7 @@ function RaffleDetailPanel({
               const winnerNameCharacters = Array.from(winner.name)
               return (
                 <article
-                  className={`winner-spotlight-card variant-${styleVariant}`}
+                  className={`winner-spotlight-card variant-${styleVariant} ${winners.length > 1 ? 'compact-winner' : ''}`}
                   key={winner.id}
                   style={{ '--i': index } as CSSProperties}
                 >
@@ -6802,7 +6956,7 @@ function RaffleDetailPanel({
             })}
           </div>
         ) : (
-          isDrawing ? <p>후보 이름을 섞는 중입니다.</p> : null
+          null
         )}
       </section>
 
@@ -6839,6 +6993,10 @@ function RaffleDetailPanel({
           <div>
             <span>후보</span>
             <strong>{previewCandidates.length}명</strong>
+          </div>
+          <div>
+            <span>선발</span>
+            <strong>{configuredWinnerCount}명</strong>
           </div>
         </div>
 
@@ -7022,24 +7180,30 @@ function getRaffleCandidatesForRule(state: EventState, rule: RaffleRule) {
   const cheeredTeamIdsByParticipant = new Map<string, Set<string>>()
   const longestCheerByParticipant = new Map<string, number>()
 
-  if (rule === 'longestCheer' || rule === 'rank789Cheer' || rule === 'rank10Cheer') {
-    for (const message of state.cheers) {
-      if (!message.participantId || message.hidden) continue
-      if (rule === 'rank789Cheer' || rule === 'rank10Cheer') {
-        const teamIds = cheeredTeamIdsByParticipant.get(message.participantId) ?? new Set<string>()
-        teamIds.add(message.teamId)
-        cheeredTeamIdsByParticipant.set(message.participantId, teamIds)
-      }
-      if (rule === 'longestCheer') {
-        longestCheerByParticipant.set(
-          message.participantId,
-          Math.max(longestCheerByParticipant.get(message.participantId) ?? 0, message.text.trim().length),
-        )
-      }
-    }
+  for (const person of state.participants) {
+    if (person.cheeredTeamIds?.length) cheeredTeamIdsByParticipant.set(person.id, new Set(person.cheeredTeamIds))
+    if (person.longestCheerLength) longestCheerByParticipant.set(person.id, person.longestCheerLength)
   }
 
-  const longestCheerLength = rule === 'longestCheer' ? Math.max(0, ...longestCheerByParticipant.values()) : 0
+  for (const message of state.cheers) {
+    if (!message.participantId || message.hidden) continue
+    const teamIds = cheeredTeamIdsByParticipant.get(message.participantId) ?? new Set<string>()
+    teamIds.add(message.teamId)
+    cheeredTeamIdsByParticipant.set(message.participantId, teamIds)
+    longestCheerByParticipant.set(
+      message.participantId,
+      Math.max(longestCheerByParticipant.get(message.participantId) ?? 0, Array.from(message.text.trim()).length),
+    )
+  }
+
+  const longestCheerLength = rule === 'longestCheer'
+    ? Math.max(
+        0,
+        ...state.participants
+          .filter((person) => !raffleAwardedParticipantIds.has(person.id) && sumStars(person.allocations) > 0 && person.cheered)
+          .map((person) => longestCheerByParticipant.get(person.id) ?? 0),
+      )
+    : 0
 
   return state.participants.filter((person) => {
     if (raffleAwardedParticipantIds.has(person.id)) return false
@@ -7047,15 +7211,19 @@ function getRaffleCandidatesForRule(state: EventState, rule: RaffleRule) {
     if (spent <= 0) return false
     if (!person.cheered) return false
     const allocationValues = Object.values(person.allocations || {}).filter((value) => value > 0)
+    const cheeredTeamIds = cheeredTeamIdsByParticipant.get(person.id) ?? new Set<string>()
 
     if (rule === 'leader') return Boolean(leaderId && person.allocations[leaderId])
     if (rule === 'top3') return topThreeIds.every((teamId) => Boolean(person.allocations[teamId]))
     if (rule === 'rank456') return rank456Ids.length === 3 && rank456Ids.every((teamId) => Boolean(person.allocations[teamId]))
-    if (rule === 'rank789Cheer') return rank789Ids.length === 3 && rank789Ids.every((teamId) => cheeredTeamIdsByParticipant.get(person.id)?.has(teamId))
-    if (rule === 'rank10Cheer') return Boolean(rank10Id && cheeredTeamIdsByParticipant.get(person.id)?.has(rank10Id))
+    if (rule === 'rank789Cheer') return rank789Ids.length === 3 && rank789Ids.every((teamId) => cheeredTeamIds.has(teamId))
+    if (rule === 'rank10Cheer') return Boolean(rank10Id && cheeredTeamIds.has(rank10Id))
     if (rule === 'multi') return allocationValues.length >= 5
     if (rule === 'big') return allocationValues.some((value) => value >= bigThreshold)
-    if (rule === 'longestCheer') return longestCheerLength > 0 && (longestCheerByParticipant.get(person.id) ?? 0) === longestCheerLength
+    if (rule === 'longestCheer') {
+      const length = longestCheerByParticipant.get(person.id) ?? 0
+      return longestCheerLength > 0 && length === longestCheerLength
+    }
     if (rule === 'cheer') return person.cheered
     return true
   })
@@ -7185,6 +7353,14 @@ function getRafflePrizeInfo(copy: EventCopy, rule: RaffleRule | undefined) {
     name: copy[nameKey] || copy.rafflePrizeNameFile || getRafflePrizeLabel(rule),
     image: copy[imageKey] || copy.rafflePrizeImageFile,
   }
+}
+
+function getRaffleWinnerCount(state: EventState, rule: RaffleRule | undefined) {
+  if (!rule) return 1
+
+  const key = raffleWinnerCountKeyByRule[rule]
+  const fallback = rule === 'all' || rule === 'cheer' ? 3 : 1
+  return clamp(Math.floor(Number(state.copy[key]) || fallback), 1, 10)
 }
 
 function getParticipantSummaries(state: EventState): ParticipantSummary[] {
@@ -8006,15 +8182,19 @@ function quizDraftToConfig(quiz: QuizConfigDraft, index: number): QuizConfig {
     title: quiz.title.trim().slice(0, 48) || `퀴즈 ${index + 1}`,
     question: quiz.question.trim().slice(0, 180),
     answer: quiz.answer.trim().slice(0, 120),
-    acceptedAnswers: quiz.acceptedAnswersText
-      .split(/[\n,]/)
-      .map((item) => item.trim().slice(0, 120))
-      .filter(Boolean)
-      .slice(0, 8),
+    acceptedAnswers: parseAcceptedAnswersText(quiz.acceptedAnswersText),
     prizeImageFile: normalizeLogoSourceValue(quiz.prizeImageFile),
     winnerCount: clamp(Math.floor(Number(quiz.winnerCount) || 2), 1, 10),
     enabled: quiz.enabled,
   }
+}
+
+function parseAcceptedAnswersText(value: string) {
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim().slice(0, 120))
+    .filter(Boolean)
+    .slice(0, 8)
 }
 
 const copyImageKeys: EventCopyImageKey[] = [

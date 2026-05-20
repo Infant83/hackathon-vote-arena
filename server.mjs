@@ -125,6 +125,15 @@ const defaultCopy = {
   rafflePrizeNameMulti: '',
   rafflePrizeNameBig: '',
   rafflePrizeNameLongestCheer: '',
+  raffleWinnerCountAll: '3',
+  raffleWinnerCountLeader: '1',
+  raffleWinnerCountTop3: '1',
+  raffleWinnerCountRank456: '1',
+  raffleWinnerCountLowerPack: '1',
+  raffleWinnerCountRank10: '1',
+  raffleWinnerCountMulti: '1',
+  raffleWinnerCountBig: '1',
+  raffleWinnerCountLongestCheer: '1',
   raffleRuleLabelAll: '공개 응원 메시지 참여자',
   raffleRuleLabelLeader: '현재 1위 팀에 별을 준 참여자',
   raffleRuleLabelTop3: '현재 1·2·3위 팀 모두에 별을 준 참여자',
@@ -309,6 +318,19 @@ const rafflePrizeNameKeyByRule = {
   big: 'rafflePrizeNameBig',
   longestCheer: 'rafflePrizeNameLongestCheer',
   cheer: 'rafflePrizeNameAll',
+}
+
+const raffleWinnerCountKeyByRule = {
+  all: 'raffleWinnerCountAll',
+  leader: 'raffleWinnerCountLeader',
+  top3: 'raffleWinnerCountTop3',
+  rank456: 'raffleWinnerCountRank456',
+  rank789Cheer: 'raffleWinnerCountLowerPack',
+  rank10Cheer: 'raffleWinnerCountRank10',
+  multi: 'raffleWinnerCountMulti',
+  big: 'raffleWinnerCountBig',
+  longestCheer: 'raffleWinnerCountLongestCheer',
+  cheer: 'raffleWinnerCountAll',
 }
 
 const appConfig = loadConfig()
@@ -764,12 +786,23 @@ function getState(options = {}) {
   }
 
   const cheerCountsByParticipant = new Map()
+  const cheeredTeamIdsByParticipant = new Map()
+  const longestCheerByParticipant = new Map()
   for (const message of cheers) {
     if (!message.participantId) continue
 
     const current = cheerCountsByParticipant.get(message.participantId) || { visible: 0, hidden: 0, total: 0 }
     if (message.hidden) current.hidden += 1
-    else current.visible += 1
+    else {
+      current.visible += 1
+      const teamIds = cheeredTeamIdsByParticipant.get(message.participantId) || new Set()
+      teamIds.add(message.teamId)
+      cheeredTeamIdsByParticipant.set(message.participantId, teamIds)
+      longestCheerByParticipant.set(
+        message.participantId,
+        Math.max(longestCheerByParticipant.get(message.participantId) || 0, Array.from(String(message.text || '').trim()).length),
+      )
+    }
     current.total += 1
     cheerCountsByParticipant.set(message.participantId, current)
   }
@@ -783,6 +816,8 @@ function getState(options = {}) {
       cheerSubmitted: Boolean(person.cheerSubmitted || counts.total),
       visibleCheerCount: counts.visible,
       hiddenCheerCount: counts.hidden,
+      cheeredTeamIds: [...(cheeredTeamIdsByParticipant.get(person.id) || [])],
+      longestCheerLength: longestCheerByParticipant.get(person.id) || 0,
     }
   })
   const dynamicStarsByTeam = new Map()
@@ -1064,7 +1099,7 @@ function getRaffleCandidates(rule) {
       if (rule === 'longestCheer') {
         longestCheerByParticipant.set(
           message.participantId,
-          Math.max(longestCheerByParticipant.get(message.participantId) || 0, message.text.trim().length),
+          Math.max(longestCheerByParticipant.get(message.participantId) || 0, Array.from(message.text.trim()).length),
         )
       }
     }
@@ -1141,6 +1176,13 @@ function getRafflePrizeImage(rule) {
 function getRafflePrizeName(rule) {
   const nameKey = rafflePrizeNameKeyByRule[rule] || 'rafflePrizeNameFile'
   return copy[nameKey] || copy.rafflePrizeNameFile || '행운권 상품'
+}
+
+function getRaffleWinnerCount(rule, rawValue) {
+  const key = raffleWinnerCountKeyByRule[rule]
+  const fallback = rule === 'all' || rule === 'cheer' ? 3 : 1
+  const value = rawValue === undefined ? copy[key] : rawValue
+  return clamp(Math.floor(Number(value) || fallback), 1, 10)
 }
 
 function shuffle(items) {
@@ -1381,7 +1423,7 @@ function submitQuizAnswer(person, textValue, body = {}) {
   if (quiz.answers.filter((answer) => answer.participantId === person.id).length >= quizAnswerLimit) return null
 
   const normalized = normalizeQuizAnswer(text)
-  const correct = quizAnswerKeys.includes(normalized)
+  const correct = isQuizAnswerCorrect(normalized)
   const estimatedSubmittedAt = estimateQuizSubmittedAt(body, serverReceivedAt)
   const answer = {
     id: quizAnswerId++,
@@ -1467,6 +1509,29 @@ function normalizeQuizAnswer(value) {
     .trim()
     .toLocaleLowerCase('ko-KR')
     .replace(/\s+/gu, '')
+}
+
+function isQuizAnswerCorrect(normalized, keys = quizAnswerKeys) {
+  return keys.some((key) => matchesQuizAnswerKey(normalized, key))
+}
+
+function matchesQuizAnswerKey(normalized, key) {
+  const pattern = String(key || '')
+  if (!normalized || !pattern) return false
+  if (!pattern.includes('*')) return normalized === pattern
+
+  const parts = pattern.split('*').filter(Boolean)
+  if (!parts.length) return false
+
+  let offset = 0
+  for (const part of parts) {
+    const found = normalized.indexOf(part, offset)
+    if (found < 0) return false
+    if (offset === 0 && !pattern.startsWith('*') && found !== 0) return false
+    offset = found + part.length
+  }
+
+  return pattern.endsWith('*') || normalized.endsWith(parts[parts.length - 1])
 }
 
 function recordVoteEvents(person, previousAllocations, nextAllocations) {
@@ -2174,7 +2239,7 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/raffle') {
     const rule = raffleRules.has(body.rule) ? body.rule : 'all'
-    const winnerCount = 1
+    const winnerCount = getRaffleWinnerCount(rule, body.winnerCount)
     const candidates = getRaffleCandidates(rule)
     const createdAt = Date.now()
     const prizeImageFile = getRafflePrizeImage(rule)

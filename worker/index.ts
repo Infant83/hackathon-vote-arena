@@ -111,6 +111,8 @@ type Participant = {
 type ParticipantState = Participant & {
   visibleCheerCount: number
   hiddenCheerCount: number
+  cheeredTeamIds: string[]
+  longestCheerLength: number
 }
 
 type CheerMessage = {
@@ -384,6 +386,15 @@ const defaultCopy = {
   rafflePrizeNameMulti: '',
   rafflePrizeNameBig: '',
   rafflePrizeNameLongestCheer: '',
+  raffleWinnerCountAll: '3',
+  raffleWinnerCountLeader: '1',
+  raffleWinnerCountTop3: '1',
+  raffleWinnerCountRank456: '1',
+  raffleWinnerCountLowerPack: '1',
+  raffleWinnerCountRank10: '1',
+  raffleWinnerCountMulti: '1',
+  raffleWinnerCountBig: '1',
+  raffleWinnerCountLongestCheer: '1',
   raffleRuleLabelAll: '공개 응원 메시지 참여자',
   raffleRuleLabelLeader: '현재 1위 팀에 별을 준 참여자',
   raffleRuleLabelTop3: '현재 1·2·3위 팀 모두에 별을 준 참여자',
@@ -479,6 +490,19 @@ const rafflePrizeNameKeyByRule: Record<RaffleRule, keyof EventCopy> = {
   big: 'rafflePrizeNameBig',
   longestCheer: 'rafflePrizeNameLongestCheer',
   cheer: 'rafflePrizeNameAll',
+}
+
+const raffleWinnerCountKeyByRule: Record<RaffleRule, keyof EventCopy> = {
+  all: 'raffleWinnerCountAll',
+  leader: 'raffleWinnerCountLeader',
+  top3: 'raffleWinnerCountTop3',
+  rank456: 'raffleWinnerCountRank456',
+  rank789Cheer: 'raffleWinnerCountLowerPack',
+  rank10Cheer: 'raffleWinnerCountRank10',
+  multi: 'raffleWinnerCountMulti',
+  big: 'raffleWinnerCountBig',
+  longestCheer: 'raffleWinnerCountLongestCheer',
+  cheer: 'raffleWinnerCountAll',
 }
 
 const validLogos = new Set<LogoKind>(['orbit', 'beam', 'grid', 'wave', 'core'])
@@ -813,7 +837,7 @@ export class ArenaRoom {
 
     if (pathname === '/api/raffle') {
       const rule = isRaffleRule(body.rule) ? body.rule : 'all'
-      const winnerCount = 1
+      const winnerCount = this.getRaffleWinnerCount(rule, body.winnerCount)
       const candidates = this.getRaffleCandidates(rule)
       const createdAt = Date.now()
       const prizeImageFile = this.getRafflePrizeImage(rule)
@@ -1042,12 +1066,23 @@ export class ArenaRoom {
     }
 
     const cheerCountsByParticipant = new Map<string, { visible: number; hidden: number; total: number }>()
+    const cheeredTeamIdsByParticipant = new Map<string, Set<string>>()
+    const longestCheerByParticipant = new Map<string, number>()
     for (const message of this.cheers) {
       if (!message.participantId) continue
 
       const current = cheerCountsByParticipant.get(message.participantId) || { visible: 0, hidden: 0, total: 0 }
       if (message.hidden) current.hidden += 1
-      else current.visible += 1
+      else {
+        current.visible += 1
+        const teamIds = cheeredTeamIdsByParticipant.get(message.participantId) || new Set<string>()
+        teamIds.add(message.teamId)
+        cheeredTeamIdsByParticipant.set(message.participantId, teamIds)
+        longestCheerByParticipant.set(
+          message.participantId,
+          Math.max(longestCheerByParticipant.get(message.participantId) || 0, Array.from(String(message.text || '').trim()).length),
+        )
+      }
       current.total += 1
       cheerCountsByParticipant.set(message.participantId, current)
     }
@@ -1061,6 +1096,8 @@ export class ArenaRoom {
         cheerSubmitted: Boolean(person.cheerSubmitted || counts.total),
         visibleCheerCount: counts.visible,
         hiddenCheerCount: counts.hidden,
+        cheeredTeamIds: [...(cheeredTeamIdsByParticipant.get(person.id) || [])],
+        longestCheerLength: longestCheerByParticipant.get(person.id) || 0,
       }
     })
     const dynamicStarsByTeam = new Map<string, number>()
@@ -1466,7 +1503,7 @@ export class ArenaRoom {
         if (rule === 'longestCheer') {
           longestCheerByParticipant.set(
             message.participantId,
-            Math.max(longestCheerByParticipant.get(message.participantId) ?? 0, message.text.trim().length),
+            Math.max(longestCheerByParticipant.get(message.participantId) ?? 0, Array.from(message.text.trim()).length),
           )
         }
       }
@@ -1591,6 +1628,13 @@ export class ArenaRoom {
   private getRafflePrizeName(rule: RaffleRule) {
     const nameKey = rafflePrizeNameKeyByRule[rule] || 'rafflePrizeNameFile'
     return this.copy[nameKey] || this.copy.rafflePrizeNameFile || '행운권 상품'
+  }
+
+  private getRaffleWinnerCount(rule: RaffleRule, rawValue?: unknown) {
+    const key = raffleWinnerCountKeyByRule[rule]
+    const fallback = rule === 'all' || rule === 'cheer' ? 3 : 1
+    const value = rawValue === undefined ? this.copy[key] : rawValue
+    return clamp(Math.floor(Number(value) || fallback), 1, 10)
   }
 
   private sanitizeQuizState(): QuizState {
@@ -1754,7 +1798,7 @@ export class ArenaRoom {
     if (this.quiz.answers.filter((answer) => answer.participantId === person.id).length >= quizAnswerLimit) return null
 
     const normalized = normalizeQuizAnswer(text)
-    const correct = this.quizAnswerKeys.includes(normalized)
+    const correct = isQuizAnswerCorrect(normalized, this.quizAnswerKeys)
     const estimatedSubmittedAt = this.estimateQuizSubmittedAt(body, serverReceivedAt)
     const answer: QuizAnswer = {
       id: this.quizAnswerId++,
@@ -2679,4 +2723,27 @@ function normalizeQuizAnswer(value: unknown) {
     .trim()
     .toLocaleLowerCase('ko-KR')
     .replace(/\s+/gu, '')
+}
+
+function isQuizAnswerCorrect(normalized: string, keys: string[]) {
+  return keys.some((key) => matchesQuizAnswerKey(normalized, key))
+}
+
+function matchesQuizAnswerKey(normalized: string, key: string) {
+  const pattern = String(key || '')
+  if (!normalized || !pattern) return false
+  if (!pattern.includes('*')) return normalized === pattern
+
+  const parts = pattern.split('*').filter(Boolean)
+  if (!parts.length) return false
+
+  let offset = 0
+  for (const part of parts) {
+    const found = normalized.indexOf(part, offset)
+    if (found < 0) return false
+    if (offset === 0 && !pattern.startsWith('*') && found !== 0) return false
+    offset = found + part.length
+  }
+
+  return pattern.endsWith('*') || normalized.endsWith(parts[parts.length - 1])
 }
