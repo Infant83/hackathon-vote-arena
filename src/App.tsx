@@ -261,6 +261,7 @@ type EventState = {
     targetTime: string
     minScore: number
     raffleCheerWeight: number
+    quizAnswerLimit: number
     cheerNameMode: CheerNameMode
     themeMode: ThemeMode
   }
@@ -647,6 +648,8 @@ const MAX_CONFIGURABLE_STARS_PER_TEAM = 10
 const DEFAULT_DURATION_MINUTES = 10
 const DEFAULT_MIN_SCORE = 5
 const DEFAULT_RAFFLE_CHEER_WEIGHT = 0.2
+const DEFAULT_QUIZ_ANSWER_LIMIT = 3
+const MAX_QUIZ_ANSWER_LIMIT = 10
 const KST_OFFSET_MINUTES = 9 * 60
 const DEFAULT_TEAM_PHOTO_RADIUS = 18
 const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
@@ -1277,6 +1280,7 @@ const fallbackState: EventState = {
     targetTime: '',
     minScore: DEFAULT_MIN_SCORE,
     raffleCheerWeight: DEFAULT_RAFFLE_CHEER_WEIGHT,
+    quizAnswerLimit: DEFAULT_QUIZ_ANSWER_LIMIT,
     cheerNameMode: 'masked',
     themeMode: 'stage',
   },
@@ -1692,11 +1696,11 @@ function Header({
                   onClick={() => {
                     void adminSession.logout()
                   }}
-                  disabled={adminSession.loading || !adminSession.required}
-                  title={adminSession.required ? '관리자 세션에서 로그아웃' : '현재 배포는 관리자 passcode가 필요하지 않습니다'}
+                  disabled={adminSession.loading}
+                  title="관리자 세션에서 로그아웃"
                 >
                   <LogOut size={15} />
-                  {adminSession.required ? '로그아웃' : '인증 불필요'}
+                  로그아웃
                 </button>
               </>
             ) : null}
@@ -2060,7 +2064,7 @@ function VoteView({
   const quizFeedback = quizFeedbackDraft.quizId === state.quiz.id ? quizFeedbackDraft.text : ''
   const myQuizAnswers = state.quiz.answers.filter((answer) => answer.participantId === currentParticipantId)
   const quizAttemptCount = myQuizAnswers.length
-  const quizAttemptLimit = 5
+  const quizAttemptLimit = getQuizAnswerLimit(state)
   const latestMyQuizAnswer = myQuizAnswers[0]
   const myWinningQuizAnswer = state.quiz.winners.find((answer) => answer.participantId === currentParticipantId)
   const quizWinnerNoticeKey = myWinningQuizAnswer ? `${myWinningQuizAnswer.quizId}:${myWinningQuizAnswer.id}` : ''
@@ -2925,6 +2929,7 @@ function AdminView({
   const targetTime = getTargetTime(state)
   const minScore = getMinScore(state)
   const raffleCheerWeight = getRaffleCheerWeight(state)
+  const quizAnswerLimit = getQuizAnswerLimit(state)
   const cheerNameMode = getCheerNameMode(state)
   const themeMode = getThemeMode(state)
   const [draftTimerMode, setDraftTimerMode] = useState<TimerMode>(timerMode)
@@ -3019,6 +3024,7 @@ function AdminView({
       targetTime: derivedTargetTime,
       minScore: data.get('minScore'),
       raffleCheerWeight: data.get('raffleCheerWeight'),
+      quizAnswerLimit: data.get('quizAnswerLimit'),
       cheerNameMode: data.get('cheerNameMode'),
       themeMode: data.get('themeMode'),
     })
@@ -3033,6 +3039,7 @@ function AdminView({
       targetTime,
       minScore,
       raffleCheerWeight,
+      quizAnswerLimit,
       cheerNameMode,
       themeMode: nextThemeMode,
     })
@@ -3119,7 +3126,7 @@ function AdminView({
         </div>
         <form
           className="control-grid"
-          key={`${starBudget}:${maxStarsPerTeam}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${raffleCheerWeight}:${cheerNameMode}:${themeMode}`}
+          key={`${starBudget}:${maxStarsPerTeam}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${raffleCheerWeight}:${quizAnswerLimit}:${cheerNameMode}:${themeMode}`}
           onSubmit={(event) => {
             event.preventDefault()
             applySettings(event.currentTarget)
@@ -3173,6 +3180,20 @@ function AdminView({
               <em>x</em>
             </div>
             <small className="control-hint">0은 동일 확률, 기본 0.2입니다. 값이 클수록 공개 응원 메시지 개수와 총 글자수가 많은 참여자의 당첨 확률이 완만하게 올라갑니다.</small>
+          </label>
+          <label>
+            <span>퀴즈 답변 시도 제한</span>
+            <div className="inline-input">
+              <input
+                name="quizAnswerLimit"
+                type="number"
+                min={1}
+                max={MAX_QUIZ_ANSWER_LIMIT}
+                defaultValue={quizAnswerLimit}
+              />
+              <em>회</em>
+            </div>
+            <small className="control-hint">참여자 1명이 한 문제에 제출할 수 있는 최대 횟수입니다. 기본 3회입니다.</small>
           </label>
           <label>
             <span>타이머 방식</span>
@@ -7327,10 +7348,10 @@ function useAdminSession(enabled: boolean): AdminSessionState {
     try {
       const response = await fetch('/api/admin/status', { credentials: 'same-origin' })
       if (!response.ok) throw new Error('status failed')
-      const next = (await response.json()) as { required?: boolean; authenticated?: boolean }
+      const next = (await response.json()) as { required?: boolean; configured?: boolean; authenticated?: boolean }
       setRequired(Boolean(next.required))
       setAuthenticated(Boolean(next.authenticated))
-      setError('')
+      setError(next.required && next.configured === false ? '관리자 passcode가 서버에 설정되지 않았습니다. ADMIN_PASSCODE를 먼저 설정해주세요.' : '')
     } catch {
       setRequired(true)
       setAuthenticated(false)
@@ -7351,11 +7372,11 @@ function useAdminSession(enabled: boolean): AdminSessionState {
       try {
         const response = await fetch('/api/admin/status', { credentials: 'same-origin' })
         if (!response.ok) throw new Error('status failed')
-        const next = (await response.json()) as { required?: boolean; authenticated?: boolean }
+        const next = (await response.json()) as { required?: boolean; configured?: boolean; authenticated?: boolean }
         if (!active) return
         setRequired(Boolean(next.required))
         setAuthenticated(Boolean(next.authenticated))
-        setError('')
+        setError(next.required && next.configured === false ? '관리자 passcode가 서버에 설정되지 않았습니다. ADMIN_PASSCODE를 먼저 설정해주세요.' : '')
       } catch {
         if (!active) return
         setRequired(true)
@@ -7392,11 +7413,20 @@ function useAdminSession(enabled: boolean): AdminSessionState {
 
       if (!response.ok) {
         setAuthenticated(false)
-        setError('Passcode가 맞지 않습니다.')
+        let message = 'Passcode가 맞지 않습니다.'
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error === 'ADMIN_PASSCODE is not configured') {
+            message = '관리자 passcode가 서버에 설정되지 않았습니다. ADMIN_PASSCODE를 먼저 설정해주세요.'
+          }
+        } catch {
+          // Keep the simple passcode error if the server did not return JSON.
+        }
+        setError(message)
         return false
       }
 
-      const next = (await response.json()) as { required?: boolean; authenticated?: boolean }
+      const next = (await response.json()) as { required?: boolean; configured?: boolean; authenticated?: boolean }
       setRequired(Boolean(next.required))
       setAuthenticated(Boolean(next.authenticated))
       return Boolean(next.authenticated)
@@ -7422,7 +7452,7 @@ function useAdminSession(enabled: boolean): AdminSessionState {
         credentials: 'same-origin',
       })
       if (!response.ok) throw new Error('logout failed')
-      const next = (await response.json()) as { required?: boolean; authenticated?: boolean }
+      const next = (await response.json()) as { required?: boolean; configured?: boolean; authenticated?: boolean }
       setRequired(Boolean(next.required))
       setAuthenticated(Boolean(next.authenticated))
     } catch {
@@ -8706,6 +8736,10 @@ function getMinScore(state: EventState) {
 
 function getRaffleCheerWeight(state: EventState) {
   return Number(clamp(Number(state.settings.raffleCheerWeight ?? DEFAULT_RAFFLE_CHEER_WEIGHT), 0, 1).toFixed(2))
+}
+
+function getQuizAnswerLimit(state: EventState) {
+  return clamp(Math.floor(Number(state.settings.quizAnswerLimit) || DEFAULT_QUIZ_ANSWER_LIMIT), 1, MAX_QUIZ_ANSWER_LIMIT)
 }
 
 function getCheerNameMode(state: EventState): CheerNameMode {

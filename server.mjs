@@ -17,6 +17,8 @@ const maxConfigurableStarsPerTeam = 10
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const defaultRaffleCheerWeight = 0.2
+const defaultQuizAnswerLimit = 3
+const maxQuizAnswerLimit = 10
 const raffleRules = new Set(['all', 'leader', 'top3', 'rank456', 'rank789Cheer', 'rank10Cheer', 'multi', 'big', 'longestCheer', 'cheer'])
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
@@ -365,6 +367,7 @@ let settings = {
   targetTime: '',
   minScore: defaultMinScore,
   raffleCheerWeight: defaultRaffleCheerWeight,
+  quizAnswerLimit: defaultQuizAnswerLimit,
   cheerNameMode: 'masked',
   themeMode: 'stage',
 }
@@ -747,6 +750,7 @@ function getRuntimeSettings(source = settings) {
     targetTime: normalizeTargetTime(source.targetTime),
     minScore: clamp(Number(source.minScore ?? defaultMinScore), 0, 9.9),
     raffleCheerWeight: clamp(Number(source.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
+    quizAnswerLimit: clamp(Math.floor(Number(source.quizAnswerLimit) || defaultQuizAnswerLimit), 1, maxQuizAnswerLimit),
     cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
     themeMode: normalizeThemeMode(source.themeMode, 'stage'),
   }
@@ -1370,10 +1374,11 @@ function clearQuiz() {
 function submitQuizAnswer(person, textValue, body = {}) {
   const text = sanitizeText(textValue, quizAnswerMaxLength)
   const serverReceivedAt = Date.now()
+  const quizAnswerLimit = getQuizAnswerLimit()
   advanceQuizPhase(serverReceivedAt)
   if (!person || (quiz.mode !== 'open' && quiz.mode !== 'settling') || !quiz.id || !text) return null
   if (Number(body.quizId) && Number(body.quizId) !== quiz.id) return null
-  if (quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) return null
+  if (quiz.answers.filter((answer) => answer.participantId === person.id).length >= quizAnswerLimit) return null
 
   const normalized = normalizeQuizAnswer(text)
   const correct = quizAnswerKeys.includes(normalized)
@@ -1429,6 +1434,7 @@ function estimateQuizSubmittedAt(body, serverReceivedAt) {
 
 function getQuizAnswerRejectionReason(person, textValue, body = {}) {
   const text = sanitizeText(textValue, quizAnswerMaxLength)
+  const quizAnswerLimit = getQuizAnswerLimit()
   advanceQuizPhase()
 
   if (!person) return '참가자 등록이 필요합니다.'
@@ -1437,11 +1443,15 @@ function getQuizAnswerRejectionReason(person, textValue, body = {}) {
   if (quiz.mode === 'countdown') return '문제가 공개되면 답변을 제출해주세요.'
   if (Number(body.quizId) && Number(body.quizId) !== quiz.id) return '이미 다른 문제가 진행 중입니다.'
   if (quiz.mode !== 'open' && quiz.mode !== 'settling') return '정답자 선정이 마감되었습니다.'
-  if (quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) {
-    return '이 문제는 최대 5번까지만 제출할 수 있습니다.'
+  if (quiz.answers.filter((answer) => answer.participantId === person.id).length >= quizAnswerLimit) {
+    return `이 문제는 최대 ${quizAnswerLimit}번까지만 제출할 수 있습니다.`
   }
 
   return '답변을 접수하지 못했습니다.'
+}
+
+function getQuizAnswerLimit() {
+  return getRuntimeSettings().quizAnswerLimit
 }
 
 function normalizeQuizAnswerKeys(value) {
@@ -1684,25 +1694,29 @@ function getRequestDeviceId(request, body) {
 }
 
 function getAdminSessionStatus(request) {
+  const required = isAdminPasscodeRequired(request)
   return {
-    required: Boolean(adminPasscode),
-    authenticated: isAdminAuthenticated(request),
+    required,
+    configured: Boolean(adminPasscode),
+    authenticated: required ? isAdminAuthenticated(request) : true,
   }
 }
 
 function isAdminAuthenticated(request) {
-  if (!adminPasscode) return true
+  if (!adminPasscode) return false
 
   const cookies = parseCookies(request.headers.cookie)
   return safeEquals(cookies[adminCookieName] || '', adminSessionToken())
+}
+
+function isAdminPasscodeRequired() {
+  return true
 }
 
 function isAdminProtectedPath(pathname) {
   return new Set([
     '/api/cheer/moderate',
     '/api/cheer/bulk',
-    '/api/raffle',
-    '/api/raffle/stage',
     '/api/quiz/open',
     '/api/quiz/prepare',
     '/api/quiz/close',
@@ -1952,6 +1966,11 @@ async function handleApi(request, response, url) {
     const body = await readJson(request)
     const passcode = String(body.passcode || '').trim()
 
+    if (!adminPasscode && isAdminPasscodeRequired(request)) {
+      sendJson(response, 503, { error: 'ADMIN_PASSCODE is not configured' }, { 'Set-Cookie': clearAdminCookieHeader() })
+      return
+    }
+
     if (!adminPasscode) {
       sendJson(response, 200, getAdminSessionStatus(request), { 'Set-Cookie': clearAdminCookieHeader() })
       return
@@ -1962,12 +1981,18 @@ async function handleApi(request, response, url) {
       return
     }
 
-    sendJson(response, 200, { required: true, authenticated: true }, { 'Set-Cookie': adminCookieHeader() })
+    sendJson(response, 200, { required: true, configured: true, authenticated: true }, { 'Set-Cookie': adminCookieHeader() })
     return
   }
 
   if (request.method === 'POST' && url.pathname === '/api/admin/logout') {
-    sendJson(response, 200, { required: Boolean(adminPasscode), authenticated: !adminPasscode }, { 'Set-Cookie': clearAdminCookieHeader() })
+    const required = isAdminPasscodeRequired(request)
+    sendJson(
+      response,
+      200,
+      { required, configured: Boolean(adminPasscode), authenticated: !required },
+      { 'Set-Cookie': clearAdminCookieHeader() },
+    )
     return
   }
 
@@ -2053,7 +2078,7 @@ async function handleApi(request, response, url) {
     removeCheersForClearedTeams(person, previousAllocations, nextAllocations)
     lastRaffle = null
     broadcast()
-    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -2098,7 +2123,7 @@ async function handleApi(request, response, url) {
     })
     cheers.splice(maxStoredCheerMessages)
     broadcast()
-    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -2245,7 +2270,7 @@ async function handleApi(request, response, url) {
         response,
         200,
         {
-          ...getStateForRequest(request, { slimMedia: true }),
+          ...getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }),
           quizSubmission: {
             accepted: false,
             reason: getQuizAnswerRejectionReason(person, body.text, body),
@@ -2261,7 +2286,7 @@ async function handleApi(request, response, url) {
       response,
       200,
       {
-        ...getStateForRequest(request, { slimMedia: true }),
+        ...getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }),
         quizSubmission: {
           accepted: true,
           answerId: answer.id,
@@ -2317,7 +2342,7 @@ async function handleApi(request, response, url) {
     }
 
     broadcast()
-    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -2352,6 +2377,11 @@ async function handleApi(request, response, url) {
     )
     const nextMinScore = clamp(Number(body.minScore ?? settings.minScore), 0, 9.9)
     const nextRaffleCheerWeight = clamp(Number(body.raffleCheerWeight ?? settings.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1)
+    const nextQuizAnswerLimit = clamp(
+      Math.floor(Number(body.quizAnswerLimit) || settings.quizAnswerLimit || defaultQuizAnswerLimit),
+      1,
+      maxQuizAnswerLimit,
+    )
     const nextTimerMode = normalizeTimerMode(body.timerMode, settings.timerMode)
     const rawDurationMinutes = normalizeDurationMinutes(body.durationMinutes, settings.durationMinutes)
     const rawTargetTime = normalizeTargetTime(body.targetTime, settings.targetTime)
@@ -2373,6 +2403,7 @@ async function handleApi(request, response, url) {
       targetTime: nextTargetTime,
       minScore: nextMinScore,
       raffleCheerWeight: nextRaffleCheerWeight,
+      quizAnswerLimit: nextQuizAnswerLimit,
       cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, settings.cheerNameMode),
       themeMode: normalizeThemeMode(body.themeMode, settings.themeMode),
     }

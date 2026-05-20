@@ -7,6 +7,8 @@ const maxConfigurableStarsPerTeam = 10
 const defaultDurationMinutes = 10
 const defaultMinScore = 5
 const defaultRaffleCheerWeight = 0.2
+const defaultQuizAnswerLimit = 3
+const maxQuizAnswerLimit = 10
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
 const maxStoredCheerMessages = 5000
@@ -36,6 +38,17 @@ type Env = {
 }
 
 type EventClientRole = 'admin' | 'wall' | 'vote'
+
+type EventClient = {
+  role: EventClientRole
+  participantId: string
+}
+
+type GetStateOptions = {
+  slimMedia?: boolean
+  role?: EventClientRole
+  participantId?: string
+}
 
 type LogoKind = 'orbit' | 'beam' | 'grid' | 'wave' | 'core'
 
@@ -229,6 +242,7 @@ type Settings = {
   targetTime: string
   minScore: number
   raffleCheerWeight: number
+  quizAnswerLimit: number
   cheerNameMode: 'masked' | 'real'
   themeMode: 'light' | 'stage'
 }
@@ -481,20 +495,23 @@ export default {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/admin/status') {
+      const required = isAdminPasscodeRequired()
       return json({
-        required: Boolean(adminPasscode),
-        authenticated: await isAdminAuthenticated(request, adminPasscode),
+        required,
+        configured: Boolean(adminPasscode),
+        authenticated: adminPasscode ? await isAdminAuthenticated(request, adminPasscode) : false,
       })
     }
 
     if (request.method === 'POST' && url.pathname === '/api/admin/login') {
       const body = await readJson(request)
       const passcode = String(body.passcode || '').trim()
+      const required = isAdminPasscodeRequired()
 
-      if (!adminPasscode) {
+      if (!adminPasscode && required) {
         return json(
-          { required: false, authenticated: true },
-          200,
+          { error: 'ADMIN_PASSCODE is not configured' },
+          503,
           { 'Set-Cookie': clearAdminCookieHeader(url.protocol === 'https:') },
         )
       }
@@ -504,15 +521,16 @@ export default {
       }
 
       return json(
-        { required: true, authenticated: true },
+        { required: true, configured: true, authenticated: true },
         200,
         { 'Set-Cookie': await adminCookieHeader(adminPasscode, url.protocol === 'https:') },
       )
     }
 
     if (request.method === 'POST' && url.pathname === '/api/admin/logout') {
+      const required = isAdminPasscodeRequired()
       return json(
-        { required: Boolean(adminPasscode), authenticated: !adminPasscode },
+        { required, configured: Boolean(adminPasscode), authenticated: !required },
         200,
         { 'Set-Cookie': clearAdminCookieHeader(url.protocol === 'https:') },
       )
@@ -537,7 +555,7 @@ export class ArenaRoom {
   private cheers: CheerMessage[] = []
   private voteEvents: VoteEvent[] = []
   private awardHistory: AwardRecord[] = []
-  private clients = new Map<ReadableStreamDefaultController<Uint8Array>, EventClientRole>()
+  private clients = new Map<ReadableStreamDefaultController<Uint8Array>, EventClient>()
   private closed = false
   private closesAt = Date.now() + defaultDurationMinutes * 60 * 1000
   private lastRaffle: LastRaffle | null = null
@@ -563,6 +581,7 @@ export class ArenaRoom {
     targetTime: '',
     minScore: defaultMinScore,
     raffleCheerWeight: defaultRaffleCheerWeight,
+    quizAnswerLimit: defaultQuizAnswerLimit,
     cheerNameMode: 'masked',
     themeMode: 'stage',
   }
@@ -586,11 +605,12 @@ export class ArenaRoom {
     const url = new URL(request.url)
 
     if (request.method === 'GET' && url.pathname === '/api/state') {
-      return json(this.getState({ slimMedia: url.searchParams.get('media') === 'slim' }))
+      const role = getEventRole(url)
+      return json(this.getStateForRequest(request, { slimMedia: url.searchParams.get('media') === 'slim', role }))
     }
 
     if (request.method === 'GET' && url.pathname === '/events') {
-      return this.openEventStream(url)
+      return this.openEventStream(request, url)
     }
 
     if (request.method === 'GET' && url.pathname === '/api/team-config/apply') {
@@ -603,7 +623,7 @@ export class ArenaRoom {
       if (!updated) return json({ error: 'teams array required' }, 400)
 
       await this.commit({ audience: true, fullMedia: true })
-      return json(this.getState())
+      return json(this.getStateForRequest(request))
     }
 
     if (request.method !== 'POST') {
@@ -667,6 +687,11 @@ export class ArenaRoom {
       targetTime: normalizeTargetTime(snapshot.settings?.targetTime),
       minScore: clamp(Number(snapshot.settings?.minScore ?? defaultMinScore), 0, 9.9),
       raffleCheerWeight: clamp(Number(snapshot.settings?.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
+      quizAnswerLimit: clamp(
+        Math.floor(Number(snapshot.settings?.quizAnswerLimit) || defaultQuizAnswerLimit),
+        1,
+        maxQuizAnswerLimit,
+      ),
       cheerNameMode: normalizeCheerNameMode(snapshot.settings?.cheerNameMode),
       themeMode: normalizeThemeMode(snapshot.settings?.themeMode),
     }
@@ -720,7 +745,7 @@ export class ArenaRoom {
       this.removeCheersForClearedTeams(person, previousAllocations, nextAllocations)
       this.lastRaffle = null
       await this.commit()
-      return json(this.getState({ slimMedia: true }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
     if (pathname === '/api/cheer') {
@@ -748,7 +773,7 @@ export class ArenaRoom {
       })
       this.cheers.splice(maxStoredCheerMessages)
       await this.commit()
-      return json(this.getState({ slimMedia: true }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
     if (pathname === '/api/cheer/moderate') {
@@ -760,7 +785,7 @@ export class ArenaRoom {
       message.hidden = Boolean(body.hidden)
       this.lastRaffle = null
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/cheer/bulk') {
@@ -783,7 +808,7 @@ export class ArenaRoom {
 
       this.lastRaffle = null
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/raffle') {
@@ -833,7 +858,7 @@ export class ArenaRoom {
       }
 
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/raffle/stage') {
@@ -847,20 +872,20 @@ export class ArenaRoom {
       }
 
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/quiz/open') {
       if (!this.openQuiz(body)) return json({ error: 'quiz question and answer required' }, 400)
 
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/quiz/prepare') {
       this.prepareQuiz()
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/quiz/answer') {
@@ -873,7 +898,7 @@ export class ArenaRoom {
       if (!answer) {
         return json(
           {
-            ...this.getState({ slimMedia: true }),
+            ...this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }),
             quizSubmission: {
               accepted: false,
               reason: this.getQuizAnswerRejectionReason(person, body.text, body),
@@ -888,7 +913,7 @@ export class ArenaRoom {
       await this.commit({ audience: true })
       return json(
         {
-          ...this.getState({ slimMedia: true }),
+          ...this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }),
           quizSubmission: {
             accepted: true,
             answerId: answer.id,
@@ -905,13 +930,13 @@ export class ArenaRoom {
     if (pathname === '/api/quiz/close') {
       this.closeQuiz()
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/quiz/clear') {
       this.clearQuiz()
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/close') {
@@ -920,7 +945,7 @@ export class ArenaRoom {
         this.closesAt = calculateClosesAt(this.settings)
       }
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/register') {
@@ -932,21 +957,21 @@ export class ArenaRoom {
       if (!person) return json({ error: 'name, group, and department required' }, 400)
 
       await this.commit()
-      return json(this.getState({ slimMedia: true }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
     if (pathname === '/api/participant/reset') {
       if (!this.resetParticipant(body.participantId)) return json({ error: 'participant not found' }, 404)
 
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/participant/delete') {
       if (!this.deleteParticipant(body.participantId)) return json({ error: 'participant not found' }, 404)
 
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/settings') {
@@ -968,6 +993,11 @@ export class ArenaRoom {
         targetTime: timerSettings.targetTime,
         minScore: clamp(Number(body.minScore ?? this.settings.minScore), 0, 9.9),
         raffleCheerWeight: clamp(Number(body.raffleCheerWeight ?? this.settings.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
+        quizAnswerLimit: clamp(
+          Math.floor(Number(body.quizAnswerLimit) || this.settings.quizAnswerLimit || defaultQuizAnswerLimit),
+          1,
+          maxQuizAnswerLimit,
+        ),
         cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, this.settings.cheerNameMode),
         themeMode: normalizeThemeMode(body.themeMode, this.settings.themeMode),
       }
@@ -976,7 +1006,7 @@ export class ArenaRoom {
       this.closed = false
       this.lastRaffle = null
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/team-config') {
@@ -984,7 +1014,7 @@ export class ArenaRoom {
       if (!updated) return json({ error: 'teams array required' }, 400)
 
       await this.commit({ audience: true, fullMedia: true })
-      return json(this.getState())
+      return json(this.getStateForRequest(request))
     }
 
     if (pathname === '/api/team-self-config') {
@@ -992,19 +1022,19 @@ export class ArenaRoom {
       if (!updated) return json({ error: 'team not found' }, 400)
 
       await this.commit({ audience: true, fullMedia: true })
-      return json(this.getState())
+      return json(this.getStateForRequest(request))
     }
 
     if (pathname === '/api/reset') {
       await this.resetRuntimeState({ seed: Boolean(body.seed), keepParticipants: Boolean(body.keepParticipants) && !body.seed })
       await this.commit({ audience: true })
-      return json(this.getState({ slimMedia: true }))
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     return json({ error: 'not found' }, 404)
   }
 
-  private getState(options: { slimMedia?: boolean } = {}) {
+  private getState(options: GetStateOptions = {}) {
     const serverTime = Date.now()
 
     if (!this.closed && serverTime > this.closesAt) {
@@ -1094,7 +1124,36 @@ export class ArenaRoom {
       configUpdatedAt: this.configUpdatedAt,
     }
 
-    return options.slimMedia ? slimStateMedia(state) : state
+    const mediaState = options.slimMedia ? slimStateMedia(state) : state
+    return shapeStateForRole(mediaState, options)
+  }
+
+  private getStateForRequest(request: Request, options: GetStateOptions = {}) {
+    const role = options.role || this.getRequestRole(request)
+    return this.getState({
+      ...options,
+      role,
+      participantId: options.participantId ?? this.getRequestParticipantId(request),
+    })
+  }
+
+  private getRequestParticipantId(request: Request) {
+    const cookies = parseCookies(request.headers.get('cookie') || '')
+    return cookies[participantCookieName] || ''
+  }
+
+  private getRequestRole(request: Request, fallback: EventClientRole = 'admin'): EventClientRole {
+    const referer = request.headers.get('referer') || ''
+    try {
+      const pathname = new URL(referer).pathname
+      if (pathname.startsWith('/vote')) return 'vote'
+      if (pathname.startsWith('/wall')) return 'wall'
+      if (pathname.startsWith('/admin')) return 'admin'
+    } catch {
+      // Requests without a referer keep the explicit fallback.
+    }
+
+    return fallback
   }
 
   private getRuntimeSettings(source: Settings = this.settings): Settings {
@@ -1111,6 +1170,7 @@ export class ArenaRoom {
       targetTime: normalizeTargetTime(source.targetTime),
       minScore: clamp(Number(source.minScore ?? defaultMinScore), 0, 9.9),
       raffleCheerWeight: clamp(Number(source.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
+      quizAnswerLimit: clamp(Math.floor(Number(source.quizAnswerLimit) || defaultQuizAnswerLimit), 1, maxQuizAnswerLimit),
       cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
       themeMode: normalizeThemeMode(source.themeMode, 'stage'),
     }
@@ -1176,14 +1236,21 @@ export class ArenaRoom {
     this.voteEvents = this.voteEvents.filter((event) => this.validTeamIds.has(event.teamId))
   }
 
-  private openEventStream(url: URL) {
+  private openEventStream(request: Request, url: URL) {
     const role = getEventRole(url)
+    const client: EventClient = {
+      role,
+      participantId: this.getRequestParticipantId(request),
+    }
     let controllerRef: ReadableStreamDefaultController<Uint8Array>
     const stream = new ReadableStream<Uint8Array>({
       start: (controller) => {
         controllerRef = controller
-        this.clients.set(controller, role)
-        this.sendState(controller)
+        this.clients.set(controller, client)
+        this.sendState(
+          controller,
+          `event: state\ndata: ${JSON.stringify(this.getState({ role: client.role, participantId: client.participantId }))}\n\n`,
+        )
       },
       cancel: () => {
         this.clients.delete(controllerRef)
@@ -1211,10 +1278,22 @@ export class ArenaRoom {
   }
 
   private broadcast({ audience = false, fullMedia = false }: { audience?: boolean; fullMedia?: boolean } = {}) {
-    const payload = `event: state\ndata: ${JSON.stringify(this.getState({ slimMedia: !fullMedia }))}\n\n`
-    for (const [client, role] of this.clients.entries()) {
-      if (role === 'vote' && !audience) continue
-      this.sendState(client, payload)
+    const payloadCache = new Map<string, string>()
+    const getPayload = (client: EventClient) => {
+      const cacheKey = `${client.role}:${client.participantId || ''}:${fullMedia ? 'full' : 'slim'}`
+      if (!payloadCache.has(cacheKey)) {
+        payloadCache.set(
+          cacheKey,
+          `event: state\ndata: ${JSON.stringify(this.getState({ slimMedia: !fullMedia, role: client.role, participantId: client.participantId }))}\n\n`,
+        )
+      }
+
+      return payloadCache.get(cacheKey) || ''
+    }
+
+    for (const [controller, client] of this.clients.entries()) {
+      if (client.role === 'vote' && !audience) continue
+      this.sendState(controller, getPayload(client))
     }
   }
 
@@ -1668,10 +1747,11 @@ export class ArenaRoom {
   private submitQuizAnswer(person: Participant | null, textValue: unknown, body: RequestBody = {}) {
     const text = sanitizeText(textValue, quizAnswerMaxLength)
     const serverReceivedAt = Date.now()
+    const quizAnswerLimit = this.getQuizAnswerLimit()
     this.advanceQuizPhase(serverReceivedAt)
     if (!person || (this.quiz.mode !== 'open' && this.quiz.mode !== 'settling') || !this.quiz.id || !text) return null
     if (Number(body.quizId) && Number(body.quizId) !== this.quiz.id) return null
-    if (this.quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) return null
+    if (this.quiz.answers.filter((answer) => answer.participantId === person.id).length >= quizAnswerLimit) return null
 
     const normalized = normalizeQuizAnswer(text)
     const correct = this.quizAnswerKeys.includes(normalized)
@@ -1726,6 +1806,7 @@ export class ArenaRoom {
 
   private getQuizAnswerRejectionReason(person: Participant | null, textValue: unknown, body: RequestBody = {}) {
     const text = sanitizeText(textValue, quizAnswerMaxLength)
+    const quizAnswerLimit = this.getQuizAnswerLimit()
     this.advanceQuizPhase()
 
     if (!person) return '참가자 등록이 필요합니다.'
@@ -1734,11 +1815,15 @@ export class ArenaRoom {
     if (this.quiz.mode === 'countdown') return '문제가 공개되면 답변을 제출해주세요.'
     if (Number(body.quizId) && Number(body.quizId) !== this.quiz.id) return '이미 다른 문제가 진행 중입니다.'
     if (this.quiz.mode !== 'open' && this.quiz.mode !== 'settling') return '정답자 선정이 마감되었습니다.'
-    if (this.quiz.answers.filter((answer) => answer.participantId === person.id).length >= 5) {
-      return '이 문제는 최대 5번까지만 제출할 수 있습니다.'
+    if (this.quiz.answers.filter((answer) => answer.participantId === person.id).length >= quizAnswerLimit) {
+      return `이 문제는 최대 ${quizAnswerLimit}번까지만 제출할 수 있습니다.`
     }
 
     return '답변을 접수하지 못했습니다.'
+  }
+
+  private getQuizAnswerLimit() {
+    return this.getRuntimeSettings().quizAnswerLimit
   }
 
   private recordVoteEvents(
@@ -1902,6 +1987,44 @@ export class ArenaRoom {
 
   private isCurrentSession(body: RequestBody) {
     return Number(body.sessionId) === this.sessionId
+  }
+}
+
+function shapeStateForRole<T extends {
+  participants: ParticipantState[]
+  awardHistory: AwardRecord[]
+  cheers: CheerMessage[]
+  voteEvents: VoteEvent[]
+  quiz: QuizState
+}>(state: T, options: GetStateOptions = {}): T {
+  if (options.role !== 'vote') return state
+
+  const participantId = String(options.participantId || '')
+  const ownParticipants = participantId
+    ? state.participants.filter((person) => person.id === participantId || getParticipantDeviceIds(person).includes(participantId))
+    : []
+  const ownParticipantIds = new Set(ownParticipants.map((person) => person.id))
+  const ownAwardHistory = ownParticipantIds.size
+    ? state.awardHistory.filter((record) => ownParticipantIds.has(record.participantId))
+    : []
+  const ownQuizAnswers = ownParticipantIds.size
+    ? state.quiz.answers.filter((answer) => ownParticipantIds.has(answer.participantId))
+    : []
+  const visibleOrOwnCheers = state.cheers.filter((message) => {
+    if (!message.hidden) return true
+    return ownParticipantIds.has(message.participantId)
+  })
+
+  return {
+    ...state,
+    participants: ownParticipants,
+    cheers: visibleOrOwnCheers,
+    voteEvents: [],
+    awardHistory: ownAwardHistory,
+    quiz: {
+      ...state.quiz,
+      answers: ownQuizAnswers,
+    },
   }
 }
 
@@ -2318,8 +2441,6 @@ function isAdminProtectedRequest(url: URL, method: string) {
   return new Set([
     '/api/cheer/moderate',
     '/api/cheer/bulk',
-    '/api/raffle',
-    '/api/raffle/stage',
     '/api/quiz/open',
     '/api/quiz/prepare',
     '/api/quiz/close',
@@ -2338,8 +2459,12 @@ function getEventRole(url: URL): EventClientRole {
   return role === 'vote' || role === 'wall' || role === 'admin' ? role : 'admin'
 }
 
+function isAdminPasscodeRequired() {
+  return true
+}
+
 async function isAdminAuthenticated(request: Request, adminPasscode: string) {
-  if (!adminPasscode) return true
+  if (!adminPasscode) return false
 
   const cookies = parseCookies(request.headers.get('cookie') || '')
   return cookies[adminCookieName] === await adminSessionToken(adminPasscode)
