@@ -140,7 +140,19 @@ type VoteEvent = {
   createdAt: number
 }
 
-type RaffleRule = 'all' | 'leader' | 'top3' | 'rank456' | 'rank789Cheer' | 'rank10Cheer' | 'multi' | 'big' | 'longestCheer' | 'cheer'
+type RaffleRule =
+  | 'all'
+  | 'leader'
+  | 'top3'
+  | 'rank456'
+  | 'rank789Cheer'
+  | 'rank10Cheer'
+  | 'multi'
+  | 'big'
+  | 'longestCheer'
+  | 'cheer3'
+  | 'cheer5'
+  | 'cheer'
 
 type RaffleSupportDetail = {
   teamId: string
@@ -388,6 +400,8 @@ const defaultCopy = {
   rafflePrizeImageMulti: '',
   rafflePrizeImageBig: '',
   rafflePrizeImageLongestCheer: '',
+  rafflePrizeImageCheer3: '',
+  rafflePrizeImageCheer5: '',
   rafflePrizeNameFile: '',
   rafflePrizeNameAll: '',
   rafflePrizeNameLeader: '',
@@ -398,6 +412,8 @@ const defaultCopy = {
   rafflePrizeNameMulti: '',
   rafflePrizeNameBig: '',
   rafflePrizeNameLongestCheer: '',
+  rafflePrizeNameCheer3: '',
+  rafflePrizeNameCheer5: '',
   raffleWinnerCountAll: '3',
   raffleWinnerCountLeader: '1',
   raffleWinnerCountTop3: '1',
@@ -407,6 +423,8 @@ const defaultCopy = {
   raffleWinnerCountMulti: '1',
   raffleWinnerCountBig: '1',
   raffleWinnerCountLongestCheer: '1',
+  raffleWinnerCountCheer3: '2',
+  raffleWinnerCountCheer5: '1',
   raffleRuleLabelAll: '공개 응원 메시지 참여자',
   raffleRuleLabelLeader: '현재 1위 팀에 별을 준 참여자',
   raffleRuleLabelTop3: '현재 1·2·3위 팀 모두에 별을 준 참여자',
@@ -416,6 +434,8 @@ const defaultCopy = {
   raffleRuleLabelMulti: '5개 이상 팀에 별을 나눠 준 참여자',
   raffleRuleLabelBig: '한 팀에 최대 별을 모두 준 참여자',
   raffleRuleLabelLongestCheer: '가장 긴 응원 메시지를 남긴 참여자',
+  raffleRuleLabelCheer3: '공개 응원 메시지를 3개 이상 보낸 참여자',
+  raffleRuleLabelCheer5: '공개 응원 메시지를 5개 이상 보낸 참여자',
   raffleStartButtonLabel: '추첨 시작',
   raffleStopButtonLabel: '정지',
   awardHistoryNotice: '당첨 선물은 행사 종료 후 운영진 확인을 거쳐 순차적으로 전달됩니다.',
@@ -488,6 +508,8 @@ const rafflePrizeImageKeyByRule: Record<RaffleRule, keyof EventCopy> = {
   multi: 'rafflePrizeImageMulti',
   big: 'rafflePrizeImageBig',
   longestCheer: 'rafflePrizeImageLongestCheer',
+  cheer3: 'rafflePrizeImageCheer3',
+  cheer5: 'rafflePrizeImageCheer5',
   cheer: 'rafflePrizeImageAll',
 }
 
@@ -501,6 +523,8 @@ const rafflePrizeNameKeyByRule: Record<RaffleRule, keyof EventCopy> = {
   multi: 'rafflePrizeNameMulti',
   big: 'rafflePrizeNameBig',
   longestCheer: 'rafflePrizeNameLongestCheer',
+  cheer3: 'rafflePrizeNameCheer3',
+  cheer5: 'rafflePrizeNameCheer5',
   cheer: 'rafflePrizeNameAll',
 }
 
@@ -514,6 +538,8 @@ const raffleWinnerCountKeyByRule: Record<RaffleRule, keyof EventCopy> = {
   multi: 'raffleWinnerCountMulti',
   big: 'raffleWinnerCountBig',
   longestCheer: 'raffleWinnerCountLongestCheer',
+  cheer3: 'raffleWinnerCountCheer3',
+  cheer5: 'raffleWinnerCountCheer5',
   cheer: 'raffleWinnerCountAll',
 }
 
@@ -1623,6 +1649,8 @@ export class ArenaRoom {
       if (rule === 'multi') return allocationValues.length >= 5
       if (rule === 'big') return allocationValues.some((value) => value >= bigThreshold)
       if (rule === 'longestCheer') return (longestCheerByParticipant.get(person.id) ?? 0) > 0
+      if (rule === 'cheer3') return Number(person.visibleCheerCount || 0) >= 3
+      if (rule === 'cheer5') return Number(person.visibleCheerCount || 0) >= 5
       if (rule === 'cheer') return person.cheered
       return true
     })
@@ -1745,7 +1773,7 @@ export class ArenaRoom {
 
   private getRaffleWinnerCount(rule: RaffleRule, rawValue?: unknown) {
     const key = raffleWinnerCountKeyByRule[rule]
-    const fallback = rule === 'all' || rule === 'cheer' ? 3 : 1
+    const fallback = rule === 'all' || rule === 'cheer' ? 3 : rule === 'cheer3' ? 2 : 1
     const value = rawValue === undefined ? this.copy[key] : rawValue
     return clamp(Math.floor(Number(value) || fallback), 1, 10)
   }
@@ -2872,6 +2900,8 @@ function isRaffleRule(value: unknown): value is RaffleRule {
     value === 'multi' ||
     value === 'big' ||
     value === 'longestCheer' ||
+    value === 'cheer3' ||
+    value === 'cheer5' ||
     value === 'cheer'
   )
 }

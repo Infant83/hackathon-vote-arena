@@ -352,6 +352,8 @@ type EventCopy = {
   rafflePrizeImageMulti: string
   rafflePrizeImageBig: string
   rafflePrizeImageLongestCheer: string
+  rafflePrizeImageCheer3: string
+  rafflePrizeImageCheer5: string
   rafflePrizeNameFile: string
   rafflePrizeNameAll: string
   rafflePrizeNameLeader: string
@@ -362,6 +364,8 @@ type EventCopy = {
   rafflePrizeNameMulti: string
   rafflePrizeNameBig: string
   rafflePrizeNameLongestCheer: string
+  rafflePrizeNameCheer3: string
+  rafflePrizeNameCheer5: string
   raffleWinnerCountAll: string
   raffleWinnerCountLeader: string
   raffleWinnerCountTop3: string
@@ -371,6 +375,8 @@ type EventCopy = {
   raffleWinnerCountMulti: string
   raffleWinnerCountBig: string
   raffleWinnerCountLongestCheer: string
+  raffleWinnerCountCheer3: string
+  raffleWinnerCountCheer5: string
   raffleRuleLabelAll: string
   raffleRuleLabelLeader: string
   raffleRuleLabelTop3: string
@@ -380,6 +386,8 @@ type EventCopy = {
   raffleRuleLabelMulti: string
   raffleRuleLabelBig: string
   raffleRuleLabelLongestCheer: string
+  raffleRuleLabelCheer3: string
+  raffleRuleLabelCheer5: string
   raffleStartButtonLabel: string
   raffleStopButtonLabel: string
   awardHistoryNotice: string
@@ -397,6 +405,8 @@ type EventCopyImageKey =
   | 'rafflePrizeImageMulti'
   | 'rafflePrizeImageBig'
   | 'rafflePrizeImageLongestCheer'
+  | 'rafflePrizeImageCheer3'
+  | 'rafflePrizeImageCheer5'
 type RafflePrizeImageKey = Exclude<EventCopyImageKey, 'appLogoFile'>
 type RafflePrizeNameKey =
   | 'rafflePrizeNameFile'
@@ -409,6 +419,8 @@ type RafflePrizeNameKey =
   | 'rafflePrizeNameMulti'
   | 'rafflePrizeNameBig'
   | 'rafflePrizeNameLongestCheer'
+  | 'rafflePrizeNameCheer3'
+  | 'rafflePrizeNameCheer5'
 type RaffleWinnerCountKey =
   | 'raffleWinnerCountAll'
   | 'raffleWinnerCountLeader'
@@ -419,9 +431,23 @@ type RaffleWinnerCountKey =
   | 'raffleWinnerCountMulti'
   | 'raffleWinnerCountBig'
   | 'raffleWinnerCountLongestCheer'
+  | 'raffleWinnerCountCheer3'
+  | 'raffleWinnerCountCheer5'
 
 type CheerNameMode = 'masked' | 'real'
-type RaffleRule = 'all' | 'leader' | 'top3' | 'rank456' | 'rank789Cheer' | 'rank10Cheer' | 'multi' | 'big' | 'longestCheer' | 'cheer'
+type RaffleRule =
+  | 'all'
+  | 'leader'
+  | 'top3'
+  | 'rank456'
+  | 'rank789Cheer'
+  | 'rank10Cheer'
+  | 'multi'
+  | 'big'
+  | 'longestCheer'
+  | 'cheer3'
+  | 'cheer5'
+  | 'cheer'
 type ConnectionState = 'connecting' | 'live' | 'offline'
 type RaffleStageState = {
   active: boolean
@@ -461,6 +487,8 @@ const raffleRuleOptions: Array<{ value: RaffleRule; label: string }> = [
   { value: 'multi', label: '5개 이상 팀에 별을 나눠 준 참여자' },
   { value: 'big', label: '한 팀에 최대 별을 모두 준 참여자' },
   { value: 'longestCheer', label: '가장 긴 응원 메시지를 남긴 참여자' },
+  { value: 'cheer3', label: '공개 응원 메시지를 3개 이상 보낸 참여자' },
+  { value: 'cheer5', label: '공개 응원 메시지를 5개 이상 보낸 참여자' },
 ]
 
 const rafflePrizeImageKeyByRule: Record<RaffleRule, RafflePrizeImageKey> = {
@@ -473,6 +501,8 @@ const rafflePrizeImageKeyByRule: Record<RaffleRule, RafflePrizeImageKey> = {
   multi: 'rafflePrizeImageMulti',
   big: 'rafflePrizeImageBig',
   longestCheer: 'rafflePrizeImageLongestCheer',
+  cheer3: 'rafflePrizeImageCheer3',
+  cheer5: 'rafflePrizeImageCheer5',
   cheer: 'rafflePrizeImageAll',
 }
 
@@ -486,6 +516,8 @@ const rafflePrizeNameKeyByRule: Record<RaffleRule, RafflePrizeNameKey> = {
   multi: 'rafflePrizeNameMulti',
   big: 'rafflePrizeNameBig',
   longestCheer: 'rafflePrizeNameLongestCheer',
+  cheer3: 'rafflePrizeNameCheer3',
+  cheer5: 'rafflePrizeNameCheer5',
   cheer: 'rafflePrizeNameAll',
 }
 
@@ -499,6 +531,8 @@ const raffleWinnerCountKeyByRule: Record<RaffleRule, RaffleWinnerCountKey> = {
   multi: 'raffleWinnerCountMulti',
   big: 'raffleWinnerCountBig',
   longestCheer: 'raffleWinnerCountLongestCheer',
+  cheer3: 'raffleWinnerCountCheer3',
+  cheer5: 'raffleWinnerCountCheer5',
   cheer: 'raffleWinnerCountAll',
 }
 
@@ -514,6 +548,8 @@ const raffleRuleLabelKeyByRule: Record<RaffleRule, RaffleRuleLabelKey> = {
   multi: 'raffleRuleLabelMulti',
   big: 'raffleRuleLabelBig',
   longestCheer: 'raffleRuleLabelLongestCheer',
+  cheer3: 'raffleRuleLabelCheer3',
+  cheer5: 'raffleRuleLabelCheer5',
   cheer: 'raffleRuleLabelAll',
 }
 
@@ -568,6 +604,16 @@ const rafflePrizeImageFields: Array<{ key: RafflePrizeImageKey; label: string; d
     label: '가장 긴 응원 메시지 참여자 상품',
     description: '추첨 룰이 “가장 긴 응원 메시지를 남긴 참여자”일 때 보여줄 상품 이미지입니다.',
   },
+  {
+    key: 'rafflePrizeImageCheer3',
+    label: '응원 메시지 3개 이상 참여자 상품',
+    description: '추첨 룰이 “공개 응원 메시지를 3개 이상 보낸 참여자”일 때 보여줄 상품 이미지입니다.',
+  },
+  {
+    key: 'rafflePrizeImageCheer5',
+    label: '응원 메시지 5개 이상 참여자 상품',
+    description: '추첨 룰이 “공개 응원 메시지를 5개 이상 보낸 참여자”일 때 보여줄 상품 이미지입니다.',
+  },
 ]
 
 const rafflePrizeNameFields: Array<{ key: RafflePrizeNameKey; label: string; description: string }> = [
@@ -620,6 +666,16 @@ const rafflePrizeNameFields: Array<{ key: RafflePrizeNameKey; label: string; des
     key: 'rafflePrizeNameLongestCheer',
     label: '가장 긴 응원 메시지 참여자 상품 이름',
     description: '추첨룰 9의 상품명입니다.',
+  },
+  {
+    key: 'rafflePrizeNameCheer3',
+    label: '응원 메시지 3개 이상 참여자 상품 이름',
+    description: '추첨룰 10의 상품명입니다.',
+  },
+  {
+    key: 'rafflePrizeNameCheer5',
+    label: '응원 메시지 5개 이상 참여자 상품 이름',
+    description: '추첨룰 11의 상품명입니다.',
   },
 ]
 
@@ -676,6 +732,18 @@ const raffleWinnerCountFields: Array<{ key: RaffleWinnerCountKey; rule: RaffleRu
     key: 'raffleWinnerCountLongestCheer',
     rule: 'longestCheer',
     label: '가장 긴 응원 메시지 참여자',
+    description: '기본 1명',
+  },
+  {
+    key: 'raffleWinnerCountCheer3',
+    rule: 'cheer3',
+    label: '응원 메시지 3개 이상 참여자',
+    description: '기본 2명',
+  },
+  {
+    key: 'raffleWinnerCountCheer5',
+    rule: 'cheer5',
+    label: '응원 메시지 5개 이상 참여자',
     description: '기본 1명',
   },
 ]
@@ -846,6 +914,8 @@ const copyLabels: Record<keyof EventCopy, string> = {
   rafflePrizeImageMulti: '5개 이상 팀 참여자 상품 이미지',
   rafflePrizeImageBig: '한 팀 최대 별 참여자 상품 이미지',
   rafflePrizeImageLongestCheer: '가장 긴 응원 메시지 참여자 상품 이미지',
+  rafflePrizeImageCheer3: '응원 메시지 3개 이상 참여자 상품 이미지',
+  rafflePrizeImageCheer5: '응원 메시지 5개 이상 참여자 상품 이미지',
   rafflePrizeNameFile: '기본 행운권 상품 이름',
   rafflePrizeNameAll: '공개 응원 메시지 참여자 상품 이름',
   rafflePrizeNameLeader: '현재 1위 팀 참여자 상품 이름',
@@ -856,6 +926,8 @@ const copyLabels: Record<keyof EventCopy, string> = {
   rafflePrizeNameMulti: '5개 이상 팀 참여자 상품 이름',
   rafflePrizeNameBig: '한 팀 최대 별 참여자 상품 이름',
   rafflePrizeNameLongestCheer: '가장 긴 응원 메시지 참여자 상품 이름',
+  rafflePrizeNameCheer3: '응원 메시지 3개 이상 참여자 상품 이름',
+  rafflePrizeNameCheer5: '응원 메시지 5개 이상 참여자 상품 이름',
   raffleWinnerCountAll: '선발 인원: 공개 응원 메시지',
   raffleWinnerCountLeader: '선발 인원: 현재 1위 팀',
   raffleWinnerCountTop3: '선발 인원: 현재 1·2·3위 팀',
@@ -865,6 +937,8 @@ const copyLabels: Record<keyof EventCopy, string> = {
   raffleWinnerCountMulti: '선발 인원: 5개 이상 팀',
   raffleWinnerCountBig: '선발 인원: 한 팀 최대 별',
   raffleWinnerCountLongestCheer: '선발 인원: 가장 긴 응원 메시지',
+  raffleWinnerCountCheer3: '선발 인원: 응원 메시지 3개 이상',
+  raffleWinnerCountCheer5: '선발 인원: 응원 메시지 5개 이상',
   raffleRuleLabelAll: '추첨룰 문구: 공개 응원 메시지',
   raffleRuleLabelLeader: '추첨룰 문구: 현재 1위 팀',
   raffleRuleLabelTop3: '추첨룰 문구: 현재 1·2·3위 팀',
@@ -874,6 +948,8 @@ const copyLabels: Record<keyof EventCopy, string> = {
   raffleRuleLabelMulti: '추첨룰 문구: 5개 이상 팀',
   raffleRuleLabelBig: '추첨룰 문구: 한 팀 최대 별',
   raffleRuleLabelLongestCheer: '추첨룰 문구: 가장 긴 응원 메시지',
+  raffleRuleLabelCheer3: '추첨룰 문구: 응원 메시지 3개 이상',
+  raffleRuleLabelCheer5: '추첨룰 문구: 응원 메시지 5개 이상',
   raffleStartButtonLabel: '행운권 시작 버튼 문구',
   raffleStopButtonLabel: '행운권 정지 버튼 문구',
   awardHistoryNotice: '당첨 안내 문구',
@@ -905,6 +981,8 @@ const copyHelp: Partial<Record<keyof EventCopy, string>> = {
   rafflePrizeImageMulti: '5개 이상 팀 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
   rafflePrizeImageBig: '한 팀에 줄 수 있는 최대 별을 모두 준 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
   rafflePrizeImageLongestCheer: '가장 긴 응원 메시지 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeImageCheer3: '공개 응원 메시지를 3개 이상 보낸 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
+  rafflePrizeImageCheer5: '공개 응원 메시지를 5개 이상 보낸 참여자 추첨 룰에서 기본 상품 대신 보여줄 이미지입니다.',
   rafflePrizeNameFile: '상품 이미지가 없거나 룰별 상품 이름이 비어 있을 때 쓰는 기본 상품명입니다.',
   rafflePrizeNameAll: '공개 응원 메시지 참여자 추첨 룰에서 보여줄 상품명입니다.',
   rafflePrizeNameLeader: '현재 1위 팀 참여자 추첨 룰에서 보여줄 상품명입니다.',
@@ -915,6 +993,8 @@ const copyHelp: Partial<Record<keyof EventCopy, string>> = {
   rafflePrizeNameMulti: '5개 이상 팀 참여자 추첨 룰에서 보여줄 상품명입니다.',
   rafflePrizeNameBig: '한 팀에 줄 수 있는 최대 별을 모두 준 참여자 추첨 룰에서 보여줄 상품명입니다.',
   rafflePrizeNameLongestCheer: '가장 긴 응원 메시지 추첨 룰에서 보여줄 상품명입니다.',
+  rafflePrizeNameCheer3: '공개 응원 메시지를 3개 이상 보낸 참여자 추첨 룰에서 보여줄 상품명입니다.',
+  rafflePrizeNameCheer5: '공개 응원 메시지를 5개 이상 보낸 참여자 추첨 룰에서 보여줄 상품명입니다.',
   raffleRuleLabelAll: '실제 조건은 유지하고 화면에 보이는 추첨 조건 문구만 바꿉니다.',
   raffleRuleLabelLeader: '실제 조건은 유지하고 화면에 보이는 추첨 조건 문구만 바꿉니다.',
   raffleRuleLabelTop3: '실제 조건은 유지하고 화면에 보이는 추첨 조건 문구만 바꿉니다.',
@@ -924,6 +1004,8 @@ const copyHelp: Partial<Record<keyof EventCopy, string>> = {
   raffleRuleLabelMulti: '실제 조건은 유지하고 화면에 보이는 추첨 조건 문구만 바꿉니다.',
   raffleRuleLabelBig: '{maxStarsPerTeam} 값과 연결되는 조건입니다. 문구는 행사 진행용으로 자유롭게 조정할 수 있습니다.',
   raffleRuleLabelLongestCheer: '실제 조건은 유지하고 화면에 보이는 추첨 조건 문구만 바꿉니다.',
+  raffleRuleLabelCheer3: '실제 조건은 유지하고 화면에 보이는 추첨 조건 문구만 바꿉니다.',
+  raffleRuleLabelCheer5: '실제 조건은 유지하고 화면에 보이는 추첨 조건 문구만 바꿉니다.',
   raffleStartButtonLabel: '행운권 패널과 송출 화면의 시작 버튼 문구입니다.',
   raffleStopButtonLabel: '행운권 패널과 송출 화면의 정지 버튼 문구입니다.',
   awardHistoryNotice: '/vote 내 당첨 이력 아래에 표시할 선물 수령 안내입니다.',
@@ -1014,6 +1096,8 @@ const copyGroups: Array<{
       'raffleRuleLabelMulti',
       'raffleRuleLabelBig',
       'raffleRuleLabelLongestCheer',
+      'raffleRuleLabelCheer3',
+      'raffleRuleLabelCheer5',
       'raffleStartButtonLabel',
       'raffleStopButtonLabel',
     ],
@@ -1122,6 +1206,8 @@ const fallbackCopy: EventCopy = {
   rafflePrizeImageMulti: '',
   rafflePrizeImageBig: '',
   rafflePrizeImageLongestCheer: '',
+  rafflePrizeImageCheer3: '',
+  rafflePrizeImageCheer5: '',
   rafflePrizeNameFile: '',
   rafflePrizeNameAll: '',
   rafflePrizeNameLeader: '',
@@ -1132,6 +1218,8 @@ const fallbackCopy: EventCopy = {
   rafflePrizeNameMulti: '',
   rafflePrizeNameBig: '',
   rafflePrizeNameLongestCheer: '',
+  rafflePrizeNameCheer3: '',
+  rafflePrizeNameCheer5: '',
   raffleWinnerCountAll: '3',
   raffleWinnerCountLeader: '1',
   raffleWinnerCountTop3: '1',
@@ -1141,6 +1229,8 @@ const fallbackCopy: EventCopy = {
   raffleWinnerCountMulti: '1',
   raffleWinnerCountBig: '1',
   raffleWinnerCountLongestCheer: '1',
+  raffleWinnerCountCheer3: '2',
+  raffleWinnerCountCheer5: '1',
   raffleRuleLabelAll: '공개 응원 메시지 참여자',
   raffleRuleLabelLeader: '현재 1위 팀에 별을 준 참여자',
   raffleRuleLabelTop3: '현재 1·2·3위 팀 모두에 별을 준 참여자',
@@ -1150,6 +1240,8 @@ const fallbackCopy: EventCopy = {
   raffleRuleLabelMulti: '5개 이상 팀에 별을 나눠 준 참여자',
   raffleRuleLabelBig: '한 팀에 최대 별을 모두 준 참여자',
   raffleRuleLabelLongestCheer: '가장 긴 응원 메시지를 남긴 참여자',
+  raffleRuleLabelCheer3: '공개 응원 메시지를 3개 이상 보낸 참여자',
+  raffleRuleLabelCheer5: '공개 응원 메시지를 5개 이상 보낸 참여자',
   raffleStartButtonLabel: '추첨 시작',
   raffleStopButtonLabel: '정지',
   awardHistoryNotice: '당첨 선물은 행사 종료 후 운영진 확인을 거쳐 순차적으로 전달됩니다.',
@@ -7539,6 +7631,8 @@ function getRaffleCandidatesForRule(state: EventState, rule: RaffleRule) {
       const length = longestCheerByParticipant.get(person.id) ?? 0
       return length > 0
     }
+    if (rule === 'cheer3') return Number(person.visibleCheerCount || 0) >= 3
+    if (rule === 'cheer5') return Number(person.visibleCheerCount || 0) >= 5
     if (rule === 'cheer') return person.cheered
     return true
   })
@@ -7684,7 +7778,7 @@ function getRaffleWinnerCount(state: EventState, rule: RaffleRule | undefined) {
   if (!rule) return 1
 
   const key = raffleWinnerCountKeyByRule[rule]
-  const fallback = rule === 'all' || rule === 'cheer' ? 3 : 1
+  const fallback = rule === 'all' || rule === 'cheer' ? 3 : rule === 'cheer3' ? 2 : 1
   return clamp(Math.floor(Number(state.copy[key]) || fallback), 1, 10)
 }
 
@@ -8601,6 +8695,8 @@ const copyImageKeys: EventCopyImageKey[] = [
   'rafflePrizeImageMulti',
   'rafflePrizeImageBig',
   'rafflePrizeImageLongestCheer',
+  'rafflePrizeImageCheer3',
+  'rafflePrizeImageCheer5',
 ]
 
 function normalizeCopyForSave(copy: EventCopy): EventCopy {
