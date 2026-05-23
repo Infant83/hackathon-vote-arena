@@ -483,6 +483,10 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+.theme-stage .cheer-board-actions span {
+  color: var(--stage-muted);
+}
+
 .theme-stage .role-nav-link.active,
 .theme-stage .public-wall-actions button.active,
 .theme-stage .theme-toggle-field input:checked + span,
@@ -1347,6 +1351,23 @@ a:focus-visible {
 .cheer-thread::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(165, 0, 52, 0.34);
+}
+
+.cheer-history-load {
+  align-self: center;
+  min-height: 32px;
+  padding: 7px 12px;
+  border: 1px solid rgba(165, 0, 52, 0.22);
+  border-radius: 999px;
+  color: var(--brand);
+  background: rgba(165, 0, 52, 0.055);
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.cheer-history-load:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .thread-message {
@@ -2607,6 +2628,18 @@ a:focus-visible {
 
 .panel-open-button {
   border-radius: var(--radius);
+}
+
+.cheer-board-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.cheer-board-actions span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 820;
 }
 
 .participant-list {
@@ -8454,6 +8487,12 @@ body.is-wall-resizing * {
   border-radius: var(--radius);
   background: rgba(3, 6, 17, 0.34);
   scrollbar-color: rgba(143, 214, 255, 0.36) rgba(143, 214, 255, 0.08);
+}
+
+.theme-stage .cheer-history-load {
+  border-color: rgba(255, 122, 160, 0.34);
+  color: var(--stage-hot);
+  background: rgba(255, 122, 160, 0.1);
 }
 
 .theme-stage .thread-message {

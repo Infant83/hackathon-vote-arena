@@ -237,6 +237,13 @@ type QuizSubmission = {
   answerId?: number
 }
 
+type CheerHistoryResponse = {
+  messages: CheerMessage[]
+  total: number
+  nextBeforeId: number | null
+  hasMore: boolean
+}
+
 type ThemeMode = 'light' | 'stage'
 type TimerMode = 'duration' | 'targetTime'
 
@@ -244,6 +251,8 @@ type EventState = {
   teams: Team[]
   participants: Participant[]
   cheers: CheerMessage[]
+  cheerTotalCount?: number
+  visibleCheerTotalCount?: number
   voteEvents: VoteEvent[]
   awardHistory: AwardRecord[]
   closed: boolean
@@ -2309,6 +2318,12 @@ function VoteView({
   const [dismissedQuizWinner, setDismissedQuizWinner] = useState(() => getStoredValue(quizWinnerDismissedKey))
   const [noticeMountedAt] = useState(() => Date.now())
   const [cheerReadAtByTeam, setCheerReadAtByTeam] = useState<Record<string, number>>({})
+  const [cheerHistoryByTeam, setCheerHistoryByTeam] = useState<Record<string, {
+    messages: CheerMessage[]
+    total: number
+    nextBeforeId: number | null
+    loading: boolean
+  }>>({})
   const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null)
   const directTeamRefs = useRef<Record<string, HTMLElement | null>>({})
   const cheerThreadRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -2463,6 +2478,61 @@ function VoteView({
 
   const markTeamCheerRead = (teamId: string) => {
     setCheerReadAtByTeam((current) => ({ ...current, [teamId]: Date.now() }))
+  }
+
+  const loadCheerHistory = async (teamId: string) => {
+    const currentHistory = cheerHistoryByTeam[teamId]
+    if (currentHistory?.loading || currentHistory?.nextBeforeId === null) return
+
+    setCheerHistoryByTeam((current) => ({
+      ...current,
+      [teamId]: {
+        messages: current[teamId]?.messages || [],
+        total: current[teamId]?.total || 0,
+        nextBeforeId: current[teamId]?.nextBeforeId ?? null,
+        loading: true,
+      },
+    }))
+
+    const params = new URLSearchParams({
+      role: 'vote',
+      teamId,
+      limit: '50',
+    })
+    const beforeId = currentHistory?.nextBeforeId
+    if (beforeId) params.set('beforeId', String(beforeId))
+
+    try {
+      const response = await fetch(`/api/cheers?${params.toString()}`, { credentials: 'same-origin' })
+      if (!response.ok) throw new Error('cheer history request failed')
+      const data = (await response.json()) as CheerHistoryResponse
+      setCheerHistoryByTeam((current) => {
+        const previous = current[teamId]?.messages || []
+        const merged = new Map<number, CheerMessage>()
+        for (const message of previous) merged.set(message.id, message)
+        for (const message of data.messages) merged.set(message.id, message)
+
+        return {
+          ...current,
+          [teamId]: {
+            messages: [...merged.values()].sort((a, b) => a.createdAt - b.createdAt || a.id - b.id),
+            total: data.total,
+            nextBeforeId: data.nextBeforeId,
+            loading: false,
+          },
+        }
+      })
+    } catch {
+      setCheerHistoryByTeam((current) => ({
+        ...current,
+        [teamId]: {
+          messages: current[teamId]?.messages || [],
+          total: current[teamId]?.total || 0,
+          nextBeforeId: current[teamId]?.nextBeforeId ?? null,
+          loading: false,
+        },
+      }))
+    }
   }
 
   const toggleTeamCheer = (teamId: string, expanded: boolean) => {
@@ -2711,7 +2781,17 @@ function VoteView({
                 const visibleTeamCheers = state.cheers
                   .filter((message) => message.teamId === team.id && !message.hidden)
                   .sort((a, b) => a.createdAt - b.createdAt)
-                const teamCheers = visibleTeamCheers.slice(-10)
+                const cheerHistory = cheerHistoryByTeam[team.id]
+                const mergedTeamCheers = new Map<number, CheerMessage>()
+                for (const message of cheerHistory?.messages || []) mergedTeamCheers.set(message.id, message)
+                for (const message of visibleTeamCheers) mergedTeamCheers.set(message.id, message)
+                const teamCheers = (cheerHistory?.messages.length ? [...mergedTeamCheers.values()] : visibleTeamCheers.slice(-10))
+                  .sort((a, b) => a.createdAt - b.createdAt || a.id - b.id)
+                const canLoadOlderCheers = expanded && (
+                  Boolean(cheerHistory?.nextBeforeId) ||
+                  cheerHistory === undefined ||
+                  (cheerHistory.total > teamCheers.length)
+                )
                 const unreadCheerCount = visibleTeamCheers.filter(
                   (message) =>
                     message.participantId !== currentParticipantId &&
@@ -2799,6 +2879,16 @@ function VoteView({
                             cheerThreadRefs.current[team.id] = node
                           }}
                         >
+                          {canLoadOlderCheers ? (
+                            <button
+                              type="button"
+                              className="cheer-history-load"
+                              onClick={() => void loadCheerHistory(team.id)}
+                              disabled={Boolean(cheerHistory?.loading)}
+                            >
+                              {cheerHistory?.loading ? '응원 기록 불러오는 중' : '이전 응원 더 보기'}
+                            </button>
+                          ) : null}
                           {teamCheers.length ? (
                             teamCheers.map((message) => (
                               <div
@@ -4456,6 +4546,7 @@ function PublicCheerBoard({
   const [focusedCheerId, setFocusedCheerId] = useState<number | null>(null)
   const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams])
   const visibleCheers = state.cheers.filter((message) => !message.hidden)
+  const visibleCheerTotal = state.visibleCheerTotalCount ?? visibleCheers.length
   const selectedCheers = visibleCheers
     .filter((message) => selectedTeamId === 'all' || message.teamId === selectedTeamId)
     .slice(0, large ? 80 : 36)
@@ -4478,9 +4569,14 @@ function PublicCheerBoard({
           <p className="section-kicker">{state.copy.wallCheerEyeline}</p>
           <h2>{selectedTeam ? `${selectedTeam.name} ${state.copy.wallSelectedCheerSuffix}` : state.copy.wallCheerTitle}</h2>
         </div>
-        <button type="button" className="panel-open-button" onClick={onSelectAll}>
-          전체
-        </button>
+        <div className="cheer-board-actions">
+          {!selectedTeam && visibleCheerTotal > visibleCheers.length ? (
+            <span>최근 {visibleCheers.length} / 전체 {visibleCheerTotal}</span>
+          ) : null}
+          <button type="button" className="panel-open-button" onClick={onSelectAll}>
+            전체
+          </button>
+        </div>
       </div>
 
       <div className="public-cheer-stream" aria-live="polite">
@@ -8188,7 +8284,7 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
     let pollTimer: number | undefined
     let hasFullMediaState = false
     const realtime = allowProtectedRealtime && (mode === 'admin' || mode === 'wall' || mode === 'vote' || voteRealtime)
-    const shouldPoll = mode === 'vote' || !realtime
+    const shouldPoll = !realtime
     const roleQuery = `role=${encodeURIComponent(mode)}`
 
     const fetchState = async () => {
@@ -8226,13 +8322,24 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
     const openEvents = () => {
       if (!realtime || events || document.hidden) return
 
-      events = new EventSource(`/events?${roleQuery}`)
-      events.onopen = () => setConnection('live')
+      events = new EventSource(`/events?${roleQuery}&media=slim`)
+      events.onopen = () => {
+        if (pollTimer && !shouldPoll) {
+          window.clearInterval(pollTimer)
+          pollTimer = undefined
+        }
+        setConnection('live')
+      }
       events.addEventListener('state', (event) => {
         applyState(JSON.parse((event as MessageEvent).data) as EventState)
         setConnection('live')
       })
-      events.onerror = () => setConnection('offline')
+      events.onerror = () => {
+        setConnection('offline')
+        if (!shouldPoll && !pollTimer) {
+          pollTimer = window.setInterval(fetchState, 30_000)
+        }
+      }
     }
 
     const handleVisibilityChange = () => {

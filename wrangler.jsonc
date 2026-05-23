@@ -3,8 +3,11 @@
   "name": "hack",
   "main": "worker/index.ts",
   "compatibility_date": "2026-05-09",
-  "workers_dev": true,
+  "workers_dev": false,
   "preview_urls": false,
+  "limits": {
+    "cpu_ms": 300000
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",

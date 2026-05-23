@@ -829,12 +829,14 @@ function getState(options = {}) {
   const cheerCountsByParticipant = new Map()
   const cheeredTeamIdsByParticipant = new Map()
   const longestCheerByParticipant = new Map()
+  let visibleCheerTotalCount = 0
   for (const message of cheers) {
     if (!message.participantId) continue
 
     const current = cheerCountsByParticipant.get(message.participantId) || { visible: 0, hidden: 0, total: 0 }
     if (message.hidden) current.hidden += 1
     else {
+      visibleCheerTotalCount += 1
       current.visible += 1
       const teamIds = cheeredTeamIdsByParticipant.get(message.participantId) || new Set()
       teamIds.add(message.teamId)
@@ -902,6 +904,8 @@ function getState(options = {}) {
     teams: rankedTeams,
     participants: participantList,
     cheers: cheers.slice(0, 120),
+    cheerTotalCount: cheers.length,
+    visibleCheerTotalCount,
     voteEvents: voteEvents.slice(0, 100),
     awardHistory: awardHistory.slice(0, 200),
     closed,
@@ -1357,7 +1361,8 @@ function scheduleQuizTimer() {
   quizSettlementTimer = setTimeout(() => {
     quizSettlementTimer = null
     if (!advanceQuizPhase(Date.now())) return
-    broadcast({ audience: true })
+    const quizPhaseChanged = quizBroadcastMarker !== `${quiz.mode}:${quiz.winners.length}:${quiz.settlementDeadlineAt}:${quiz.confirmModeStartedAt}`
+    broadcast({ audience: quizPhaseChanged })
   }, delay)
 }
 
@@ -2226,6 +2231,68 @@ function getStateForRequest(request, options = {}) {
   })
 }
 
+function getParticipantIdentitySet(participantId) {
+  const ids = new Set()
+  const normalizedId = sanitizeIdentifier(participantId, 96)
+  if (normalizedId) ids.add(normalizedId)
+  if (!normalizedId) return ids
+
+  for (const person of participants.values()) {
+    const deviceIds = getParticipantDeviceIds(person)
+    if (person.id === normalizedId || deviceIds.includes(normalizedId)) {
+      ids.add(person.id)
+      for (const deviceId of deviceIds) ids.add(deviceId)
+    }
+  }
+
+  return ids
+}
+
+function getCheerPageForRequest(request, url) {
+  const role = getEventRole(url)
+  const participantId = getRequestParticipantCookie(request)
+  const ownParticipantIds = getParticipantIdentitySet(participantId)
+  const teamId = String(url.searchParams.get('teamId') || '')
+  const beforeId = Number(url.searchParams.get('beforeId') || Number.MAX_SAFE_INTEGER)
+  const limit = clamp(Math.floor(Number(url.searchParams.get('limit')) || 50), 1, 200)
+  const includeHidden = role !== 'vote' && url.searchParams.get('includeHidden') === '1'
+  const visibleMessages = cheers.filter((message) => {
+    if (teamId && message.teamId !== teamId) return false
+    if (!message.hidden || includeHidden) return true
+    return ownParticipantIds.has(message.participantId)
+  })
+  const messages = visibleMessages.filter((message) => {
+    if (!Number.isFinite(beforeId)) return true
+    return message.id < beforeId
+  })
+  const page = messages.slice(0, limit)
+  const nextBeforeId = page.length === limit ? page[page.length - 1].id : null
+
+  return {
+    messages: [...page].reverse(),
+    total: visibleMessages.length,
+    nextBeforeId,
+    hasMore: Boolean(nextBeforeId),
+  }
+}
+
+function getArchiveExport() {
+  return {
+    generatedAt: Date.now(),
+    sessionId,
+    teams,
+    participants: [...participants.values()],
+    cheers,
+    quizAnswers: quiz.answers,
+    quizWinners: quiz.winners,
+    awardHistory,
+    voteEvents,
+    settings: getRuntimeSettings(),
+    configRevision,
+    configUpdatedAt,
+  }
+}
+
 function getEventRole(url) {
   const role = url.searchParams.get('role')
   return role === 'vote' || role === 'wall' || role === 'admin' ? role : 'admin'
@@ -2282,6 +2349,27 @@ async function handleApi(request, response, url) {
     return
   }
 
+  if (request.method === 'GET' && url.pathname === '/api/cheers') {
+    const role = url.searchParams.get('role')
+    if (role !== 'vote' && !isAdminAuthenticated(request)) {
+      sendJson(response, 401, { error: 'admin authentication required' })
+      return
+    }
+
+    sendJson(response, 200, getCheerPageForRequest(request, url))
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/export') {
+    if (!isAdminAuthenticated(request)) {
+      sendJson(response, 401, { error: 'admin authentication required' })
+      return
+    }
+
+    sendJson(response, 200, getArchiveExport())
+    return
+  }
+
   if (request.method === 'GET' && url.pathname === '/events') {
     if (isProtectedRealtimeRequest(url) && !isAdminAuthenticated(request)) {
       sendJson(response, 401, { error: 'admin authentication required' })
@@ -2296,8 +2384,9 @@ async function handleApi(request, response, url) {
     })
     const role = getEventRole(url)
     const participantId = getRequestParticipantCookie(request)
-    response.write(`event: state\ndata: ${JSON.stringify(getState({ role, participantId }))}\n\n`)
-    clients.set(response, { role, participantId })
+    const slimMedia = url.searchParams.get('media') === 'slim'
+    response.write(`event: state\ndata: ${JSON.stringify(getState({ slimMedia, role, participantId }))}\n\n`)
+    clients.set(response, { role, participantId, slimMedia })
     request.on('close', () => clients.delete(response))
     return
   }
@@ -2572,6 +2661,7 @@ async function handleApi(request, response, url) {
 
     const deviceId = getRequestDeviceId(request, body)
     const person = upsertParticipant(deviceId, body.name, body.group, body.department)
+    const quizBroadcastMarker = `${quiz.mode}:${quiz.winners.length}:${quiz.settlementDeadlineAt}:${quiz.confirmModeStartedAt}`
     const answer = submitQuizAnswer(person, body.text, body)
 
     if (!answer) {

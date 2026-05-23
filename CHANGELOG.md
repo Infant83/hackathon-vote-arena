@@ -2,6 +2,32 @@
 
 이 문서는 `Vibe Vote Arena`의 주요 개발 진행 상황을 시간순으로 정리합니다.
 
+## 2026-05-23
+
+### Cloudflare 실시간 안정화와 데이터 백업
+
+- Cloudflare Observability에서 `2026-05-21 14:12-14:36 KST` 구간 오류를 재확인하고, 주요 원인을 `/vote` 사용자의 동시 상태 조회와 SSE 재연결이 단일 Durable Object에 몰린 현상으로 정리했습니다.
+- `/vote` 화면은 SSE 연결이 정상일 때 15초마다 전체 상태를 다시 조회하지 않도록 변경했습니다.
+- SSE 연결이 끊긴 사용자만 fallback polling으로 복구하도록 바꿔, 정상 사용자의 반복 `/api/state?role=vote` 요청을 줄였습니다.
+- `/events?role=vote` 연결은 기본적으로 `media=slim` 상태를 사용해 큰 로고/상품 이미지를 반복 전송하지 않도록 했습니다.
+- 퀴즈 답변 제출 시 제출자 본인은 POST 응답으로 즉시 결과를 받고, 모든 관객에게 매 답변마다 전체 상태를 broadcast하지 않도록 정리했습니다.
+- 퀴즈 phase가 실제로 바뀌는 경우에는 관객 화면으로 상태를 broadcast해 퀴즈 출제, 확인, 마감 흐름의 즉시성을 유지했습니다.
+- 공개 응원 메시지 과거 조회용 `/api/cheers` API를 추가했습니다. `/vote`에서는 팀별 과거 메시지를 페이지 단위로 더 볼 수 있고, live 상태 payload에는 최근 메시지만 유지합니다.
+- 상태 응답에 `cheerTotalCount`와 `visibleCheerTotalCount`를 추가해, 화면에는 최근 메시지만 보여도 전체 응원 메시지 규모를 잃지 않게 했습니다.
+- 관리자 인증이 된 환경에서 원본 보관용 `/api/export` JSON을 받을 수 있게 했습니다. 이 export에는 팀 설정, 참가자, 응원 메시지, 퀴즈 답변, 퀴즈 정답자, 당첨 이력, 별 이동 이벤트, 운영 설정이 포함됩니다.
+- 로컬 Node 서버와 Cloudflare Worker가 같은 `/api/cheers`, `/api/export`, slim SSE 정책을 쓰도록 맞췄습니다.
+
+### 공개 저장소용 데이터 익명화
+
+- 레포의 `teams.json`에 들어 있던 실명, 소속, 프로젝트명, 외부 사진 URL을 익명 개발 샘플 값으로 치환했습니다.
+- JSON 구조, 팀 내부 ID, 팀 편집 키, 색상, 정렬, 이미지 프레임 설정은 그대로 유지해 운영 콘텐츠 관리 기능과 테스트 흐름이 깨지지 않게 했습니다.
+- 운영 중 Cloudflare Durable Object storage에 저장된 실제 팀 정보와 레포의 익명 샘플 JSON이 다를 수 있다는 점을 README에 명시했습니다.
+
+### 문서 정리
+
+- README에 현재 실시간 통신 정책, Durable Object storage 저장 위치, `/api/cheers` 과거 응원 조회, `/api/export` 원본 데이터 백업, 운영 후 데이터 보존 절차를 추가했습니다.
+- README의 Cloudflare 비용/운영 규모 설명을 예전 15초 polling 중심 설명에서 SSE 우선 구조와 slim payload 기준으로 갱신했습니다.
+
 ## 2026-05-21
 
 ### 퀴즈 정답 확인 딜레이 운영

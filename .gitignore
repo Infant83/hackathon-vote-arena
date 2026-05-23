@@ -60,10 +60,12 @@ wrangler.*.local.toml
 coverage/
 test-results/
 playwright-report/
+.playwright-cli/
 .playwright-mcp/
 screenshots/
 videos/
 traces/
+output/
 
 # Tool caches
 .cache/
@@ -88,3 +90,5 @@ Desktop.ini
 # Local agent/session scratch
 .codex/
 .claude/
+
+ppt_sample/

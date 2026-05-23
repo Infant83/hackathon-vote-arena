@@ -46,6 +46,7 @@ type EventClientRole = 'admin' | 'wall' | 'vote'
 type EventClient = {
   role: EventClientRole
   participantId: string
+  slimMedia: boolean
 }
 
 type GetStateOptions = {
@@ -673,6 +674,14 @@ export class ArenaRoom {
       return json(this.getStateForRequest(request, { slimMedia: url.searchParams.get('media') === 'slim', role }))
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/cheers') {
+      return json(this.getCheerPageForRequest(request, url))
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/export') {
+      return json(this.getArchiveExport())
+    }
+
     if (request.method === 'GET' && url.pathname === '/events') {
       return this.openEventStream(request, url)
     }
@@ -1032,7 +1041,7 @@ export class ArenaRoom {
       }
 
       await this.scheduleQuizAlarm()
-      await this.commit({ audience: true })
+      await this.commit()
       return json(
         {
           ...this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }),
@@ -1183,12 +1192,14 @@ export class ArenaRoom {
     const cheerCountsByParticipant = new Map<string, { visible: number; hidden: number; total: number }>()
     const cheeredTeamIdsByParticipant = new Map<string, Set<string>>()
     const longestCheerByParticipant = new Map<string, number>()
+    let visibleCheerTotalCount = 0
     for (const message of this.cheers) {
       if (!message.participantId) continue
 
       const current = cheerCountsByParticipant.get(message.participantId) || { visible: 0, hidden: 0, total: 0 }
       if (message.hidden) current.hidden += 1
       else {
+        visibleCheerTotalCount += 1
         current.visible += 1
         const teamIds = cheeredTeamIdsByParticipant.get(message.participantId) || new Set<string>()
         teamIds.add(message.teamId)
@@ -1259,6 +1270,8 @@ export class ArenaRoom {
       teams: rankedTeams,
       participants: participantList,
       cheers: this.cheers.slice(0, 120),
+      cheerTotalCount: this.cheers.length,
+      visibleCheerTotalCount,
       voteEvents: this.voteEvents.slice(0, 100),
       awardHistory: this.awardHistory.slice(0, 200),
       closed: this.closed,
@@ -1287,6 +1300,69 @@ export class ArenaRoom {
       role,
       participantId: options.participantId ?? this.getRequestParticipantId(request),
     })
+  }
+
+  private getCheerPageForRequest(request: Request, url: URL) {
+    const role = getEventRole(url)
+    const participantId = this.getRequestParticipantId(request)
+    const ownParticipantIds = this.getParticipantIdentitySet(participantId)
+    const teamId = String(url.searchParams.get('teamId') || '')
+    const beforeId = Number(url.searchParams.get('beforeId') || Number.MAX_SAFE_INTEGER)
+    const limit = clamp(Math.floor(Number(url.searchParams.get('limit')) || 50), 1, 200)
+    const includeHidden = role !== 'vote' && url.searchParams.get('includeHidden') === '1'
+
+    const visibleMessages = this.cheers.filter((message) => {
+      if (teamId && message.teamId !== teamId) return false
+      if (!message.hidden || includeHidden) return true
+      return ownParticipantIds.has(message.participantId)
+    })
+    const messages = visibleMessages.filter((message) => {
+      if (!Number.isFinite(beforeId)) return true
+      return message.id < beforeId
+    })
+    const page = messages.slice(0, limit)
+    const nextBeforeId = page.length === limit ? page[page.length - 1].id : null
+
+    return {
+      messages: [...page].reverse(),
+      total: visibleMessages.length,
+      nextBeforeId,
+      hasMore: Boolean(nextBeforeId),
+    }
+  }
+
+  private getArchiveExport() {
+    return {
+      generatedAt: Date.now(),
+      sessionId: this.sessionId,
+      teams: this.teams,
+      participants: [...this.participants.values()],
+      cheers: this.cheers,
+      quizAnswers: this.quiz.answers,
+      quizWinners: this.quiz.winners,
+      awardHistory: this.awardHistory,
+      voteEvents: this.voteEvents,
+      settings: this.getRuntimeSettings(),
+      configRevision: this.configRevision,
+      configUpdatedAt: this.configUpdatedAt,
+    }
+  }
+
+  private getParticipantIdentitySet(participantId: string) {
+    const ids = new Set<string>()
+    const normalizedId = sanitizeIdentifier(participantId, 96)
+    if (normalizedId) ids.add(normalizedId)
+    if (!normalizedId) return ids
+
+    for (const person of this.participants.values()) {
+      const deviceIds = getParticipantDeviceIds(person)
+      if (person.id === normalizedId || deviceIds.includes(normalizedId)) {
+        ids.add(person.id)
+        for (const deviceId of deviceIds) ids.add(deviceId)
+      }
+    }
+
+    return ids
   }
 
   private getRequestParticipantId(request: Request) {
@@ -1402,6 +1478,7 @@ export class ArenaRoom {
     const client: EventClient = {
       role,
       participantId: this.getRequestParticipantId(request),
+      slimMedia: url.searchParams.get('media') === 'slim',
     }
     let controllerRef: ReadableStreamDefaultController<Uint8Array>
     const stream = new ReadableStream<Uint8Array>({
@@ -1410,7 +1487,7 @@ export class ArenaRoom {
         this.clients.set(controller, client)
         this.sendState(
           controller,
-          `event: state\ndata: ${JSON.stringify(this.getState({ role: client.role, participantId: client.participantId }))}\n\n`,
+          `event: state\ndata: ${JSON.stringify(this.getState({ slimMedia: client.slimMedia, role: client.role, participantId: client.participantId }))}\n\n`,
         )
       },
       cancel: () => {
@@ -1428,10 +1505,10 @@ export class ArenaRoom {
   }
 
   private async commit(options: { audience?: boolean; fullMedia?: boolean } = {}) {
-    this.advanceQuizPhase()
+    const quizPhaseChanged = this.advanceQuizPhase()
     await this.scheduleQuizAlarm()
     await this.persist()
-    this.broadcast(options)
+    this.broadcast({ ...options, audience: Boolean(options.audience || quizPhaseChanged) })
   }
 
   private touchConfig() {
@@ -2820,6 +2897,15 @@ function isAdminProtectedRequest(url: URL, method: string) {
   if (method === 'GET' && url.pathname === '/api/state') {
     const role = url.searchParams.get('role')
     return role === 'admin' || role === 'wall'
+  }
+
+  if (method === 'GET' && url.pathname === '/api/cheers') {
+    const role = url.searchParams.get('role')
+    return role !== 'vote'
+  }
+
+  if (method === 'GET' && url.pathname === '/api/export') {
+    return true
   }
 
   if (method === 'GET' && url.pathname === '/events') {
