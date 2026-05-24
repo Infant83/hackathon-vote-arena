@@ -5,17 +5,17 @@
 현재 라이브 배포 주소는 다음과 같습니다.
 
 ```text
-https://hack.lgdisplay.workers.dev/vote
-https://hack.lgdisplay.workers.dev/admin
+https://hack.infant83.workers.dev/vote
+https://hack.infant83.workers.dev/admin
 ```
 
-운영 Worker 이름은 `hack`이고, Cloudflare workers.dev 서브도메인은 `lgdisplay`입니다.
+운영 Worker 이름은 `hack`이고, Cloudflare workers.dev 서브도메인은 `infant83`입니다.
 
 ## 1. 현재 개발 상태
 
 현재 MVP는 다음 흐름까지 구현되어 있습니다.
 
-1. 관객은 `/vote`에서 이름과 Let's ID를 등록합니다.
+1. 관객은 `/vote`에서 이름과 ID를 등록합니다.
 2. 관객은 관리자가 정한 별 개수만큼 팀별로 별을 나눠 줍니다.
 3. 한 팀에 줄 수 있는 별은 기본 최대 5개이며, 관리자가 운영 설정에서 조정할 수 있습니다.
 4. 투표 마감 전에는 별을 회수하거나 다시 배분할 수 있습니다.
@@ -45,7 +45,7 @@ https://hack.lgdisplay.workers.dev/admin
 
 관객용 화면입니다.
 
-- 이름과 Let's ID 등록
+- 이름과 ID 등록
 - 총 별 개수 안내
 - 팀별 별 배분
 - 팀별 응원 메시지 작성
@@ -249,7 +249,7 @@ npm run cf:deploy
 배포가 성공하면 다음과 같은 주소가 표시됩니다.
 
 ```text
-https://hack.lgdisplay.workers.dev
+https://hack.infant83.workers.dev
 ```
 
 ### 5.5. Git Build 자동 배포
@@ -530,33 +530,33 @@ Durable Object storage는 운영 중 상태 저장소이지, 영구 아카이브
 이 플랫폼은 개인정보 수집을 늘리지 않는 방향으로 설계했습니다. 참가자는 다음 두 가지만 입력합니다.
 
 1. 이름
-2. Let's ID
+2. ID
 
 브라우저는 익명 디바이스 ID를 만들고 localStorage와 SameSite cookie에 저장합니다. 서버는 아래 조합을 같은 사람 판단 기준으로 사용합니다.
 
 ```text
-이름 + Let's ID
+이름 + ID
 ```
 
 비교할 때만 다음 정규화를 적용합니다.
 
 - 이름: 모든 띄어쓰기 제거
-- Let's ID: `@` 뒤 도메인 제거
-- Let's ID: 띄어쓰기 제거
-- Let's ID: 영문 대문자 소문자 변환
-- Let's ID: 영문/숫자/마침표/하이픈/밑줄만 사용
+- ID: `@` 뒤 도메인 제거
+- ID: 띄어쓰기 제거
+- ID: 영문 대문자 소문자 변환
+- ID: 영문/숫자/마침표/하이픈/밑줄만 사용
 
 예시:
 
 ```text
 "김 현중" == "김현중"
-"hyun-jung.kim@lgdisplay.com" == "hyun-jung.kim"
-"HYUN-JUNG.KIM" == "hyun-jung.kim"
+"gd.hong@lgdisplay.com" == "gd.hong"
+"GD.HONG" == "gd.hong"
 ```
 
 화면 표시는 사용자가 입력한 값을 최대한 유지합니다.
 
-한 번 등록한 사용자는 같은 브라우저 device ID로 재접속하면 기존 참여 내역을 이어갑니다. 다른 기기에서 접속할 때는 이름과 Let's ID를 입력한 뒤 `등록하고 투표 시작` 버튼을 누르거나 Enter로 제출해야 동일성 판단을 수행합니다. 제출된 이름과 Let's ID가 기존 참여자와 같으면 같은 참여자로 묶고, 새 device ID를 같은 참여자에 추가합니다. 이 경우 기존 별 배분, 응원 메시지, 수상 이력 상태를 이어받습니다.
+한 번 등록한 사용자는 같은 브라우저 device ID로 재접속하면 기존 참여 내역을 이어갑니다. 다른 기기에서 접속할 때는 이름과 ID를 입력한 뒤 `등록하고 투표 시작` 버튼을 누르거나 Enter로 제출해야 동일성 판단을 수행합니다. 제출된 이름과 ID가 기존 참여자와 같으면 같은 참여자로 묶고, 새 device ID를 같은 참여자에 추가합니다. 이 경우 기존 별 배분, 응원 메시지, 수상 이력 상태를 이어받습니다.
 
 강한 중복 방지는 하지 않습니다. 사번, 이메일, 사진, 카메라 QR 스캔, 강한 디바이스 fingerprint는 기본 흐름에 넣지 않습니다.
 
@@ -585,7 +585,7 @@ npm run cf:deploy:dry-run
 3. `Reset` 실행
 4. 팀 정보와 안내 문구 확인
 5. 모바일 `/vote` 접속
-6. 이름/Let's ID 등록
+6. 이름/ID 등록
 7. 여러 팀에 별 배분
 8. 별 회수와 재배분 확인
 9. 별을 준 팀에 응원 메시지 작성
@@ -610,5 +610,6 @@ npm run cf:deploy:dry-run
 
 - `CHANGELOG.md`: 지금까지 구현된 변경 내역
 - `TODO.md`: 남은 작업과 우선순위
+- `docs/OPERATIONS_ISSUE_REPORT_2026-05-23.md`: 행사 로그 기반 이슈 진단, 개선 내역, 예방 체크리스트
 - `AGENTS.md`: 이 작업공간에서 Codex가 따라야 하는 개발 규칙
 - `DESIGN.md`: UI/시각 디자인 기준

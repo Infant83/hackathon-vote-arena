@@ -75,7 +75,7 @@ const defaultCopy = {
   adminHeroTitle: '관리자 모드에서 실시간 별 현황을 공개합니다.',
   adminHeroSubtitle: '모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.',
   checkInEyeline: 'Check In',
-  checkInTitle: "먼저 이름과 Let's ID를 등록하세요.",
+  checkInTitle: '먼저 이름과 ID를 등록하세요.',
   teamVoteEyeline: 'Team Vote',
   teamVoteTitle: '팀별 별 보내기',
   raffleReady: '추첨 자동응모 완료',
@@ -86,7 +86,7 @@ const defaultCopy = {
   raffleRemovedDisqualified:
     '관리자에 의해 응원 메시지가 제거되어 경품 추첨 응모 조건이 충족되지 않았습니다. 별을 준 팀에 새 응원 메시지를 작성해주세요.',
   voteClosedAlert: '투표가 마감되어 별을 추가하거나 메시지를 보낼 수 없습니다.',
-  registrationReady: "같은 이름과 Let's ID로 다시 접속하면 기존 참여 내역을 이어갑니다. 이메일을 입력해도 @ 뒤 주소는 사용하지 않습니다.",
+  registrationReady: '같은 이름과 ID로 다시 접속하면 기존 참여 내역을 이어갑니다. 이메일을 입력해도 @ 뒤 주소는 사용하지 않습니다.',
   registrationConnecting: '행사 서버에 연결하는 중입니다.',
   cheerButtonLabel: '응원 메시지 보내기',
   wallEyeline: 'Audience Wall',

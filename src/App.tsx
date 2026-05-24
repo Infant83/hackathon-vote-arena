@@ -1160,7 +1160,7 @@ const fallbackCopy: EventCopy = {
   adminHeroTitle: '관리자 모드에서 실시간 별 현황을 공개합니다.',
   adminHeroSubtitle: '모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.',
   checkInEyeline: 'Check In',
-  checkInTitle: "먼저 이름과 Let's ID를 등록하세요.",
+  checkInTitle: '먼저 이름과 ID를 등록하세요.',
   teamVoteEyeline: 'Team Vote',
   teamVoteTitle: '팀별 별 보내기',
   raffleReady: '추첨 자동응모 완료',
@@ -1171,7 +1171,7 @@ const fallbackCopy: EventCopy = {
   raffleRemovedDisqualified:
     '관리자에 의해 응원 메시지가 제거되어 경품 추첨 응모 조건이 충족되지 않았습니다. 별을 준 팀에 새 응원 메시지를 작성해주세요.',
   voteClosedAlert: '투표가 마감되어 별을 추가하거나 메시지를 보낼 수 없습니다.',
-  registrationReady: "같은 이름과 Let's ID로 다시 접속하면 기존 참여 내역을 이어갑니다. 이메일을 입력해도 @ 뒤 주소는 사용하지 않습니다.",
+  registrationReady: '같은 이름과 ID로 다시 접속하면 기존 참여 내역을 이어갑니다. 이메일을 입력해도 @ 뒤 주소는 사용하지 않습니다.',
   registrationConnecting: '행사 서버에 연결하는 중입니다.',
   cheerButtonLabel: '응원 메시지 보내기',
   wallEyeline: 'Audience Wall',
@@ -2671,7 +2671,7 @@ function VoteView({
             <strong>{name}</strong>
           </div>
           <div>
-            <span>Let's ID</span>
+            <span>ID</span>
             <strong>{normalizeLetsIdDisplay(group)}</strong>
           </div>
           {departmentDisplay ? (
@@ -2698,16 +2698,16 @@ function VoteView({
                 value={name}
                 maxLength={18}
                 onChange={(event) => onNameChange(event.target.value)}
-                placeholder="예: 김민준"
+                placeholder="예: 홍길동"
               />
               </label>
             <label>
-              <span>Let's ID</span>
+              <span>ID</span>
               <input
                 value={group}
                 maxLength={48}
                 onChange={(event) => onGroupChange(event.target.value)}
-                placeholder="예: hyun-jung.kim"
+                placeholder="예: gd.hong"
               />
             </label>
             <label>
@@ -2716,7 +2716,7 @@ function VoteView({
                 value={department}
                 maxLength={40}
                 onChange={(event) => onDepartmentChange(event.target.value)}
-                placeholder="예: DX팀"
+                placeholder="예: AI연구1팀"
               />
             </label>
             <button type="submit" disabled={!hasRegistrationInfo || !sessionReady}>
@@ -3736,7 +3736,7 @@ function AdminView({
           </button>
         </form>
         <p className="control-note">
-          현재 중복 응모 방지는 이름과 Let's ID 기준으로 판단합니다. 이메일을 입력하면 @ 뒤 주소는 제외하고 Let's ID만 사용합니다.
+          현재 중복 응모 방지는 이름과 ID 기준으로 판단합니다. 이메일을 입력하면 @ 뒤 주소는 제외하고 ID만 사용합니다.
         </p>
       </section>
 
@@ -9158,7 +9158,7 @@ function exportResultsWorkbook(state: EventState) {
     {
       name: '참여자',
       rows: [
-        ['이름', "Let's ID", '사용 별', '응모 상태', '공개 메시지', '숨김 메시지', '팀별 배분', '최근 업데이트'],
+        ['이름', 'ID', '사용 별', '응모 상태', '공개 메시지', '숨김 메시지', '팀별 배분', '최근 업데이트'],
         ...participants.map((person) => [
           person.name,
           person.group,
@@ -9187,7 +9187,7 @@ function exportResultsWorkbook(state: EventState) {
     {
       name: '추첨결과',
       rows: [
-        ['추첨시각', '룰', '후보 수', '순번', '이름', "Let's ID", '응원 참여'],
+        ['추첨시각', '룰', '후보 수', '순번', '이름', 'ID', '응원 참여'],
         ...(state.lastRaffle?.winners ?? []).map((winner, index) => [
           state.lastRaffle ? new Date(state.lastRaffle.createdAt).toLocaleString('ko-KR') : '',
           state.lastRaffle?.rule ?? '',

@@ -2,6 +2,19 @@
 
 이 문서는 `Vibe Vote Arena`의 주요 개발 진행 상황을 시간순으로 정리합니다.
 
+## 2026-05-24
+
+### Cloudflare workers.dev 서빙 주소 이전
+
+- Cloudflare 계정 workers.dev 서브도메인을 `lgdisplay`에서 `infant83`로 전환했습니다.
+- Worker `hack`의 `workers_dev` 라우팅을 활성화해 운영 주소를 `https://hack.infant83.workers.dev`로 서빙하도록 변경했습니다.
+- Durable Object 바인딩과 Worker 이름은 유지해 기존 운영 데이터 저장소를 그대로 사용하도록 했습니다.
+
+### 관객 등록 화면 문구 정리
+
+- 관객 화면 상단 행사명에서 `LGD` 문구를 제거해 `2026 상반기 AX Hackathon`으로 표시하도록 운영 copy와 기본 `teams.json`을 맞췄습니다.
+- `/vote` 등록 화면의 `Let's ID` 표기를 `ID`로 줄이고, 기본 예시를 `홍길동`, `gd.hong`, `AI연구1팀`으로 변경했습니다.
+
 ## 2026-05-23
 
 ### Cloudflare 실시간 안정화와 데이터 백업
