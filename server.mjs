@@ -21,6 +21,7 @@ const defaultQuizAnswerLimit = 3
 const maxQuizAnswerLimit = 10
 const defaultQuizInitialConfirmDelaySeconds = 20
 const maxQuizInitialConfirmDelaySeconds = 60
+const defaultQnaWallFontScale = 1.12
 const raffleRules = new Set([
   'all',
   'leader',
@@ -38,6 +39,8 @@ const raffleRules = new Set([
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
 const maxStoredCheerMessages = 5000
+const questionMaxLength = 700
+const maxStoredQuestions = 500
 const defaultTeamPhotoRadius = 18
 const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
@@ -53,7 +56,11 @@ const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const adminCookieName = 'vibe-vote-admin'
 const adminCookieMaxAge = 60 * 60 * 8
-const teamsConfigPath = path.join(__dirname, 'teams.json')
+const wallSessionValues = ['overview', 'raffle', 'showup', 'qna', 'quiz']
+const defaultWallEnabledPanels = wallSessionValues
+const defaultConfigFileName = 'teams.json'
+const eventConfigEnvNames = ['EVENT_CONFIG_FILE', 'VIBE_EVENT_CONFIG', 'TEAMS_CONFIG_FILE']
+const teamsConfigPath = resolveEventConfigPath()
 const teamLogoDir = path.join(__dirname, 'public', 'team-logos')
 const defaultCopy = {
   appTitle: 'Vibe Vote Arena',
@@ -92,11 +99,13 @@ const defaultCopy = {
   wallEyeline: 'Audience Wall',
   wallMetricStars: '누적 별',
   wallMetricCheers: '응원 메시지',
+  wallMetricQuestions: '질문',
   wallOverviewLabel: '실시간 현황',
   wallCheerLabel: '응원메세지',
   wallRaffleLabel: '행운권추첨',
   wallShowupLabel: '말풍선',
   wallQuizLabel: '퀴즈',
+  wallQnaLabel: 'Q&A',
   wallArenaEyeline: 'Live Arena Wall',
   wallArenaTitle: '실시간 별 현황',
   wallCheerEyeline: 'Cheer Board',
@@ -106,6 +115,22 @@ const defaultCopy = {
   wallRaffleTitle: '행운권 추첨',
   wallQuizEyeline: 'Live Quiz',
   wallQuizTitle: '퀴즈',
+  wallQnaEyeline: 'Live Q&A',
+  wallQnaTitle: '무엇이든 질문해 주세요',
+  wallQnaEmpty: '아직 질문이 없습니다. 무엇이 궁금하신가요?',
+  qnaRoomEyeline: 'QnA Room',
+  qnaRoomTitle: 'AX Group QnA',
+  qnaRoomTarget: 'AX Group에게 질문해주세요',
+  qnaRoomSummary: '별명으로 입장한 뒤 질문을 남기면 Q&A board에 실시간으로 올라갑니다.',
+  qnaLoginTitle: 'QnA 방 입장',
+  qnaLoginReady: '별명만 입력하면 익명으로 질문할 수 있습니다. 운영자는 내부 관리 ID로 참여 기록을 확인합니다.',
+  qnaLoginButtonLabel: 'QnA 방 입장',
+  qnaQuestionSentStatus: '질문이 Q&A wall에 올라갔습니다.',
+  qnaPromptEyeline: 'Q&A',
+  qnaPromptTitle: '발표자에게 남길 질문',
+  qnaPromptSummary: '궁금한 점을 적어 보내면 발표장 Q&A wall에 예쁜 질문 카드로 쌓입니다.',
+  qnaInputPlaceholder: '예: 이 기능을 실제 업무에 적용할 때 가장 먼저 필요한 데이터는 무엇인가요?',
+  qnaSendLabel: '질문 올리기',
   quizStandbyHeadline: '퀴즈를 준비 중입니다',
   quizStandbySubhead: '',
   quizStandbyHint: '문제가 출제되면 3초 카운트다운 뒤 문제가 공개됩니다. 최대한 빨리 정답을 입력하세요. :)',
@@ -362,6 +387,23 @@ const raffleWinnerCountKeyByRule = {
   cheer: 'raffleWinnerCountAll',
 }
 
+const defaultRuntimeSettings = {
+  showScoresToAudience: true,
+  starBudget: defaultStarBudget,
+  maxStarsPerTeam: defaultMaxStarsPerTeam,
+  durationMinutes: defaultDurationMinutes,
+  timerMode: 'duration',
+  targetTime: '',
+  minScore: defaultMinScore,
+  raffleCheerWeight: defaultRaffleCheerWeight,
+  quizAnswerLimit: defaultQuizAnswerLimit,
+  quizInitialConfirmDelaySeconds: defaultQuizInitialConfirmDelaySeconds,
+  cheerNameMode: 'masked',
+  themeMode: 'stage',
+  wallEnabledPanels: defaultWallEnabledPanels,
+  qnaWallFontScale: defaultQnaWallFontScale,
+}
+
 const appConfig = loadConfig()
 let teams = appConfig.teams
 let copy = appConfig.copy
@@ -371,6 +413,7 @@ let configUpdatedAt = Date.now()
 let validTeamIds = new Set(teams.map((team) => team.id))
 const participants = new Map()
 const cheers = []
+const questions = []
 const voteEvents = []
 const awardHistory = []
 const clients = new Map()
@@ -404,6 +447,7 @@ let raffleStage = {
   updatedAt: Date.now(),
 }
 let cheerId = 1
+let questionId = 1
 let voteEventId = 1
 let quizAnswerId = 1
 let sessionId = 1
@@ -411,19 +455,31 @@ let testMode = false
 let quiz = { ...emptyQuizState }
 let quizAnswerKeys = []
 let quizSettlementTimer = null
-let settings = {
-  showScoresToAudience: true,
-  starBudget: defaultStarBudget,
-  maxStarsPerTeam: defaultMaxStarsPerTeam,
-  durationMinutes: defaultDurationMinutes,
-  timerMode: 'duration',
-  targetTime: '',
-  minScore: defaultMinScore,
-  raffleCheerWeight: defaultRaffleCheerWeight,
-  quizAnswerLimit: defaultQuizAnswerLimit,
-  quizInitialConfirmDelaySeconds: defaultQuizInitialConfirmDelaySeconds,
-  cheerNameMode: 'masked',
-  themeMode: 'stage',
+let settings = appConfig.settings
+
+function resolveEventConfigPath() {
+  const configuredPath = eventConfigEnvNames
+    .map((name) => String(process.env[name] || '').trim())
+    .find(Boolean)
+
+  if (!configuredPath) return path.join(__dirname, defaultConfigFileName)
+
+  const resolvedPath = path.isAbsolute(configuredPath)
+    ? path.resolve(configuredPath)
+    : path.resolve(__dirname, configuredPath)
+
+  if (path.extname(resolvedPath).toLowerCase() !== '.json') {
+    console.warn(`행사 설정 파일은 .json 파일을 권장합니다: ${resolvedPath}`)
+  }
+
+  return resolvedPath
+}
+
+function getConfigPathLabel() {
+  const relativePath = path.relative(__dirname, teamsConfigPath)
+  return relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath)
+    ? relativePath
+    : teamsConfigPath
 }
 
 function loadConfig() {
@@ -438,15 +494,22 @@ function loadConfig() {
       teams,
       copy: normalizeCopy(Array.isArray(parsed) ? {} : parsed?.copy),
       quizBank: normalizeQuizBank(Array.isArray(parsed) ? undefined : parsed?.quizzes),
+      settings: normalizeRuntimeSettings(Array.isArray(parsed) ? undefined : parsed?.settings),
     }
   } catch (error) {
-    console.warn(`teams.json을 읽지 못해 기본 팀 정보를 사용합니다: ${error.message}`)
+    console.warn(`${getConfigPathLabel()}을 읽지 못해 기본 팀 정보를 사용합니다: ${error.message}`)
     return {
       teams: defaultTeams.map((team, index) => normalizeTeam(team, team, index)),
       copy: defaultCopy,
       quizBank: defaultQuizBank.map((quiz, index) => normalizeQuizConfig(quiz, quiz, index)),
+      settings: normalizeRuntimeSettings(),
     }
   }
+}
+
+function normalizeRuntimeSettings(input) {
+  const source = input && typeof input === 'object' ? input : {}
+  return getRuntimeSettings({ ...defaultRuntimeSettings, ...source })
 }
 
 function normalizeCopy(input) {
@@ -740,6 +803,7 @@ function cleanupInvalidTeamReferences() {
 async function persistTeamConfig() {
   const payload = {
     copy,
+    settings: getRuntimeSettings(),
     quizzes: quizBank.map((quiz) => ({
       id: quiz.id,
       title: quiz.title,
@@ -787,12 +851,14 @@ async function persistTeamConfig() {
       })),
   }
 
+  await mkdir(path.dirname(teamsConfigPath), { recursive: true })
   await writeFile(teamsConfigPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
 }
 
 function getRuntimeSettings(source = settings) {
   return {
     ...source,
+    showScoresToAudience: Boolean(source.showScoresToAudience),
     starBudget: clamp(Math.floor(Number(source.starBudget) || defaultStarBudget), 1, 20),
     maxStarsPerTeam: clamp(
       Math.floor(Number(source.maxStarsPerTeam) || defaultMaxStarsPerTeam),
@@ -816,6 +882,8 @@ function getRuntimeSettings(source = settings) {
     ),
     cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
     themeMode: normalizeThemeMode(source.themeMode, 'stage'),
+    wallEnabledPanels: normalizeWallEnabledPanels(source.wallEnabledPanels),
+    qnaWallFontScale: clamp(Number(source.qnaWallFontScale ?? defaultQnaWallFontScale), 0.85, 1.55),
   }
 }
 
@@ -849,6 +917,7 @@ function getState(options = {}) {
     current.total += 1
     cheerCountsByParticipant.set(message.participantId, current)
   }
+  const visibleQuestionTotalCount = questions.filter((question) => !question.hidden).length
 
   const participantList = [...participants.values()].map((person) => {
     const counts = cheerCountsByParticipant.get(person.id) || { visible: 0, hidden: 0, total: 0 }
@@ -906,6 +975,9 @@ function getState(options = {}) {
     cheers: cheers.slice(0, 120),
     cheerTotalCount: cheers.length,
     visibleCheerTotalCount,
+    questions: questions.slice(0, 120),
+    questionTotalCount: questions.length,
+    visibleQuestionTotalCount,
     voteEvents: voteEvents.slice(0, 100),
     awardHistory: awardHistory.slice(0, 200),
     closed,
@@ -945,11 +1017,16 @@ function shapeStateForRole(state, options = {}) {
     if (!message.hidden) return true
     return ownParticipantIds.has(message.participantId)
   })
+  const visibleOrOwnQuestions = (state.questions || []).filter((question) => {
+    if (!question.hidden) return true
+    return ownParticipantIds.has(question.participantId)
+  })
 
   return {
     ...state,
     participants: ownParticipants,
     cheers: visibleOrOwnCheers,
+    questions: visibleOrOwnQuestions,
     voteEvents: [],
     awardHistory: ownAwardHistory,
     quiz: {
@@ -1057,9 +1134,7 @@ function upsertParticipant(deviceId, name, group, department = '') {
   attachParticipantDevice(person, browserDeviceId)
   person.name = nextName
   person.group = nextGroup
-  if (nextDepartment || !person.department) {
-    person.department = nextDepartment
-  }
+  person.department = nextDepartment
   person.updatedAt = Date.now()
   participants.set(id, person)
   return person
@@ -1071,6 +1146,10 @@ function cleanupParticipantReferences(participantId) {
 
   for (let index = cheers.length - 1; index >= 0; index -= 1) {
     if (cheers[index].participantId === id) cheers.splice(index, 1)
+  }
+
+  for (let index = questions.length - 1; index >= 0; index -= 1) {
+    if (questions[index].participantId === id) questions.splice(index, 1)
   }
 
   for (let index = voteEvents.length - 1; index >= 0; index -= 1) {
@@ -1869,6 +1948,16 @@ function normalizeThemeMode(value, fallback = 'light') {
   return value === 'stage' ? 'stage' : value === 'light' ? 'light' : fallback
 }
 
+function normalizeWallEnabledPanels(value) {
+  const source = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : defaultWallEnabledPanels
+  const next = []
+  for (const item of source) {
+    const panel = String(item || '').trim()
+    if (wallSessionValues.includes(panel) && !next.includes(panel)) next.push(panel)
+  }
+  return next.length ? next : defaultWallEnabledPanels
+}
+
 function normalizeTimerMode(value, fallback = 'duration') {
   return value === 'targetTime' ? 'targetTime' : value === 'duration' ? 'duration' : fallback
 }
@@ -1961,6 +2050,8 @@ function isAdminProtectedPath(pathname) {
   return new Set([
     '/api/cheer/moderate',
     '/api/cheer/bulk',
+    '/api/question/read',
+    '/api/question/reset',
     '/api/quiz/open',
     '/api/quiz/prepare',
     '/api/quiz/confirm-mode',
@@ -2026,9 +2117,11 @@ function resetRuntimeState({ seed = false, keepParticipants = false } = {}) {
     participants.set(person.id, person)
   }
   cheers.splice(0)
+  questions.splice(0)
   voteEvents.splice(0)
   awardHistory.splice(0)
   cheerId = 1
+  questionId = 1
   voteEventId = 1
   clearQuiz()
   if (!keepParticipants) sessionId += 1
@@ -2078,6 +2171,11 @@ function resetQuizHistory() {
   quizAnswerId = 1
 }
 
+function resetQuestions() {
+  questions.splice(0)
+  questionId = 1
+}
+
 function seedTestData() {
   const now = Date.now()
   const samples = [
@@ -2087,6 +2185,7 @@ function seedTestData() {
       group: 'test',
       allocations: { 'team-aurora': Math.min(settings.starBudget, 5) },
       messages: ['검색 데모가 바로 써볼 수 있어 보여요', '발표 때 반응 좋을 것 같아요'],
+      question: '검색 결과가 틀렸을 때 사용자가 바로 정정할 수 있는 흐름도 있나요?',
     },
     {
       id: 'test-seoyeon',
@@ -2094,6 +2193,7 @@ function seedTestData() {
       group: 'test',
       allocations: { 'team-prism': Math.min(settings.starBudget, 4) },
       messages: ['현장 적용성이 좋아요'],
+      question: '제조 라인 데이터가 부족한 초기 공정에도 적용할 수 있을까요?',
     },
     {
       id: 'test-yuna',
@@ -2101,6 +2201,7 @@ function seedTestData() {
       group: 'test',
       allocations: { 'team-vector': Math.min(settings.starBudget, 5) },
       messages: ['리뷰 요약이 선명해요'],
+      question: '코드 리뷰 위험도를 설명할 때 어떤 근거를 함께 보여주나요?',
     },
     {
       id: 'test-hana',
@@ -2108,6 +2209,7 @@ function seedTestData() {
       group: 'test',
       allocations: { 'team-lattice': Math.min(settings.starBudget, 3) },
       messages: ['장애 원인 추적 기대됩니다'],
+      question: '장애 원인을 여러 시스템 로그에서 연결할 때 권한 관리는 어떻게 하나요?',
     },
     {
       id: 'test-doyeon',
@@ -2115,6 +2217,7 @@ function seedTestData() {
       group: 'test',
       allocations: { 'team-pulse': Math.min(settings.starBudget, 2) },
       messages: ['VOC 엔진 좋습니다'],
+      question: 'VOC 우선순위가 바뀌면 담당자에게 어떤 방식으로 알려주나요?',
     },
   ]
 
@@ -2139,6 +2242,17 @@ function seedTestData() {
         hidden: false,
       })
     }
+    questions.unshift({
+      id: questionId++,
+      participantId: person.id,
+      author: person.name,
+      group: person.group,
+      department: person.department || '',
+      text: sample.question,
+      createdAt: now - (samples.length * 2 + 3) * 15_000,
+      hidden: false,
+      read: false,
+    })
   }
 }
 
@@ -2283,6 +2397,7 @@ function getArchiveExport() {
     teams,
     participants: [...participants.values()],
     cheers,
+    questions,
     quizAnswers: quiz.answers,
     quizWinners: quiz.winners,
     awardHistory,
@@ -2293,12 +2408,153 @@ function getArchiveExport() {
   }
 }
 
+function getOpsAudit() {
+  const payloadBytes = getStatePayloadBytes()
+  const clientCounts = getClientCounts()
+  const checks = []
+  const addCheck = (id, status, summary, detail = '') => checks.push({ id, status, summary, detail })
+  const runtimeSettings = getRuntimeSettings()
+  const fullAdminBytes = payloadBytes.admin.full
+  const fullWallBytes = payloadBytes.wall.full
+  const slimVoteBytes = payloadBytes.vote.slim
+  const activeClientTotal = Object.values(clientCounts.byRole).reduce((total, count) => total + count, 0)
+
+  addCheck(
+    'admin-passcode',
+    adminPasscode ? 'pass' : 'fail',
+    adminPasscode ? '관리자 passcode가 설정되어 있습니다.' : '관리자 passcode가 설정되어 있지 않습니다.',
+    '운영 전 Cloudflare secret 또는 로컬 환경변수 ADMIN_PASSCODE를 확인하세요.',
+  )
+  addCheck(
+    'event-config',
+    getConfigPathLabel() === defaultConfigFileName ? 'warn' : 'pass',
+    getConfigPathLabel() === defaultConfigFileName
+      ? '기본 teams.json으로 실행 중입니다.'
+      : `행사 설정 파일을 사용 중입니다: ${getConfigPathLabel()}`,
+    '이번 행사는 event-configs/2026_ax_group_q2_meeting.json 사용을 권장합니다.',
+  )
+  addCheck(
+    'wall-panels',
+    runtimeSettings.wallEnabledPanels.length <= 2 && runtimeSettings.wallEnabledPanels.includes('qna') ? 'pass' : 'warn',
+    `현재 wall 표시 세션: ${runtimeSettings.wallEnabledPanels.join(', ')}`,
+    '이번 AX 모임은 Q&A와 퀴즈만 열어두면 불필요한 화면/상태 노출을 줄일 수 있습니다.',
+  )
+  addCheck(
+    'admin-full-payload',
+    fullAdminBytes > 1_000_000 ? 'fail' : fullAdminBytes > 500_000 ? 'warn' : 'pass',
+    `관리자 full 상태 payload: ${formatBytes(fullAdminBytes)}`,
+    '큰 inline 이미지나 과도한 메시지 누적은 full 상태 전송을 무겁게 만듭니다.',
+  )
+  addCheck(
+    'wall-full-payload',
+    fullWallBytes > 1_000_000 ? 'fail' : fullWallBytes > 500_000 ? 'warn' : 'pass',
+    `wall full 상태 payload: ${formatBytes(fullWallBytes)}`,
+    '발표장 wall은 full media 갱신 때만 큰 payload를 받아야 합니다.',
+  )
+  addCheck(
+    'vote-slim-payload',
+    slimVoteBytes > 250_000 ? 'fail' : slimVoteBytes > 120_000 ? 'warn' : 'pass',
+    `관객 slim 상태 payload: ${formatBytes(slimVoteBytes)}`,
+    '정상 SSE 반복 갱신은 slim 상태를 사용해야 합니다.',
+  )
+  addCheck(
+    'audience-sse-clients',
+    clientCounts.byRole.vote > 500 ? 'fail' : clientCounts.byRole.vote > 250 ? 'warn' : 'pass',
+    `현재 관객 SSE 연결: ${clientCounts.byRole.vote}개`,
+    '행사 전 리허설이 끝나면 열어둔 관객 탭을 닫아 Durable Object duration 누적을 줄입니다.',
+  )
+  addCheck(
+    'active-tabs',
+    activeClientTotal > 700 ? 'fail' : activeClientTotal > 350 ? 'warn' : 'pass',
+    `현재 SSE 연결 전체: ${activeClientTotal}개`,
+    '사용하지 않는 /vote, /admin, /wall 탭은 행사 전후에 닫아둡니다.',
+  )
+  addCheck(
+    'stored-interactions',
+    cheers.length + questions.length + quiz.answers.length > 2_000 ? 'warn' : 'pass',
+    `저장된 응원/질문/퀴즈 답변: ${cheers.length + questions.length + quiz.answers.length}건`,
+    '이번 행사는 질문 수십 건 규모라면 이 값이 크게 늘지 않는 것이 정상입니다.',
+  )
+
+  const status = checks.some((check) => check.status === 'fail')
+    ? 'fail'
+    : checks.some((check) => check.status === 'warn')
+      ? 'warn'
+      : 'pass'
+
+  return {
+    status,
+    generatedAt: Date.now(),
+    runtime: 'node',
+    configFile: getConfigPathLabel(),
+    appTitle: copy.appTitle,
+    sessionId,
+    settings: runtimeSettings,
+    counts: {
+      teams: teams.length,
+      participants: participants.size,
+      cheers: cheers.length,
+      visibleCheers: cheers.filter((message) => !message.hidden).length,
+      questions: questions.length,
+      visibleQuestions: questions.filter((question) => !question.hidden).length,
+      quizAnswers: quiz.answers.length,
+    },
+    clients: clientCounts,
+    payloadBytes,
+    checks,
+  }
+}
+
+function getStatePayloadBytes() {
+  return Object.fromEntries(
+    ['vote', 'wall', 'admin'].map((role) => [
+      role,
+      {
+        full: byteLengthJson(getState({ role, slimMedia: false })),
+        slim: byteLengthJson(getState({ role, slimMedia: true })),
+      },
+    ]),
+  )
+}
+
+function getClientCounts() {
+  const byRole = { vote: 0, wall: 0, admin: 0 }
+  const byMedia = { slim: 0, full: 0 }
+
+  for (const client of clients.values()) {
+    byRole[client.role] = (byRole[client.role] || 0) + 1
+    byMedia[client.slimMedia ? 'slim' : 'full'] += 1
+  }
+
+  return { byRole, byMedia }
+}
+
+function byteLengthJson(value) {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8')
+}
+
+function formatBytes(bytes) {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${bytes} B`
+}
+
 function getEventRole(url) {
   const role = url.searchParams.get('role')
   return role === 'vote' || role === 'wall' || role === 'admin' ? role : 'admin'
 }
 
 async function handleApi(request, response, url) {
+  if (request.method === 'GET' && url.pathname === '/api/health') {
+    sendJson(response, 200, {
+      ok: true,
+      runtime: 'node',
+      configFile: getConfigPathLabel(),
+      adminPasscodeConfigured: Boolean(adminPasscode),
+    })
+    return
+  }
+
   if (request.method === 'GET' && url.pathname === '/api/admin/status') {
     sendJson(response, 200, getAdminSessionStatus(request))
     return
@@ -2357,6 +2613,16 @@ async function handleApi(request, response, url) {
     }
 
     sendJson(response, 200, getCheerPageForRequest(request, url))
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/ops/audit') {
+    if (!isAdminAuthenticated(request)) {
+      sendJson(response, 401, { error: 'admin authentication required' })
+      return
+    }
+
+    sendJson(response, 200, getOpsAudit())
     return
   }
 
@@ -2493,6 +2759,119 @@ async function handleApi(request, response, url) {
     cheers.splice(maxStoredCheerMessages)
     broadcast({ audience: true })
     sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    return
+  }
+
+  if (url.pathname === '/api/question') {
+    if (!isCurrentSession(body)) {
+      sendJson(response, 409, { error: 'session expired' })
+      return
+    }
+
+    const deviceId = getRequestDeviceId(request, body)
+    const person = upsertParticipant(deviceId, body.name, body.group, body.department)
+    const text = sanitizeText(body.text, questionMaxLength)
+
+    if (!person || !text) {
+      sendJson(response, 400, { error: 'invalid question' })
+      return
+    }
+
+    questions.unshift({
+      id: questionId++,
+      participantId: person.id,
+      author: person.name,
+      group: person.group,
+      department: person.department || '',
+      text,
+      createdAt: Date.now(),
+      hidden: false,
+      read: false,
+    })
+    questions.splice(maxStoredQuestions)
+    broadcast({ audience: true })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    return
+  }
+
+  if (url.pathname === '/api/question/update') {
+    if (!isCurrentSession(body)) {
+      sendJson(response, 409, { error: 'session expired' })
+      return
+    }
+
+    const question = questions.find((item) => item.id === Number(body.questionId))
+    if (!question) {
+      sendJson(response, 404, { error: 'question not found' })
+      return
+    }
+
+    const deviceId = getRequestDeviceId(request, body)
+    const ownerIds = getParticipantIdentitySet(deviceId)
+    if (!ownerIds.has(question.participantId)) {
+      sendJson(response, 403, { error: 'question owner required' })
+      return
+    }
+
+    const text = sanitizeText(body.text, questionMaxLength)
+    if (!text) {
+      sendJson(response, 400, { error: 'invalid question' })
+      return
+    }
+
+    question.text = text
+    question.read = false
+    question.editedAt = Date.now()
+    broadcast({ audience: true })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    return
+  }
+
+  if (url.pathname === '/api/question/delete') {
+    if (!isCurrentSession(body)) {
+      sendJson(response, 409, { error: 'session expired' })
+      return
+    }
+
+    const questionIndex = questions.findIndex((item) => item.id === Number(body.questionId))
+    const question = questionIndex >= 0 ? questions[questionIndex] : null
+    if (!question) {
+      sendJson(response, 404, { error: 'question not found' })
+      return
+    }
+
+    const deviceId = getRequestDeviceId(request, body)
+    const ownerIds = getParticipantIdentitySet(deviceId)
+    if (!ownerIds.has(question.participantId)) {
+      sendJson(response, 403, { error: 'question owner required' })
+      return
+    }
+
+    questions.splice(questionIndex, 1)
+    broadcast({ audience: true })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    return
+  }
+
+  if (url.pathname === '/api/question/read') {
+    const questionId = Number(body.questionId)
+    const question = questions.find((item) => item.id === questionId)
+
+    if (!question) {
+      sendJson(response, 404, { error: 'question not found' })
+      return
+    }
+
+    question.read = typeof body.read === 'boolean' ? Boolean(body.read) : !question.read
+    broadcast({ audience: true })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
+    return
+  }
+
+  if (url.pathname === '/api/question/reset') {
+    resetQuestions()
+    broadcast({ audience: true })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return
   }
 
@@ -2737,13 +3116,9 @@ async function handleApi(request, response, url) {
     }
 
     const deviceId = getRequestDeviceId(request, body)
-    if (!sanitizeText(body.department, 40)) {
-      sendJson(response, 400, { error: 'name, group, and department required' })
-      return
-    }
     const person = upsertParticipant(deviceId, body.name, body.group, body.department)
     if (!person) {
-      sendJson(response, 400, { error: 'name, group, and department required' })
+      sendJson(response, 400, { error: 'nickname and device required' })
       return
     }
 
@@ -2797,6 +3172,11 @@ async function handleApi(request, response, url) {
       0,
       maxQuizInitialConfirmDelaySeconds,
     )
+    const nextQnaWallFontScale = clamp(
+      Number(body.qnaWallFontScale ?? settings.qnaWallFontScale ?? defaultQnaWallFontScale),
+      0.85,
+      1.55,
+    )
     const nextTimerMode = normalizeTimerMode(body.timerMode, settings.timerMode)
     const rawDurationMinutes = normalizeDurationMinutes(body.durationMinutes, settings.durationMinutes)
     const rawTargetTime = normalizeTargetTime(body.targetTime, settings.targetTime)
@@ -2822,10 +3202,13 @@ async function handleApi(request, response, url) {
       quizInitialConfirmDelaySeconds: nextQuizInitialConfirmDelaySeconds,
       cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, settings.cheerNameMode),
       themeMode: normalizeThemeMode(body.themeMode, settings.themeMode),
+      wallEnabledPanels: normalizeWallEnabledPanels(body.wallEnabledPanels ?? settings.wallEnabledPanels),
+      qnaWallFontScale: nextQnaWallFontScale,
     }
     normalizeAllParticipantAllocations()
     closed = false
     closesAt = calculateClosesAt(settings)
+    await persistTeamConfig()
     broadcast({ audience: true })
     sendJson(response, 200, getStateForRequest(request, { slimMedia: true }))
     return

@@ -10,12 +10,15 @@
     "preview": "vite preview",
     "start": "node server.mjs",
     "realtime": "npm run build && node server.mjs",
+    "ops:audit": "node scripts/ops-audit.mjs",
+    "ops:audit:ax-q2": "node scripts/ops-audit.mjs --config=event-configs/2026_ax_group_q2_meeting.json",
     "cf:types": "wrangler types",
     "cf:dev": "npm run build && wrangler dev",
     "cf:deploy:dry-run": "npm run build && wrangler deploy --dry-run",
     "cf:deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
+    "d3-cloud": "^1.2.9",
     "fflate": "^0.8.2",
     "lucide-react": "^1.14.0",
     "react": "^19.2.5",
@@ -24,6 +27,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260509.1",
     "@eslint/js": "^10.0.1",
+    "@types/d3-cloud": "^1.2.9",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

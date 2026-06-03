@@ -364,9 +364,52 @@ Free 플랜은 개발과 작은 리허설에는 사용할 수 있지만, 전사 
 
 행사 전에는 Cloudflare Dashboard에서 사용량 알림과 비용 알림을 켜 둡니다. 행사 당일에는 사용하지 않는 `/vote`, `/admin`, Showup 탭을 닫고, 리허설이 끝나면 Durable Object 사용량이 불필요하게 계속 늘지 않도록 배포 URL을 열어둔 브라우저를 정리합니다.
 
+### 5.9. 운영 Preflight Audit
+
+행사 전에는 정적 설정과 실행 중 서버 상태를 함께 점검합니다.
+
+```powershell
+$env:EVENT_CONFIG_FILE = 'event-configs/2026_ax_group_q2_meeting.json'
+$env:ADMIN_PASSCODE = '<운영 passcode>'
+npm run realtime
+
+# 다른 PowerShell 창에서 실행
+$env:ADMIN_PASSCODE = '<운영 passcode>'
+npm run ops:audit:ax-q2
+```
+
+Cloudflare 배포 주소를 점검할 때는 `AUDIT_URL`을 배포 URL로 지정합니다.
+
+```powershell
+$env:AUDIT_URL = 'https://hack.infant83.workers.dev'
+$env:ADMIN_PASSCODE = '<운영 passcode>'
+npm run ops:audit:ax-q2
+```
+
+Audit 결과 기준:
+
+- `FAIL`: 운영 전 반드시 수정합니다. 예: admin passcode 없음, 행사별 `ARENA_ROOM_NAME` 미분리, payload 과대.
+- `WARN`: 리허설 전에 확인하고 의도한 값인지 판단합니다. 예: 서버가 꺼져 있어 runtime audit을 못 한 상태, 열어둔 SSE 탭이 많은 상태.
+- `PASS`: 해당 항목은 현재 기준으로 안전합니다.
+
+서버가 실행 중이면 보호된 `/api/ops/audit` endpoint도 확인합니다. 이 endpoint는 상태를 바꾸지 않고 현재 참가자/질문/응원/퀴즈 건수, role별 SSE 연결 수, full/slim 상태 payload 크기를 계산합니다. Cloudflare에서는 관리자 인증 후에만 접근됩니다.
+
 ## 6. 운영 콘텐츠 관리
 
-팀 정보, 화면 문구, 퀴즈 문제의 기본값은 `teams.json`에 있습니다.
+팀 정보, 화면 문구, 퀴즈 문제, 운영 설정의 기본값은 `teams.json`에 있습니다.
+
+지난 행사 설정을 보존하고 새 행사만 다른 설정으로 띄우려면 `event-configs/` 아래에 행사별 JSON을 두고 로컬 서버 실행 전에 `EVENT_CONFIG_FILE`을 지정합니다. 지정하지 않으면 기존처럼 `teams.json`을 읽습니다.
+
+```powershell
+$env:EVENT_CONFIG_FILE = 'event-configs/2026_ax_group_q2_meeting.json'
+npm run realtime
+```
+
+이렇게 실행하면 로컬 Node 서버는 선택된 행사 JSON을 읽고, 관리자 화면에서 저장한 팀/문구/퀴즈/운영 설정도 같은 행사 JSON에 씁니다. 기존 Hackathon 설정은 `teams.json`에 그대로 남습니다.
+
+Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 런타임에 바꿔 읽을 수 없습니다. Cloudflare 운영에서는 행사별로 `ARENA_ROOM_NAME`을 다르게 지정해 Durable Object 저장소를 분리합니다. 예를 들어 이번 행사는 `ARENA_ROOM_NAME=2026-ax-q2-meeting`처럼 별도 룸 이름을 쓰면 이전 행사 DB와 섞이지 않습니다.
+
+`worker/index.ts`는 `2026-ax-q2-meeting` 룸의 초기 설정으로 `event-configs/2026_ax_group_q2_meeting.json`을 함께 번들링합니다. 운영 중 내용이 바뀌면 `/admin > 운영 콘텐츠 > 관리`에서 저장 적용하고, 행사 후에는 관리자 화면에서 JSON을 내려받아 `event-configs/`에 반영합니다.
 
 관리자 화면에서도 수정할 수 있습니다.
 
@@ -399,6 +442,10 @@ Free 플랜은 개발과 작은 리허설에는 사용할 수 있지만, 전사 
   "copy": {
     "appTitle": "Vibe Vote Arena",
     "audienceEyeline": "Audience Vote"
+  },
+  "settings": {
+    "themeMode": "stage",
+    "wallEnabledPanels": ["qna", "quiz"]
   },
   "teams": [
     {

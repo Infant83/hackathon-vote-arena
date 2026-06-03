@@ -1,3 +1,4 @@
+import rawAxQ2Config from '../event-configs/2026_ax_group_q2_meeting.json'
 import rawConfig from '../teams.json'
 import { inflateSync, strFromU8 } from 'fflate'
 
@@ -11,9 +12,12 @@ const defaultQuizAnswerLimit = 3
 const maxQuizAnswerLimit = 10
 const defaultQuizInitialConfirmDelaySeconds = 20
 const maxQuizInitialConfirmDelaySeconds = 60
+const defaultQnaWallFontScale = 1.12
 const kstOffsetMinutes = 9 * 60
 const cheerMessageMaxLength = 5000
 const maxStoredCheerMessages = 5000
+const questionMaxLength = 700
+const maxStoredQuestions = 500
 const defaultTeamPhotoRadius = 18
 const quizQuestionMaxLength = 180
 const quizAnswerMaxLength = 120
@@ -29,6 +33,8 @@ const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const adminCookieName = 'vibe-vote-admin'
 const adminCookieMaxAge = 60 * 60 * 8
+const wallSessionValues = ['overview', 'raffle', 'showup', 'qna', 'quiz'] as const
+const defaultWallEnabledPanels = [...wallSessionValues]
 const snapshotKey = 'event-state-v1'
 const mediaStoragePrefix = 'event-media-v1:'
 const storedMediaTokenPrefix = '__stored_media__:'
@@ -128,6 +134,19 @@ type CheerMessage = {
   text: string
   createdAt: number
   hidden: boolean
+}
+
+type QuestionMessage = {
+  id: number
+  participantId: string
+  author: string
+  group: string
+  department?: string
+  text: string
+  createdAt: number
+  editedAt?: number
+  hidden: boolean
+  read?: boolean
 }
 
 type VoteEvent = {
@@ -267,11 +286,21 @@ type Settings = {
   quizInitialConfirmDelaySeconds: number
   cheerNameMode: 'masked' | 'real'
   themeMode: 'light' | 'stage'
+  wallEnabledPanels: Array<(typeof wallSessionValues)[number]>
+  qnaWallFontScale: number
+}
+
+type LoadedConfig = {
+  teams: TeamConfig[]
+  copy: EventCopy
+  quizBank: QuizConfig[]
+  settings: Settings
 }
 
 type Snapshot = {
   participants: Participant[]
   cheers: CheerMessage[]
+  questions?: QuestionMessage[]
   voteEvents: VoteEvent[]
   closed: boolean
   closesAt: number
@@ -281,6 +310,7 @@ type Snapshot = {
   quiz?: QuizState
   quizAnswerKeys?: string[]
   quizAnswerId?: number
+  questionId?: number
   quizBank?: QuizConfig[]
   cheerId: number
   voteEventId: number
@@ -363,11 +393,13 @@ const defaultCopy = {
   wallEyeline: 'Audience Wall',
   wallMetricStars: '누적 별',
   wallMetricCheers: '응원 메시지',
+  wallMetricQuestions: '질문',
   wallOverviewLabel: '실시간 현황',
   wallCheerLabel: '응원메세지',
   wallRaffleLabel: '행운권추첨',
   wallShowupLabel: '말풍선',
   wallQuizLabel: '퀴즈',
+  wallQnaLabel: 'Q&A',
   wallArenaEyeline: 'Live Arena Wall',
   wallArenaTitle: '실시간 별 현황',
   wallCheerEyeline: 'Cheer Board',
@@ -377,6 +409,22 @@ const defaultCopy = {
   wallRaffleTitle: '행운권 추첨',
   wallQuizEyeline: 'Live Quiz',
   wallQuizTitle: '퀴즈',
+  wallQnaEyeline: 'Live Q&A',
+  wallQnaTitle: '무엇이든 질문해 주세요',
+  wallQnaEmpty: '아직 질문이 없습니다. 무엇이 궁금하신가요?',
+  qnaRoomEyeline: 'QnA Room',
+  qnaRoomTitle: 'AX Group QnA',
+  qnaRoomTarget: 'AX Group에게 질문해주세요',
+  qnaRoomSummary: '별명으로 입장한 뒤 질문을 남기면 Q&A board에 실시간으로 올라갑니다.',
+  qnaLoginTitle: 'QnA 방 입장',
+  qnaLoginReady: '별명만 입력하면 익명으로 질문할 수 있습니다. 운영자는 내부 관리 ID로 참여 기록을 확인합니다.',
+  qnaLoginButtonLabel: 'QnA 방 입장',
+  qnaQuestionSentStatus: '질문이 Q&A wall에 올라갔습니다.',
+  qnaPromptEyeline: 'Q&A',
+  qnaPromptTitle: '발표자에게 남길 질문',
+  qnaPromptSummary: '궁금한 점을 적어 보내면 발표장 Q&A wall에 예쁜 질문 카드로 쌓입니다.',
+  qnaInputPlaceholder: '예: 이 기능을 실제 업무에 적용할 때 가장 먼저 필요한 데이터는 무엇인가요?',
+  qnaSendLabel: '질문 올리기',
   quizStandbyHeadline: '퀴즈를 준비 중입니다',
   quizStandbySubhead: '',
   quizStandbyHint: '문제가 출제되면 3초 카운트다운 뒤 문제가 공개됩니다. 최대한 빨리 정답을 입력하세요. :)',
@@ -544,9 +592,33 @@ const raffleWinnerCountKeyByRule: Record<RaffleRule, keyof EventCopy> = {
   cheer: 'raffleWinnerCountAll',
 }
 
+const defaultRuntimeSettings: Settings = {
+  showScoresToAudience: true,
+  starBudget: defaultStarBudget,
+  maxStarsPerTeam: defaultMaxStarsPerTeam,
+  durationMinutes: defaultDurationMinutes,
+  timerMode: 'duration',
+  targetTime: '',
+  minScore: defaultMinScore,
+  raffleCheerWeight: defaultRaffleCheerWeight,
+  quizAnswerLimit: defaultQuizAnswerLimit,
+  quizInitialConfirmDelaySeconds: defaultQuizInitialConfirmDelaySeconds,
+  cheerNameMode: 'masked',
+  themeMode: 'stage',
+  wallEnabledPanels: [...defaultWallEnabledPanels],
+  qnaWallFontScale: defaultQnaWallFontScale,
+}
+
 const validLogos = new Set<LogoKind>(['orbit', 'beam', 'grid', 'wave', 'core'])
-const initialConfig = loadConfig(rawConfig)
+const fallbackInitialConfig = loadConfig(rawConfig)
+const initialConfigByRoomName = new Map<string, LoadedConfig>([
+  ['2026-ax-q2-meeting', loadConfig(rawAxQ2Config)],
+])
 const encoder = new TextEncoder()
+
+function getInitialConfig(roomName: string) {
+  return initialConfigByRoomName.get(roomName) || fallbackInitialConfig
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -554,7 +626,12 @@ export default {
     const adminPasscode = String(env.ADMIN_PASSCODE || '').trim()
 
     if (url.pathname === '/api/health') {
-      return json({ ok: true, runtime: 'cloudflare-workers' })
+      return json({
+        ok: true,
+        runtime: 'cloudflare-workers',
+        arenaRoomName: env.ARENA_ROOM_NAME || 'default',
+        adminPasscodeConfigured: Boolean(adminPasscode),
+      })
     }
 
     if (request.method === 'GET' && url.pathname === '/api/admin/status') {
@@ -606,7 +683,10 @@ export default {
     if (url.pathname.startsWith('/api/') || url.pathname === '/events') {
       const roomName = env.ARENA_ROOM_NAME || 'default'
       const roomId = env.ARENA_ROOM.idFromName(roomName)
-      return env.ARENA_ROOM.get(roomId).fetch(request)
+      const headers = new Headers(request.headers)
+      headers.set('x-arena-room-name', roomName)
+      headers.set('x-admin-passcode-configured', adminPasscode ? '1' : '0')
+      return env.ARENA_ROOM.get(roomId).fetch(new Request(request, { headers }))
     }
 
     return env.ASSETS.fetch(request)
@@ -616,6 +696,7 @@ export default {
 export class ArenaRoom {
   private participants = new Map<string, Participant>()
   private cheers: CheerMessage[] = []
+  private questions: QuestionMessage[] = []
   private voteEvents: VoteEvent[] = []
   private awardHistory: AwardRecord[] = []
   private clients = new Map<ReadableStreamDefaultController<Uint8Array>, EventClient>()
@@ -631,35 +712,30 @@ export class ArenaRoom {
   private quiz: QuizState = { ...emptyQuizState }
   private quizAnswerKeys: string[] = []
   private cheerId = 1
+  private questionId = 1
   private voteEventId = 1
   private quizAnswerId = 1
   private sessionId = 1
   private testMode = false
-  private settings: Settings = {
-    showScoresToAudience: true,
-    starBudget: defaultStarBudget,
-    maxStarsPerTeam: defaultMaxStarsPerTeam,
-    durationMinutes: defaultDurationMinutes,
-    timerMode: 'duration',
-    targetTime: '',
-    minScore: defaultMinScore,
-    raffleCheerWeight: defaultRaffleCheerWeight,
-    quizAnswerLimit: defaultQuizAnswerLimit,
-    quizInitialConfirmDelaySeconds: defaultQuizInitialConfirmDelaySeconds,
-    cheerNameMode: 'masked',
-    themeMode: 'stage',
-  }
-  private teams: TeamConfig[] = initialConfig.teams
-  private copy: EventCopy = initialConfig.copy
-  private quizBank: QuizConfig[] = initialConfig.quizBank
+  private initialConfig: LoadedConfig = fallbackInitialConfig
+  private settings: Settings = fallbackInitialConfig.settings
+  private teams: TeamConfig[] = fallbackInitialConfig.teams
+  private copy: EventCopy = fallbackInitialConfig.copy
+  private quizBank: QuizConfig[] = fallbackInitialConfig.quizBank
   private configRevision = 1
   private configUpdatedAt = Date.now()
-  private validTeamIds = new Set(initialConfig.teams.map((team) => team.id))
+  private validTeamIds = new Set(fallbackInitialConfig.teams.map((team) => team.id))
   private storedMediaKeys = new Set<string>()
   private state: DurableObjectState
   private loaded: Promise<void>
 
-  constructor(state: DurableObjectState) {
+  constructor(state: DurableObjectState, env: Env) {
+    this.initialConfig = getInitialConfig(env.ARENA_ROOM_NAME || 'default')
+    this.settings = this.initialConfig.settings
+    this.teams = this.initialConfig.teams
+    this.copy = this.initialConfig.copy
+    this.quizBank = this.initialConfig.quizBank
+    this.validTeamIds = new Set(this.initialConfig.teams.map((team) => team.id))
     this.state = state
     this.loaded = this.load()
   }
@@ -680,6 +756,13 @@ export class ArenaRoom {
 
     if (request.method === 'GET' && url.pathname === '/api/export') {
       return json(this.getArchiveExport())
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/ops/audit') {
+      return json(this.getOpsAudit(
+        request.headers.get('x-arena-room-name') || 'default',
+        request.headers.get('x-admin-passcode-configured') === '1',
+      ))
     }
 
     if (request.method === 'GET' && url.pathname === '/events') {
@@ -729,6 +812,7 @@ export class ArenaRoom {
 
     this.participants = new Map(snapshot.participants.map((person) => [person.id, person]))
     this.cheers = snapshot.cheers || []
+    this.questions = snapshot.questions || []
     this.voteEvents = snapshot.voteEvents || []
     this.awardHistory = Array.isArray(snapshot.awardHistory) ? snapshot.awardHistory.filter(Boolean).slice(0, 200) : []
     this.closed = Boolean(snapshot.closed)
@@ -737,54 +821,31 @@ export class ArenaRoom {
     this.raffleStage = normalizeRaffleStage(snapshot.raffleStage)
     this.quiz = normalizeQuizState(snapshot.quiz)
     this.quizAnswerKeys = Array.isArray(snapshot.quizAnswerKeys) ? snapshot.quizAnswerKeys.filter(Boolean) : []
-    this.quizBank = normalizeQuizBank(snapshot.quizBank, initialConfig.quizBank)
+    this.quizBank = normalizeQuizBank(snapshot.quizBank, this.initialConfig.quizBank)
     this.configRevision = Math.max(1, Math.floor(Number(snapshot.configRevision || 1)))
     this.configUpdatedAt = Number(snapshot.configUpdatedAt || Date.now())
     this.cheerId = Math.max(1, Number(snapshot.cheerId || 1))
+    this.questionId = Math.max(1, Number(snapshot.questionId || 1))
     this.voteEventId = Math.max(1, Number(snapshot.voteEventId || 1))
     this.quizAnswerId = Math.max(1, Number(snapshot.quizAnswerId || 1))
     this.sessionId = Math.max(1, Number(snapshot.sessionId || 1))
     this.testMode = Boolean(snapshot.testMode)
     this.teams = Array.isArray(snapshot.teams) && snapshot.teams.length
-      ? snapshot.teams.map((team, index) => normalizeTeam(team, initialConfig.teams[index] || initialConfig.teams[0], index))
-      : initialConfig.teams
-    this.copy = normalizeCopy({ ...initialConfig.copy, ...(snapshot.copy || {}) })
+      ? snapshot.teams.map((team, index) => normalizeTeam(team, this.initialConfig.teams[index] || this.initialConfig.teams[0], index))
+      : this.initialConfig.teams
+    this.copy = normalizeCopy({ ...this.initialConfig.copy, ...(snapshot.copy || {}) })
     this.validTeamIds = new Set(this.teams.map((team) => team.id))
+    const snapshotSettings = snapshot.settings || this.initialConfig.settings
     const persistedSettingsVersion = Number(snapshot.settingsVersion || 1)
-    const persistedStarBudget = Math.floor(Number(snapshot.settings?.starBudget || defaultStarBudget))
+    const persistedStarBudget = Math.floor(Number(snapshotSettings.starBudget || this.initialConfig.settings.starBudget))
     const migratedStarBudget =
       persistedSettingsVersion < settingsVersion && [5, 20].includes(persistedStarBudget) ? defaultStarBudget : persistedStarBudget
 
-    this.settings = {
-      showScoresToAudience: Boolean(snapshot.settings?.showScoresToAudience ?? true),
-      starBudget: clamp(migratedStarBudget, 1, 20),
-      maxStarsPerTeam: clamp(
-        Math.floor(Number(snapshot.settings?.maxStarsPerTeam) || defaultMaxStarsPerTeam),
-        1,
-        maxConfigurableStarsPerTeam,
-      ),
-      durationMinutes: normalizeDurationMinutes(snapshot.settings?.durationMinutes, defaultDurationMinutes),
-      timerMode: normalizeTimerMode(snapshot.settings?.timerMode),
-      targetTime: normalizeTargetTime(snapshot.settings?.targetTime),
-      minScore: clamp(Number(snapshot.settings?.minScore ?? defaultMinScore), 0, 9.9),
-      raffleCheerWeight: clamp(Number(snapshot.settings?.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
-      quizAnswerLimit: clamp(
-        Math.floor(Number(snapshot.settings?.quizAnswerLimit) || defaultQuizAnswerLimit),
-        1,
-        maxQuizAnswerLimit,
-      ),
-      quizInitialConfirmDelaySeconds: clamp(
-        Math.floor(
-          Number.isFinite(Number(snapshot.settings?.quizInitialConfirmDelaySeconds))
-            ? Number(snapshot.settings?.quizInitialConfirmDelaySeconds)
-            : defaultQuizInitialConfirmDelaySeconds,
-        ),
-        0,
-        maxQuizInitialConfirmDelaySeconds,
-      ),
-      cheerNameMode: normalizeCheerNameMode(snapshot.settings?.cheerNameMode),
-      themeMode: normalizeThemeMode(snapshot.settings?.themeMode),
-    }
+    this.settings = normalizeRuntimeSettings({
+      ...this.initialConfig.settings,
+      ...snapshotSettings,
+      starBudget: migratedStarBudget,
+    })
     await this.scheduleQuizAlarm()
   }
 
@@ -792,6 +853,7 @@ export class ArenaRoom {
     const snapshot: Snapshot = {
       participants: [...this.participants.values()],
       cheers: this.cheers,
+      questions: this.questions,
       voteEvents: this.voteEvents,
       awardHistory: this.awardHistory,
       closed: this.closed,
@@ -803,6 +865,7 @@ export class ArenaRoom {
       quizAnswerId: this.quizAnswerId,
       quizBank: this.quizBank,
       cheerId: this.cheerId,
+      questionId: this.questionId,
       voteEventId: this.voteEventId,
       sessionId: this.sessionId,
       testMode: this.testMode,
@@ -878,6 +941,84 @@ export class ArenaRoom {
       this.cheers.splice(maxStoredCheerMessages)
       await this.commit({ audience: true })
       return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+    }
+
+    if (pathname === '/api/question') {
+      if (!this.isCurrentSession(body)) return json({ error: 'session expired' }, 409)
+
+      const deviceId = this.getRequestDeviceId(request, body)
+      const person = this.upsertParticipant(deviceId, body.name, body.group, body.department)
+      const text = sanitizeText(body.text, questionMaxLength)
+
+      if (!person || !text) return json({ error: 'invalid question' }, 400)
+
+      this.questions.unshift({
+        id: this.questionId++,
+        participantId: person.id,
+        author: person.name,
+        group: person.group,
+        department: person.department || '',
+        text,
+        createdAt: Date.now(),
+        hidden: false,
+        read: false,
+      })
+      this.questions.splice(maxStoredQuestions)
+      await this.commit({ audience: true })
+      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+    }
+
+    if (pathname === '/api/question/update') {
+      if (!this.isCurrentSession(body)) return json({ error: 'session expired' }, 409)
+
+      const question = this.questions.find((item) => item.id === Number(body.questionId))
+      if (!question) return json({ error: 'question not found' }, 404)
+
+      const deviceId = this.getRequestDeviceId(request, body)
+      const ownerIds = this.getParticipantIdentitySet(deviceId)
+      if (!ownerIds.has(question.participantId)) return json({ error: 'question owner required' }, 403)
+
+      const text = sanitizeText(body.text, questionMaxLength)
+      if (!text) return json({ error: 'invalid question' }, 400)
+
+      question.text = text
+      question.read = false
+      question.editedAt = Date.now()
+      await this.commit({ audience: true })
+      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+    }
+
+    if (pathname === '/api/question/delete') {
+      if (!this.isCurrentSession(body)) return json({ error: 'session expired' }, 409)
+
+      const questionIndex = this.questions.findIndex((item) => item.id === Number(body.questionId))
+      const question = questionIndex >= 0 ? this.questions[questionIndex] : null
+      if (!question) return json({ error: 'question not found' }, 404)
+
+      const deviceId = this.getRequestDeviceId(request, body)
+      const ownerIds = this.getParticipantIdentitySet(deviceId)
+      if (!ownerIds.has(question.participantId)) return json({ error: 'question owner required' }, 403)
+
+      this.questions.splice(questionIndex, 1)
+      await this.commit({ audience: true })
+      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+    }
+
+    if (pathname === '/api/question/read') {
+      const questionId = Number(body.questionId)
+      const question = this.questions.find((item) => item.id === questionId)
+
+      if (!question) return json({ error: 'question not found' }, 404)
+
+      question.read = typeof body.read === 'boolean' ? Boolean(body.read) : !question.read
+      await this.commit({ audience: true })
+      return json(this.getStateForRequest(request, { slimMedia: true }))
+    }
+
+    if (pathname === '/api/question/reset') {
+      this.resetQuestions()
+      await this.commit({ audience: true })
+      return json(this.getStateForRequest(request, { slimMedia: true }))
     }
 
     if (pathname === '/api/cheer/moderate') {
@@ -1089,9 +1230,8 @@ export class ArenaRoom {
       if (!this.isCurrentSession(body)) return json({ error: 'session expired' }, 409)
 
       const deviceId = this.getRequestDeviceId(request, body)
-      if (!sanitizeText(body.department, 40)) return json({ error: 'name, group, and department required' }, 400)
       const person = this.upsertParticipant(deviceId, body.name, body.group, body.department)
-      if (!person) return json({ error: 'name, group, and department required' }, 400)
+      if (!person) return json({ error: 'nickname and device required' }, 400)
 
       await this.commit()
       return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
@@ -1148,6 +1288,12 @@ export class ArenaRoom {
         })(),
         cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, this.settings.cheerNameMode),
         themeMode: normalizeThemeMode(body.themeMode, this.settings.themeMode),
+        wallEnabledPanels: normalizeWallEnabledPanels(body.wallEnabledPanels ?? this.settings.wallEnabledPanels),
+        qnaWallFontScale: clamp(
+          Number(body.qnaWallFontScale ?? this.settings.qnaWallFontScale ?? defaultQnaWallFontScale),
+          0.85,
+          1.55,
+        ),
       }
       this.normalizeAllParticipantAllocations()
       this.closesAt = calculateClosesAt(this.settings)
@@ -1272,6 +1418,9 @@ export class ArenaRoom {
       cheers: this.cheers.slice(0, 120),
       cheerTotalCount: this.cheers.length,
       visibleCheerTotalCount,
+      questions: this.questions.slice(0, 120),
+      questionTotalCount: this.questions.length,
+      visibleQuestionTotalCount: this.questions.filter((question) => !question.hidden).length,
       voteEvents: this.voteEvents.slice(0, 100),
       awardHistory: this.awardHistory.slice(0, 200),
       closed: this.closed,
@@ -1338,6 +1487,7 @@ export class ArenaRoom {
       teams: this.teams,
       participants: [...this.participants.values()],
       cheers: this.cheers,
+      questions: this.questions,
       quizAnswers: this.quiz.answers,
       quizWinners: this.quiz.winners,
       awardHistory: this.awardHistory,
@@ -1346,6 +1496,132 @@ export class ArenaRoom {
       configRevision: this.configRevision,
       configUpdatedAt: this.configUpdatedAt,
     }
+  }
+
+  private getOpsAudit(roomName: string, adminPasscodeConfigured: boolean) {
+    const payloadBytes = this.getStatePayloadBytes()
+    const clientCounts = this.getClientCounts()
+    const checks: Array<{ id: string; status: 'pass' | 'warn' | 'fail'; summary: string; detail: string }> = []
+    const addCheck = (
+      id: string,
+      status: 'pass' | 'warn' | 'fail',
+      summary: string,
+      detail = '',
+    ) => checks.push({ id, status, summary, detail })
+    const runtimeSettings = this.getRuntimeSettings()
+    const activeClientTotal = Object.values(clientCounts.byRole).reduce((total, count) => total + count, 0)
+
+    addCheck(
+      'admin-passcode',
+      adminPasscodeConfigured ? 'pass' : 'fail',
+      adminPasscodeConfigured ? '관리자 passcode가 설정되어 있습니다.' : '관리자 passcode가 설정되어 있지 않습니다.',
+      '운영 전 Cloudflare secret ADMIN_PASSCODE를 확인하세요.',
+    )
+    addCheck(
+      'arena-room-name',
+      roomName === 'default' ? 'warn' : 'pass',
+      `현재 Cloudflare Durable Object room: ${roomName}`,
+      '행사별로 ARENA_ROOM_NAME을 분리하면 지난 행사 DB와 섞이는 것을 막을 수 있습니다.',
+    )
+    addCheck(
+      'wall-panels',
+      runtimeSettings.wallEnabledPanels.length <= 2 && runtimeSettings.wallEnabledPanels.includes('qna') ? 'pass' : 'warn',
+      `현재 wall 표시 세션: ${runtimeSettings.wallEnabledPanels.join(', ')}`,
+      '이번 AX 모임은 Q&A와 퀴즈만 열어두면 불필요한 화면/상태 노출을 줄일 수 있습니다.',
+    )
+    addCheck(
+      'admin-full-payload',
+      payloadBytes.admin.full > 1_000_000 ? 'fail' : payloadBytes.admin.full > 500_000 ? 'warn' : 'pass',
+      `관리자 full 상태 payload: ${formatBytes(payloadBytes.admin.full)}`,
+      '큰 inline 이미지나 과도한 메시지 누적은 full 상태 전송을 무겁게 만듭니다.',
+    )
+    addCheck(
+      'wall-full-payload',
+      payloadBytes.wall.full > 1_000_000 ? 'fail' : payloadBytes.wall.full > 500_000 ? 'warn' : 'pass',
+      `wall full 상태 payload: ${formatBytes(payloadBytes.wall.full)}`,
+      '발표장 wall은 full media 갱신 때만 큰 payload를 받아야 합니다.',
+    )
+    addCheck(
+      'vote-slim-payload',
+      payloadBytes.vote.slim > 250_000 ? 'fail' : payloadBytes.vote.slim > 120_000 ? 'warn' : 'pass',
+      `관객 slim 상태 payload: ${formatBytes(payloadBytes.vote.slim)}`,
+      '정상 SSE 반복 갱신은 slim 상태를 사용해야 합니다.',
+    )
+    addCheck(
+      'audience-sse-clients',
+      clientCounts.byRole.vote > 500 ? 'fail' : clientCounts.byRole.vote > 250 ? 'warn' : 'pass',
+      `현재 관객 SSE 연결: ${clientCounts.byRole.vote}개`,
+      '행사 전 리허설이 끝나면 열어둔 관객 탭을 닫아 Durable Object duration 누적을 줄입니다.',
+    )
+    addCheck(
+      'active-tabs',
+      activeClientTotal > 700 ? 'fail' : activeClientTotal > 350 ? 'warn' : 'pass',
+      `현재 SSE 연결 전체: ${activeClientTotal}개`,
+      '사용하지 않는 /vote, /admin, /wall 탭은 행사 전후에 닫아둡니다.',
+    )
+    addCheck(
+      'stored-interactions',
+      this.cheers.length + this.questions.length + this.quiz.answers.length > 2_000 ? 'warn' : 'pass',
+      `저장된 응원/질문/퀴즈 답변: ${this.cheers.length + this.questions.length + this.quiz.answers.length}건`,
+      '이번 행사는 질문 수십 건 규모라면 이 값이 크게 늘지 않는 것이 정상입니다.',
+    )
+
+    const status = checks.some((check) => check.status === 'fail')
+      ? 'fail'
+      : checks.some((check) => check.status === 'warn')
+        ? 'warn'
+        : 'pass'
+
+    return {
+      status,
+      generatedAt: Date.now(),
+      runtime: 'cloudflare-workers',
+      arenaRoomName: roomName,
+      appTitle: this.copy.appTitle,
+      sessionId: this.sessionId,
+      settings: runtimeSettings,
+      counts: {
+        teams: this.teams.length,
+        participants: this.participants.size,
+        cheers: this.cheers.length,
+        visibleCheers: this.cheers.filter((message) => !message.hidden).length,
+        questions: this.questions.length,
+        visibleQuestions: this.questions.filter((question) => !question.hidden).length,
+        quizAnswers: this.quiz.answers.length,
+      },
+      clients: clientCounts,
+      payloadBytes,
+      checks,
+    }
+  }
+
+  private getStatePayloadBytes() {
+    return {
+      vote: {
+        full: byteLengthJson(this.getState({ role: 'vote', slimMedia: false })),
+        slim: byteLengthJson(this.getState({ role: 'vote', slimMedia: true })),
+      },
+      wall: {
+        full: byteLengthJson(this.getState({ role: 'wall', slimMedia: false })),
+        slim: byteLengthJson(this.getState({ role: 'wall', slimMedia: true })),
+      },
+      admin: {
+        full: byteLengthJson(this.getState({ role: 'admin', slimMedia: false })),
+        slim: byteLengthJson(this.getState({ role: 'admin', slimMedia: true })),
+      },
+    }
+  }
+
+  private getClientCounts() {
+    const byRole = { vote: 0, wall: 0, admin: 0 }
+    const byMedia = { slim: 0, full: 0 }
+
+    for (const client of this.clients.values()) {
+      byRole[client.role] += 1
+      byMedia[client.slimMedia ? 'slim' : 'full'] += 1
+    }
+
+    return { byRole, byMedia }
   }
 
   private getParticipantIdentitySet(participantId: string) {
@@ -1385,32 +1661,7 @@ export class ArenaRoom {
   }
 
   private getRuntimeSettings(source: Settings = this.settings): Settings {
-    return {
-      ...source,
-      starBudget: clamp(Math.floor(Number(source.starBudget) || defaultStarBudget), 1, 20),
-      maxStarsPerTeam: clamp(
-        Math.floor(Number(source.maxStarsPerTeam) || defaultMaxStarsPerTeam),
-        1,
-        maxConfigurableStarsPerTeam,
-      ),
-      durationMinutes: normalizeDurationMinutes(source.durationMinutes, defaultDurationMinutes),
-      timerMode: normalizeTimerMode(source.timerMode, 'duration'),
-      targetTime: normalizeTargetTime(source.targetTime),
-      minScore: clamp(Number(source.minScore ?? defaultMinScore), 0, 9.9),
-      raffleCheerWeight: clamp(Number(source.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
-      quizAnswerLimit: clamp(Math.floor(Number(source.quizAnswerLimit) || defaultQuizAnswerLimit), 1, maxQuizAnswerLimit),
-      quizInitialConfirmDelaySeconds: clamp(
-        Math.floor(
-          Number.isFinite(Number(source.quizInitialConfirmDelaySeconds))
-            ? Number(source.quizInitialConfirmDelaySeconds)
-            : defaultQuizInitialConfirmDelaySeconds,
-        ),
-        0,
-        maxQuizInitialConfirmDelaySeconds,
-      ),
-      cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
-      themeMode: normalizeThemeMode(source.themeMode, 'stage'),
-    }
+    return normalizeRuntimeSettings(source)
   }
 
   private applyTeamConfig(body: RequestBody) {
@@ -1426,7 +1677,7 @@ export class ArenaRoom {
         team.logoFile = logoDataUrl
       }
 
-      return normalizeTeam(team, this.teams[index] || initialConfig.teams[index] || initialConfig.teams[0], index)
+      return normalizeTeam(team, this.teams[index] || this.initialConfig.teams[index] || this.initialConfig.teams[0], index)
     })
     this.copy = normalizeCopy({ ...this.copy, ...normalizeObject(body.copy) })
     if (Array.isArray(body.quizzes) || Array.isArray(body.quizBank)) {
@@ -1607,9 +1858,7 @@ export class ArenaRoom {
     attachParticipantDevice(person, browserDeviceId)
     person.name = nextName
     person.group = nextGroup
-    if (nextDepartment || !person.department) {
-      person.department = nextDepartment
-    }
+    person.department = nextDepartment
     person.updatedAt = Date.now()
     this.participants.set(id, person)
     return person
@@ -1620,6 +1869,7 @@ export class ArenaRoom {
     if (!participantId) return
 
     this.cheers = this.cheers.filter((message) => message.participantId !== participantId)
+    this.questions = this.questions.filter((question) => question.participantId !== participantId)
     this.voteEvents = this.voteEvents.filter((event) => event.participantId !== participantId)
     this.awardHistory = this.awardHistory.filter((award) => award.participantId !== participantId)
 
@@ -2288,9 +2538,11 @@ export class ArenaRoom {
       this.participants.set(person.id, person)
     }
     this.cheers = []
+    this.questions = []
     this.voteEvents = []
     this.awardHistory = []
     this.cheerId = 1
+    this.questionId = 1
     this.voteEventId = 1
     this.clearQuiz()
     if (!keepParticipants) this.sessionId += 1
@@ -2321,6 +2573,11 @@ export class ArenaRoom {
     }
   }
 
+  private resetQuestions() {
+    this.questions = []
+    this.questionId = 1
+  }
+
   private seedTestData() {
     const samples = [
       {
@@ -2329,6 +2586,7 @@ export class ArenaRoom {
         group: 'test',
         allocations: { 'team-aurora': Math.min(this.settings.starBudget, 5) },
         message: '검색 데모가 바로 써볼 수 있어 보여요',
+        question: '검색 결과가 틀렸을 때 사용자가 바로 정정할 수 있는 흐름도 있나요?',
       },
       {
         id: 'test-seoyeon',
@@ -2336,6 +2594,7 @@ export class ArenaRoom {
         group: 'test',
         allocations: { 'team-prism': Math.min(this.settings.starBudget, 4) },
         message: '현장 적용성이 좋아요',
+        question: '제조 라인 데이터가 부족한 초기 공정에도 적용할 수 있을까요?',
       },
       {
         id: 'test-yuna',
@@ -2343,6 +2602,7 @@ export class ArenaRoom {
         group: 'test',
         allocations: { 'team-vector': Math.min(this.settings.starBudget, 5) },
         message: '리뷰 시간이 줄어들 것 같아요',
+        question: '코드 리뷰 위험도를 설명할 때 어떤 근거를 함께 보여주나요?',
       },
       {
         id: 'test-hana',
@@ -2350,6 +2610,7 @@ export class ArenaRoom {
         group: 'test',
         allocations: { 'team-lattice': Math.min(this.settings.starBudget, 3) },
         message: '장애 리포트 연결이 인상적입니다',
+        question: '장애 원인을 여러 시스템 로그에서 연결할 때 권한 관리는 어떻게 하나요?',
       },
       {
         id: 'test-doyeon',
@@ -2357,6 +2618,7 @@ export class ArenaRoom {
         group: 'test',
         allocations: { 'team-pulse': Math.min(this.settings.starBudget, 2) },
         message: '고객 목소리 우선순위가 명확해질 것 같아요',
+        question: 'VOC 우선순위가 바뀌면 담당자에게 어떤 방식으로 알려주나요?',
       },
     ]
 
@@ -2376,6 +2638,17 @@ export class ArenaRoom {
         createdAt: Date.now(),
         hidden: false,
       })
+      this.questions.unshift({
+        id: this.questionId++,
+        participantId: person.id,
+        author: person.name,
+        group: person.group,
+        department: person.department || '',
+        text: sample.question,
+        createdAt: Date.now(),
+        hidden: false,
+        read: false,
+      })
     }
   }
 
@@ -2393,6 +2666,7 @@ function shapeStateForRole<T extends {
   participants: ParticipantState[]
   awardHistory: AwardRecord[]
   cheers: CheerMessage[]
+  questions?: QuestionMessage[]
   voteEvents: VoteEvent[]
   quiz: QuizState
 }>(state: T, options: GetStateOptions = {}): T {
@@ -2413,11 +2687,16 @@ function shapeStateForRole<T extends {
     if (!message.hidden) return true
     return ownParticipantIds.has(message.participantId)
   })
+  const visibleOrOwnQuestions = (state.questions || []).filter((question) => {
+    if (!question.hidden) return true
+    return ownParticipantIds.has(question.participantId)
+  })
 
   return {
     ...state,
     participants: ownParticipants,
     cheers: visibleOrOwnCheers,
+    questions: visibleOrOwnQuestions,
     voteEvents: [],
     awardHistory: ownAwardHistory,
     quiz: {
@@ -2548,6 +2827,40 @@ function loadConfig(config: unknown) {
     teams,
     copy: normalizeCopy(Array.isArray(parsed) ? {} : parsed.copy),
     quizBank: normalizeQuizBank(Array.isArray(parsed) ? undefined : parsed.quizzes),
+    settings: normalizeRuntimeSettings(Array.isArray(parsed) ? undefined : parsed.settings),
+  }
+}
+
+function normalizeRuntimeSettings(input: unknown): Settings {
+  const source = { ...defaultRuntimeSettings, ...normalizeObject(input) }
+  return {
+    ...source,
+    showScoresToAudience: Boolean(source.showScoresToAudience),
+    starBudget: clamp(Math.floor(Number(source.starBudget) || defaultStarBudget), 1, 20),
+    maxStarsPerTeam: clamp(
+      Math.floor(Number(source.maxStarsPerTeam) || defaultMaxStarsPerTeam),
+      1,
+      maxConfigurableStarsPerTeam,
+    ),
+    durationMinutes: normalizeDurationMinutes(source.durationMinutes, defaultDurationMinutes),
+    timerMode: normalizeTimerMode(source.timerMode, 'duration'),
+    targetTime: normalizeTargetTime(source.targetTime),
+    minScore: clamp(Number(source.minScore ?? defaultMinScore), 0, 9.9),
+    raffleCheerWeight: clamp(Number(source.raffleCheerWeight ?? defaultRaffleCheerWeight), 0, 1),
+    quizAnswerLimit: clamp(Math.floor(Number(source.quizAnswerLimit) || defaultQuizAnswerLimit), 1, maxQuizAnswerLimit),
+    quizInitialConfirmDelaySeconds: clamp(
+      Math.floor(
+        Number.isFinite(Number(source.quizInitialConfirmDelaySeconds))
+          ? Number(source.quizInitialConfirmDelaySeconds)
+          : defaultQuizInitialConfirmDelaySeconds,
+      ),
+      0,
+      maxQuizInitialConfirmDelaySeconds,
+    ),
+    cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
+    themeMode: normalizeThemeMode(source.themeMode, 'stage'),
+    wallEnabledPanels: normalizeWallEnabledPanels(source.wallEnabledPanels),
+    qnaWallFontScale: clamp(Number(source.qnaWallFontScale ?? defaultQnaWallFontScale), 0.85, 1.55),
   }
 }
 
@@ -2698,6 +3011,16 @@ function json(data: unknown, status = 200, headers: HeadersInit = {}) {
       ...headers,
     },
   })
+}
+
+function byteLengthJson(value: unknown) {
+  return encoder.encode(JSON.stringify(value)).byteLength
+}
+
+function formatBytes(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${bytes} B`
 }
 
 function sanitizeText(value: unknown, maxLength: number) {
@@ -2908,6 +3231,10 @@ function isAdminProtectedRequest(url: URL, method: string) {
     return true
   }
 
+  if (method === 'GET' && url.pathname === '/api/ops/audit') {
+    return true
+  }
+
   if (method === 'GET' && url.pathname === '/events') {
     const role = url.searchParams.get('role')
     return role === 'admin' || role === 'wall'
@@ -2922,6 +3249,8 @@ function isAdminProtectedRequest(url: URL, method: string) {
   return new Set([
     '/api/cheer/moderate',
     '/api/cheer/bulk',
+    '/api/question/read',
+    '/api/question/reset',
     '/api/quiz/open',
     '/api/quiz/prepare',
     '/api/quiz/confirm-mode',
@@ -3024,6 +3353,18 @@ function normalizeCheerNameMode(value: unknown, fallback: Settings['cheerNameMod
 
 function normalizeThemeMode(value: unknown, fallback: Settings['themeMode'] = 'light'): Settings['themeMode'] {
   return value === 'stage' ? 'stage' : value === 'light' ? 'light' : fallback
+}
+
+function normalizeWallEnabledPanels(value: unknown): Settings['wallEnabledPanels'] {
+  const source = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : defaultWallEnabledPanels
+  const next: Settings['wallEnabledPanels'] = []
+  for (const item of source) {
+    const panel = String(item || '').trim()
+    if ((wallSessionValues as readonly string[]).includes(panel) && !next.includes(panel as Settings['wallEnabledPanels'][number])) {
+      next.push(panel as Settings['wallEnabledPanels'][number])
+    }
+  }
+  return next.length ? next : defaultWallEnabledPanels
 }
 
 function normalizeTimerMode(value: unknown, fallback: Settings['timerMode'] = 'duration'): Settings['timerMode'] {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CSSProperties,
   FormEvent as ReactFormEvent,
@@ -33,6 +33,7 @@ import {
   RefreshCcw,
   Save,
   Search,
+  Send,
   Settings2,
   Sparkles,
   Star,
@@ -114,6 +115,19 @@ type CheerMessage = {
   text: string
   createdAt: number
   hidden?: boolean
+}
+
+type QuestionMessage = {
+  id: number
+  participantId?: string
+  author: string
+  group?: string
+  department?: string
+  text: string
+  createdAt: number
+  editedAt?: number
+  hidden?: boolean
+  read?: boolean
 }
 
 type VoteEvent = {
@@ -253,6 +267,9 @@ type EventState = {
   cheers: CheerMessage[]
   cheerTotalCount?: number
   visibleCheerTotalCount?: number
+  questions: QuestionMessage[]
+  questionTotalCount?: number
+  visibleQuestionTotalCount?: number
   voteEvents: VoteEvent[]
   awardHistory: AwardRecord[]
   closed: boolean
@@ -279,6 +296,8 @@ type EventState = {
     quizInitialConfirmDelaySeconds: number
     cheerNameMode: CheerNameMode
     themeMode: ThemeMode
+    wallEnabledPanels: WallSession[]
+    qnaWallFontScale: number
   }
   copy: EventCopy
 }
@@ -323,11 +342,13 @@ type EventCopy = {
   wallEyeline: string
   wallMetricStars: string
   wallMetricCheers: string
+  wallMetricQuestions: string
   wallOverviewLabel: string
   wallCheerLabel: string
   wallRaffleLabel: string
   wallShowupLabel: string
   wallQuizLabel: string
+  wallQnaLabel: string
   wallArenaEyeline: string
   wallArenaTitle: string
   wallCheerEyeline: string
@@ -337,6 +358,22 @@ type EventCopy = {
   wallRaffleTitle: string
   wallQuizEyeline: string
   wallQuizTitle: string
+  wallQnaEyeline: string
+  wallQnaTitle: string
+  wallQnaEmpty: string
+  qnaRoomEyeline: string
+  qnaRoomTitle: string
+  qnaRoomTarget: string
+  qnaRoomSummary: string
+  qnaLoginTitle: string
+  qnaLoginReady: string
+  qnaLoginButtonLabel: string
+  qnaQuestionSentStatus: string
+  qnaPromptEyeline: string
+  qnaPromptTitle: string
+  qnaPromptSummary: string
+  qnaInputPlaceholder: string
+  qnaSendLabel: string
   quizStandbyHeadline: string
   quizStandbySubhead: string
   quizStandbyHint: string
@@ -482,9 +519,10 @@ type AdminSessionState = {
   logout: () => Promise<void>
   refresh: () => Promise<void>
 }
-type AppMode = 'admin' | 'vote' | 'wall' | 'team'
+type AppMode = 'admin' | 'vote' | 'wall' | 'team' | 'message'
 type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams' | 'quiz' | 'export'
-type WallPanel = 'overview' | 'cheer' | 'raffle' | 'quiz'
+type WallPanel = 'overview' | 'cheer' | 'raffle' | 'quiz' | 'qna'
+type WallSession = 'overview' | 'raffle' | 'showup' | 'qna' | 'quiz'
 
 const raffleRuleOptions: Array<{ value: RaffleRule; label: string }> = [
   { value: 'all', label: '공개 응원 메시지 참여자' },
@@ -499,6 +537,15 @@ const raffleRuleOptions: Array<{ value: RaffleRule; label: string }> = [
   { value: 'cheer3', label: '공개 응원 메시지를 3개 이상 보낸 참여자' },
   { value: 'cheer5', label: '공개 응원 메시지를 5개 이상 보낸 참여자' },
 ]
+
+const wallSessionOptions: Array<{ value: WallSession; label: string; description: string }> = [
+  { value: 'overview', label: '실시간 현황', description: '누적 별, 순위, 응원 메시지 패널을 함께 보여줍니다.' },
+  { value: 'raffle', label: '행운권 추첨', description: '송출 화면에서 행운권 추첨 세션을 열 수 있게 합니다.' },
+  { value: 'showup', label: '말풍선', description: '응원 말풍선 Showup 버튼을 노출합니다.' },
+  { value: 'qna', label: 'Q&A', description: '질문 wall 세션을 노출합니다.' },
+  { value: 'quiz', label: '퀴즈', description: '퀴즈 송출 세션을 노출합니다.' },
+]
+const defaultWallEnabledSessions: WallSession[] = wallSessionOptions.map((option) => option.value)
 
 const rafflePrizeImageKeyByRule: Record<RaffleRule, RafflePrizeImageKey> = {
   all: 'rafflePrizeImageAll',
@@ -821,6 +868,42 @@ type TeamVisual = Pick<
 >
 type ImageTuningField = 'shape' | 'frame' | 'fit' | 'width' | 'height' | 'zoom' | 'focusX' | 'focusY'
 type ImageTuningValues = Record<ImageTuningField, string> & { size?: string }
+type QnaWordCloudItem = {
+  term: string
+  text: string
+  x: number
+  y: number
+  size: number
+  weight: number
+  rotate: number
+  color: string
+  driftX: number
+  driftY: number
+  driftDelay: number
+  driftDuration: number
+}
+type QnaWordCloudSeed = Pick<QnaWordCloudItem, 'term' | 'text' | 'size' | 'weight' | 'rotate' | 'color'>
+type D3QnaCloudWord = QnaWordCloudSeed & {
+  x?: number
+  y?: number
+}
+type D3QnaCloudLayout<T extends D3QnaCloudWord> = {
+  size: (size: [number, number]) => D3QnaCloudLayout<T>
+  words: (words: T[]) => D3QnaCloudLayout<T>
+  padding: (padding: number | ((word: T, index: number) => number)) => D3QnaCloudLayout<T>
+  rotate: (rotate: number | ((word: T, index: number) => number)) => D3QnaCloudLayout<T>
+  font: (font: string | ((word: T, index: number) => string)) => D3QnaCloudLayout<T>
+  fontWeight: (weight: string | number | ((word: T, index: number) => string | number)) => D3QnaCloudLayout<T>
+  fontSize: (size: number | ((word: T, index: number) => number)) => D3QnaCloudLayout<T>
+  text: (text: string | ((word: T, index: number) => string)) => D3QnaCloudLayout<T>
+  spiral: (name: string) => D3QnaCloudLayout<T>
+  random: (random: () => number) => D3QnaCloudLayout<T>
+  timeInterval: (interval: number) => D3QnaCloudLayout<T>
+  on: (type: 'end', listener: (words: T[]) => void) => D3QnaCloudLayout<T>
+  start: () => D3QnaCloudLayout<T>
+  stop: () => D3QnaCloudLayout<T>
+}
+type D3QnaCloudFactory = <T extends D3QnaCloudWord>() => D3QnaCloudLayout<T>
 
 const DEFAULT_STAR_BUDGET = 10
 const DEFAULT_MAX_STARS_PER_TEAM = 5
@@ -832,9 +915,160 @@ const DEFAULT_QUIZ_ANSWER_LIMIT = 3
 const MAX_QUIZ_ANSWER_LIMIT = 10
 const DEFAULT_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS = 20
 const MAX_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS = 60
+const DEFAULT_QNA_WALL_FONT_SCALE = 1.12
+const QUESTION_MAX_LENGTH = 700
 const KST_OFFSET_MINUTES = 9 * 60
 const DEFAULT_TEAM_PHOTO_RADIUS = 18
 const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
+const QNA_WORD_CLOUD_WIDTH = 860
+const QNA_WORD_CLOUD_HEIGHT = 230
+const QNA_WORD_CLOUD_MAX_TERMS = 46
+const qnaWordCloudRotateOptions = [0, 0, 0, 0, -5, 5, -8, 8, -11, 11] as const
+const qnaWordCloudColors = ['#d8bfd0', '#bdd8ef', '#cfc7ea', '#afd8d2', '#d7bfd8', '#bfcce8']
+let d3QnaCloudLoader: Promise<D3QnaCloudFactory> | null = null
+const qnaWordCloudStopWords = new Set([
+  'ax',
+  'q&a',
+  '그리고',
+  '그런데',
+  '그러면',
+  '그래서',
+  '다만',
+  '어떻게',
+  '어떤',
+  '무엇',
+  '무엇인가요',
+  '어디',
+  '언제',
+  '왜',
+  '혹시',
+  '가장',
+  '먼저',
+  '주세요',
+  '질문',
+  '궁금',
+  '궁금해요',
+  '궁금합니다',
+  '문의',
+  '답변',
+  '발표',
+  '발표자',
+  '남길',
+  '보내면',
+  '보냈습니다',
+  '올라갑니다',
+  '쌓입니다',
+  '확인',
+  '확인하겠습니다',
+  '참고',
+  '영상',
+  '같이',
+  '지금',
+  '현재',
+  '관련',
+  '경우',
+  '정도',
+  '부분',
+  '기능',
+  '사용',
+  '이번',
+  '오늘',
+  '가능',
+  '가능한가요',
+  '가능할까요',
+  '필요',
+  '입니다',
+  '합니다',
+  '해주세요',
+  '되나요',
+  '있나요',
+  '있습니다',
+  '없나요',
+  '이것',
+  '저것',
+  '그것',
+  '이제',
+  '원본',
+  '요청',
+  '요청한',
+  '기준',
+  '기준으로',
+  '기준이므로',
+  '부근',
+  '됐습니다',
+  '됐습니',
+  '됩니다',
+  '넘어',
+  '넘어갔습니다',
+  '덮어',
+  '읽히고',
+  '녹아들고',
+  '녹아들',
+  '살아났고',
+  '봤습니다',
+  '맞습니다',
+  '좋습니다',
+  '좋을까',
+  '좋을까요',
+  '싫어요',
+  '봐야',
+  '볼까요',
+  '볼까',
+  '잡으면',
+  '쉽습니다',
+  '쉬운',
+  '낮아',
+  '남아',
+  'qna',
+  'wall',
+  'board',
+  'cloud',
+])
+const qnaKoreanFunctionalSuffixes = [
+  '으로부터',
+  '으로써',
+  '으로서',
+  '에서는',
+  '에게서',
+  '이라고',
+  '이므로',
+  '라는',
+  '이라면',
+  '이라서',
+  '까지',
+  '부터',
+  '에게',
+  '한테',
+  '께서',
+  '에서',
+  '으로',
+  '라고',
+  '이라',
+  '라도',
+  '므로',
+  '처럼',
+  '보다',
+  '밖에',
+  '마다',
+  '하고',
+  '이며',
+  '이고',
+  '인데',
+  '인가',
+  '은',
+  '는',
+  '이',
+  '가',
+  '을',
+  '를',
+  '에',
+  '의',
+  '와',
+  '과',
+  '도',
+  '만',
+  '로',
+] as const
 const imageShapeOptions: Array<{ value: ImageShape; label: string }> = [
   { value: 'circle', label: '원형' },
   { value: 'rounded', label: '둥근 사각형' },
@@ -885,11 +1119,13 @@ const copyLabels: Record<keyof EventCopy, string> = {
   wallEyeline: '송출 화면 상단 라벨',
   wallMetricStars: '송출 누적 별 라벨',
   wallMetricCheers: '송출 응원 메시지 라벨',
+  wallMetricQuestions: '송출 질문 수 라벨',
   wallOverviewLabel: '송출 실시간 현황 버튼',
   wallCheerLabel: '송출 응원 메시지 버튼',
   wallRaffleLabel: '송출 행운권 추첨 버튼',
   wallShowupLabel: '송출 말풍선 버튼',
   wallQuizLabel: '송출 퀴즈 버튼',
+  wallQnaLabel: '송출 Q&A 버튼',
   wallArenaEyeline: '송출 현황 패널 라벨',
   wallArenaTitle: '송출 현황 패널 제목',
   wallCheerEyeline: '송출 응원 패널 라벨',
@@ -899,6 +1135,22 @@ const copyLabels: Record<keyof EventCopy, string> = {
   wallRaffleTitle: '송출 추첨 패널 제목',
   wallQuizEyeline: '송출 퀴즈 패널 라벨',
   wallQuizTitle: '송출 퀴즈 패널 제목',
+  wallQnaEyeline: '송출 Q&A 패널 라벨',
+  wallQnaTitle: '송출 Q&A 패널 제목',
+  wallQnaEmpty: '송출 Q&A 질문 없음 문구',
+  qnaRoomEyeline: 'QnA 방 상단 라벨',
+  qnaRoomTitle: 'QnA 방 화면 제목',
+  qnaRoomTarget: 'QnA 질문 대상 문구',
+  qnaRoomSummary: 'QnA 방 안내 문구',
+  qnaLoginTitle: 'QnA 입장 영역 제목',
+  qnaLoginReady: 'QnA 입장 안내 문구',
+  qnaLoginButtonLabel: 'QnA 입장 버튼 문구',
+  qnaQuestionSentStatus: 'QnA 질문 전송 완료 문구',
+  qnaPromptEyeline: '관객 질문 입력 라벨',
+  qnaPromptTitle: '관객 질문 입력 제목',
+  qnaPromptSummary: '관객 질문 입력 안내',
+  qnaInputPlaceholder: '관객 질문 입력 예시',
+  qnaSendLabel: '관객 질문 전송 버튼',
   quizStandbyHeadline: '퀴즈 대기 화면 큰 제목',
   quizStandbySubhead: '퀴즈 대기 화면 설명',
   quizStandbyHint: '퀴즈 대기 화면 보조 안내',
@@ -976,6 +1228,11 @@ const copyHelp: Partial<Record<keyof EventCopy, string>> = {
   wallRaffleLabel: '/wall 상단 행운권 추첨 버튼입니다.',
   wallShowupLabel: '/wall 상단 말풍선 버튼입니다.',
   wallQuizLabel: '/wall 상단 퀴즈 버튼입니다.',
+  wallQnaLabel: '/wall 상단 Q&A 버튼입니다.',
+  qnaRoomTitle: '/message 화면의 상단 제목과 현재 화면 표시에 쓰입니다.',
+  qnaRoomTarget: '/message 화면에서 보이는 "누구에게 질문해주세요" 문구입니다.',
+  qnaLoginReady: '/message 입장 폼 아래에 표시되는 질문 전용 안내 문구입니다.',
+  qnaPromptSummary: '/message 질문 입력 카드의 안내 문구입니다.',
   quizStandbyHeadline: '/wall과 /vote 퀴즈 대기 화면의 가장 큰 안내입니다.',
   quizStandbySubhead: '/wall 퀴즈 대기 화면에서 참가자 전환 상태를 설명합니다.',
   quizStandbyHint: '/wall과 /vote 퀴즈 대기 화면의 짧은 참여 방법 안내입니다.',
@@ -1072,15 +1329,41 @@ const copyGroups: Array<{
     keys: [
       'wallMetricStars',
       'wallMetricCheers',
+      'wallMetricQuestions',
       'wallOverviewLabel',
       'wallRaffleLabel',
       'wallShowupLabel',
       'wallQuizLabel',
+      'wallQnaLabel',
       'wallArenaEyeline',
       'wallArenaTitle',
       'wallCheerEyeline',
       'wallCheerTitle',
       'wallSelectedCheerSuffix',
+      'wallQnaEyeline',
+      'wallQnaTitle',
+      'wallQnaEmpty',
+    ],
+  },
+  {
+    id: 'qna',
+    eyeline: 'Q&A',
+    title: 'QnA 방',
+    description: '참가자가 /message에서 입장하고 질문을 남길 때 보는 문구입니다.',
+    keys: [
+      'qnaRoomEyeline',
+      'qnaRoomTitle',
+      'qnaRoomTarget',
+      'qnaRoomSummary',
+      'qnaLoginTitle',
+      'qnaLoginReady',
+      'qnaLoginButtonLabel',
+      'qnaQuestionSentStatus',
+      'qnaPromptEyeline',
+      'qnaPromptTitle',
+      'qnaPromptSummary',
+      'qnaInputPlaceholder',
+      'qnaSendLabel',
     ],
   },
   {
@@ -1177,11 +1460,13 @@ const fallbackCopy: EventCopy = {
   wallEyeline: 'Audience Wall',
   wallMetricStars: '누적 별',
   wallMetricCheers: '응원 메시지',
+  wallMetricQuestions: '질문',
   wallOverviewLabel: '실시간 현황',
   wallCheerLabel: '응원메세지',
   wallRaffleLabel: '행운권추첨',
   wallShowupLabel: '말풍선',
   wallQuizLabel: '퀴즈',
+  wallQnaLabel: 'Q&A',
   wallArenaEyeline: 'Live Arena Wall',
   wallArenaTitle: '실시간 별 현황',
   wallCheerEyeline: 'Cheer Board',
@@ -1191,6 +1476,22 @@ const fallbackCopy: EventCopy = {
   wallRaffleTitle: '행운권 추첨',
   wallQuizEyeline: 'Live Quiz',
   wallQuizTitle: '퀴즈',
+  wallQnaEyeline: 'Live Q&A',
+  wallQnaTitle: '무엇이든 질문해 주세요',
+  wallQnaEmpty: '아직 질문이 없습니다. 무엇이 궁금하신가요?',
+  qnaRoomEyeline: 'QnA Room',
+  qnaRoomTitle: 'AX Group QnA',
+  qnaRoomTarget: 'AX Group에게 질문해주세요',
+  qnaRoomSummary: '별명으로 입장한 뒤 질문을 남기면 Q&A board에 실시간으로 올라갑니다.',
+  qnaLoginTitle: 'QnA 방 입장',
+  qnaLoginReady: '별명만 입력하면 익명으로 질문할 수 있습니다. 운영자는 내부 관리 ID로 참여 기록을 확인합니다.',
+  qnaLoginButtonLabel: 'QnA 방 입장',
+  qnaQuestionSentStatus: '질문이 Q&A board에 올라갔습니다.',
+  qnaPromptEyeline: 'Q&A',
+  qnaPromptTitle: '발표자에게 남길 질문',
+  qnaPromptSummary: '궁금한 점을 적어 보내면 Q&A board에 질문 카드로 쌓입니다.',
+  qnaInputPlaceholder: '예: 이 기능을 실제 업무에 적용할 때 가장 먼저 필요한 데이터는 무엇인가요?',
+  qnaSendLabel: '질문 올리기',
   quizStandbyHeadline: '퀴즈를 준비 중입니다',
   quizStandbySubhead: '',
   quizStandbyHint: '문제가 출제되면 3초 카운트다운 뒤 문제가 공개됩니다. 최대한 빨리 정답을 입력하세요. :)',
@@ -1461,6 +1762,17 @@ const fallbackState: EventState = {
       createdAt: Date.now() - 30_000,
     },
   ],
+  questions: [
+    {
+      id: 1,
+      author: '지민',
+      group: 'demo',
+      department: 'AI연구1팀',
+      text: '이 아이디어를 실제 현장에 적용하려면 첫 주에 무엇부터 검증하면 좋을까요?',
+      createdAt: Date.now() - 45_000,
+      read: false,
+    },
+  ],
   voteEvents: [],
   awardHistory: [],
   closed: false,
@@ -1510,6 +1822,8 @@ const fallbackState: EventState = {
     quizInitialConfirmDelaySeconds: DEFAULT_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS,
     cheerNameMode: 'masked',
     themeMode: 'stage',
+    wallEnabledPanels: defaultWallEnabledSessions,
+    qnaWallFontScale: DEFAULT_QNA_WALL_FONT_SCALE,
   },
   copy: fallbackCopy,
 }
@@ -1536,13 +1850,7 @@ function App() {
   const [showCheerConstellation, setShowCheerConstellation] = useState(
     () => new URLSearchParams(window.location.search).get('showCheer') === '1',
   )
-  const visibleWallPanel: WallPanel = mode === 'wall' && state.quiz.mode !== 'idle' ? 'quiz' : wallPanel
-  const syncedWallPanel: WallPanel =
-    mode === 'wall' && state.quiz.mode !== 'idle'
-      ? 'quiz'
-      : mode === 'wall' && state.raffleStage.active
-        ? 'raffle'
-        : visibleWallPanel
+  const syncedWallPanel: WallPanel = mode === 'wall' ? resolveWallPanel(state, wallPanel) : wallPanel
 
   const participant = state.participants.find((person) => isSameParticipantDevice(person, participantId))
   const allocations = participant?.allocations ?? {}
@@ -1602,7 +1910,7 @@ function App() {
   }
 
   return (
-    <main className={`app-shell theme-${themeMode} ${mode === 'wall' ? 'wall-shell-app' : ''}`}>
+    <main className={`app-shell theme-${themeMode} ${mode === 'wall' ? 'wall-shell-app' : ''} ${mode === 'message' ? 'message-shell-app' : ''}`}>
       <Header
         mode={mode}
         connection={connection}
@@ -1642,7 +1950,7 @@ function App() {
           return null
         }}
         adminSession={protectedDisplayMode ? adminSession : undefined}
-        onVoteLogout={mode === 'vote' ? switchVoteParticipant : undefined}
+        onVoteLogout={mode === 'vote' || mode === 'message' ? switchVoteParticipant : undefined}
       />
       {mode === 'admin' ? (
         <AdminView state={state} connection={connection} post={post} />
@@ -1657,6 +1965,17 @@ function App() {
         />
       ) : mode === 'team' ? (
         <TeamSelfEditView key={getEditableConfigSignature(state)} state={state} post={post} />
+      ) : mode === 'message' ? (
+        <MessageView
+          state={state}
+          participantId={participantId}
+          participant={participant}
+          name={name}
+          onNameChange={saveName}
+          onGroupChange={saveGroup}
+          onDepartmentChange={saveDepartment}
+          post={post}
+        />
       ) : (
         <VoteView
           state={state}
@@ -1725,12 +2044,48 @@ function getAppMode(): AppMode {
   if (window.location.pathname.startsWith('/admin')) return 'admin'
   if (window.location.pathname.startsWith('/wall')) return 'wall'
   if (window.location.pathname.startsWith('/team')) return 'team'
+  if (window.location.pathname.startsWith('/message')) return 'message'
   return 'vote'
+}
+
+function hasResolvedEventState(state: EventState) {
+  return state.sessionId > 0
 }
 
 function getInitialWallPanel(): WallPanel {
   const panel = new URLSearchParams(window.location.search).get('panel')
-  return panel === 'cheer' || panel === 'raffle' || panel === 'quiz' ? panel : 'overview'
+  return panel === 'cheer' || panel === 'raffle' || panel === 'quiz' || panel === 'qna' ? panel : 'overview'
+}
+
+function getWallEnabledSessions(state: EventState): WallSession[] {
+  const source = Array.isArray(state.settings.wallEnabledPanels) ? state.settings.wallEnabledPanels : defaultWallEnabledSessions
+  const enabled = source.filter((panel): panel is WallSession => wallSessionOptions.some((option) => option.value === panel))
+  return enabled.length ? enabled : defaultWallEnabledSessions
+}
+
+function isWallSessionEnabled(state: EventState, session: WallSession) {
+  return getWallEnabledSessions(state).includes(session)
+}
+
+function isWallPanelEnabled(state: EventState, panel: WallPanel) {
+  if (panel === 'cheer') return isWallSessionEnabled(state, 'overview')
+  return isWallSessionEnabled(state, panel)
+}
+
+function getFirstEnabledWallPanel(state: EventState): WallPanel {
+  const enabled = getWallEnabledSessions(state)
+  if (enabled.includes('overview')) return 'overview'
+  if (enabled.includes('raffle')) return 'raffle'
+  if (enabled.includes('qna')) return 'qna'
+  if (enabled.includes('quiz')) return 'quiz'
+  return 'overview'
+}
+
+function resolveWallPanel(state: EventState, requestedPanel: WallPanel): WallPanel {
+  if (state.quiz.mode !== 'idle' && isWallSessionEnabled(state, 'quiz')) return 'quiz'
+  if (state.raffleStage.active && isWallSessionEnabled(state, 'raffle')) return 'raffle'
+  if (isWallPanelEnabled(state, requestedPanel)) return requestedPanel
+  return getFirstEnabledWallPanel(state)
 }
 
 function getInitialAdminPanel(): AdminPanel | null {
@@ -1772,6 +2127,7 @@ function getDocumentTitle(mode: AppMode, wallPanel: WallPanel) {
     const teamId = getTeamEditRouteId()
     return `vibe-compete/team${teamId ? `/${teamId}` : ''}`
   }
+  if (mode === 'message') return 'vibe-compete/message'
   return 'vibe-compete/vote'
 }
 
@@ -1846,8 +2202,26 @@ function Header({
   const secondsLeft = Math.max(0, Math.floor((state.closesAt - now) / 1000))
   const connectionLabel = connection === 'live' ? 'Live' : connection === 'connecting' ? '연결 중' : '오프라인 데모'
   const voteUrl = `${window.location.host}/vote`
+  const headerEyeline =
+    mode === 'admin'
+      ? state.copy.adminEyeline
+      : mode === 'wall'
+        ? state.copy.wallEyeline
+        : mode === 'message'
+          ? state.copy.qnaRoomEyeline
+          : state.copy.audienceEyeline
+  const headerTitle = state.copy.appTitle
+  const statusPillIcon = mode === 'team' ? <Settings2 size={16} /> : mode === 'message' ? <CircleHelp size={16} /> : <Radio size={16} />
+  const statusPillText = mode === 'team' ? '팀 정보 편집' : mode === 'message' ? state.copy.qnaRoomTitle : '관객 투표 화면'
+  const wallStateReady = mode !== 'wall' || hasResolvedEventState(state)
+  const wallOverviewEnabled = isWallSessionEnabled(state, 'overview')
+  const wallRaffleEnabled = isWallSessionEnabled(state, 'raffle')
+  const wallShowupEnabled = isWallSessionEnabled(state, 'showup')
+  const wallQnaEnabled = isWallSessionEnabled(state, 'qna')
+  const wallQuizEnabled = isWallSessionEnabled(state, 'quiz')
   const wallTotalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
   const wallVisibleCheers = state.cheers.filter((message) => !message.hidden).length
+  const wallVisibleQuestions = state.questions.filter((question) => !question.hidden).length
   const adminPanel = new URLSearchParams(window.location.search).get('panel')
   const adminOverviewActive = state.quiz.mode === 'idle' && (!adminPanel || adminPanel === 'arena')
   const adminQuizActive = adminPanel === 'quiz' || state.quiz.mode !== 'idle'
@@ -1870,9 +2244,9 @@ function Header({
       <div className="brand-lockup">
         <BrandMark copy={state.copy} />
         <div>
-          <p className="eyeline">{mode === 'admin' ? state.copy.adminEyeline : mode === 'wall' ? state.copy.wallEyeline : state.copy.audienceEyeline}</p>
+          <p className="eyeline">{headerEyeline}</p>
           <div className="brand-title-row">
-            <h1>{state.copy.appTitle}</h1>
+            <h1>{mode === 'message' ? <QnaFontText text={headerTitle} /> : headerTitle}</h1>
             {mode === 'admin' ? <span className="admin-console-badge">운영 콘솔</span> : null}
           </div>
         </div>
@@ -1942,6 +2316,10 @@ function Header({
               <Megaphone size={15} />
               관객 화면 미리보기
             </a>
+            <a className="role-nav-link" href="/message" target="_blank" rel="noreferrer">
+              <CircleHelp size={15} />
+              QnA 화면 미리보기
+            </a>
             {adminSession ? (
               <>
                 <button
@@ -1976,78 +2354,125 @@ function Header({
           </>
         ) : mode === 'wall' ? (
           <>
-            <div className="public-wall-metrics wall-topbar-metrics" aria-label="관객 공개 지표">
-              <div>
-                <span>{state.copy.wallMetricStars}</span>
-                <strong>{wallTotalStars}</strong>
+            {!wallStateReady ? (
+              <div className="public-wall-booting" role="status" aria-live="polite">
+                <Radio size={16} />
+                <span>Q&A board 연결 중</span>
               </div>
-              <div>
-                <span>{state.copy.wallMetricCheers}</span>
-                <strong>{wallVisibleCheers}</strong>
-              </div>
-            </div>
-            <div className="public-wall-actions wall-topbar-actions">
-              <button
-                type="button"
-                className={wallPanel === 'overview' ? 'active' : ''}
-                onClick={() => {
-                  void (async () => {
-                    if (state.quiz.mode !== 'idle') await onEndQuiz?.()
-                    if (!(await endRaffleBeforeNavigation())) return
-                    onWallPanelChange('overview')
-                  })()
-                }}
-              >
-                <RadioTower size={16} />
-                {state.copy.wallOverviewLabel}
-              </button>
-              <button
-                type="button"
-                className={wallPanel === 'raffle' ? 'active' : ''}
-                onClick={() => {
-                  onWallPanelChange('raffle')
-                  if (state.quiz.mode !== 'idle') void onEndQuiz?.()
-                  void onPrepareRaffle?.()
-                }}
-              >
-                <Ticket size={16} />
-                {state.copy.wallRaffleLabel}
-              </button>
-              <button type="button" onClick={onOpenCheerConstellation}>
-                <Sparkles size={17} />
-                {getWallShowupButtonLabel(state.copy)}
-              </button>
-              <button
-                type="button"
-                className={wallPanel === 'quiz' ? 'active' : ''}
-                onClick={() => {
-                  void (async () => {
-                    if (!(await endRaffleBeforeNavigation())) return
-                    onWallPanelChange('quiz')
-                    await onPrepareQuiz?.()
-                  })()
-                }}
-              >
-                <CircleHelp size={16} />
-                {state.copy.wallQuizLabel}
-              </button>
-            </div>
+            ) : (
+              <>
+                {wallOverviewEnabled || wallQnaEnabled ? (
+                  <div className="public-wall-metrics wall-topbar-metrics" aria-label="관객 공개 지표">
+                    {wallOverviewEnabled ? (
+                      <>
+                        <div>
+                          <span>{state.copy.wallMetricStars}</span>
+                          <strong>{wallTotalStars}</strong>
+                        </div>
+                        <div>
+                          <span>{state.copy.wallMetricCheers}</span>
+                          <strong>{wallVisibleCheers}</strong>
+                        </div>
+                      </>
+                    ) : null}
+                    {wallQnaEnabled ? (
+                      <div>
+                        <span>{state.copy.wallMetricQuestions}</span>
+                        <strong>{wallVisibleQuestions}</strong>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="public-wall-actions wall-topbar-actions">
+                  {wallOverviewEnabled ? (
+                    <button
+                      type="button"
+                      className={wallPanel === 'overview' ? 'active' : ''}
+                      onClick={() => {
+                        void (async () => {
+                          if (state.quiz.mode !== 'idle') await onEndQuiz?.()
+                          if (!(await endRaffleBeforeNavigation())) return
+                          onWallPanelChange('overview')
+                        })()
+                      }}
+                    >
+                      <RadioTower size={16} />
+                      {state.copy.wallOverviewLabel}
+                    </button>
+                  ) : null}
+                  {wallRaffleEnabled ? (
+                    <button
+                      type="button"
+                      className={wallPanel === 'raffle' ? 'active' : ''}
+                      onClick={() => {
+                        onWallPanelChange('raffle')
+                        if (state.quiz.mode !== 'idle') void onEndQuiz?.()
+                        void onPrepareRaffle?.()
+                      }}
+                    >
+                      <Ticket size={16} />
+                      {state.copy.wallRaffleLabel}
+                    </button>
+                  ) : null}
+                  {wallShowupEnabled ? (
+                    <button type="button" onClick={onOpenCheerConstellation}>
+                      <Sparkles size={17} />
+                      {getWallShowupButtonLabel(state.copy)}
+                    </button>
+                  ) : null}
+                  {wallQnaEnabled ? (
+                    <button
+                      type="button"
+                      className={wallPanel === 'qna' ? 'active' : ''}
+                      onClick={() => {
+                        void (async () => {
+                          if (state.quiz.mode !== 'idle') await onEndQuiz?.()
+                          if (!(await endRaffleBeforeNavigation())) return
+                          onWallPanelChange('qna')
+                        })()
+                      }}
+                    >
+                      <MessageCircle size={16} />
+                      {state.copy.wallQnaLabel}
+                    </button>
+                  ) : null}
+                  {wallQuizEnabled ? (
+                    <button
+                      type="button"
+                      className={wallPanel === 'quiz' ? 'active' : ''}
+                      onClick={() => {
+                        void (async () => {
+                          if (!(await endRaffleBeforeNavigation())) return
+                          onWallPanelChange('quiz')
+                          await onPrepareQuiz?.()
+                        })()
+                      }}
+                    >
+                      <CircleHelp size={16} />
+                      {state.copy.wallQuizLabel}
+                    </button>
+                  ) : null}
+                </div>
+              </>
+            )}
           </>
         ) : (
           <div className="audience-status-pill" aria-label="현재 화면">
-            {mode === 'team' ? <Settings2 size={16} /> : <Radio size={16} />}
-            <span>{mode === 'team' ? '팀 정보 편집' : '관객 투표 화면'}</span>
+            {statusPillIcon}
+            <span>{mode === 'message' ? <QnaFontText text={statusPillText} /> : statusPillText}</span>
           </div>
         )}
-        <div className={`timer ${state.closed ? 'closed' : ''}`}>
-          <Clock3 size={18} />
-          <span>{state.closed ? '투표 마감' : formatTime(secondsLeft)}</span>
-        </div>
+        {mode === 'message' || (mode === 'wall' && !wallStateReady) ? null : (
+          <div className={`timer ${state.closed ? 'closed' : ''}`}>
+            <Clock3 size={18} />
+            <span>{state.closed ? '투표 마감' : formatTime(secondsLeft)}</span>
+          </div>
+        )}
         <div className={`connection ${connection}`}>
           <span className="live-dot" />
           <span>{connectionLabel}</span>
         </div>
-        {mode === 'vote' && onVoteLogout ? (
+        {(mode === 'vote' || mode === 'message') && onVoteLogout ? (
           <button type="button" className="session-logout-button" onClick={onVoteLogout}>
             <LogOut size={15} />
             Logout
@@ -2584,7 +3009,7 @@ function VoteView({
       return
     }
 
-    if (!text || !isRegistered || quizPhase !== 'open') return
+    if (!text || !isRegistered || (quizPhase !== 'open' && quizPhase !== 'settling')) return
 
     const response = await post('/api/quiz/answer', {
       sessionId: state.sessionId,
@@ -2950,6 +3375,405 @@ function VoteView({
   )
 }
 
+function MessageView({
+  state,
+  participantId,
+  participant,
+  name,
+  onNameChange,
+  onGroupChange,
+  onDepartmentChange,
+  post,
+}: {
+  state: EventState
+  participantId: string
+  participant: Participant | undefined
+  name: string
+  onNameChange: (name: string) => void
+  onGroupChange: (group: string) => void
+  onDepartmentChange: (department: string) => void
+  post: PostEventState
+}) {
+  const [questionText, setQuestionText] = useState('')
+  const [questionStatus, setQuestionStatus] = useState('')
+  const [focusedOwnQuestionId, setFocusedOwnQuestionId] = useState<number | null>(null)
+  const [editingQuestionId, setEditingQuestionId] = useState<number | null>(null)
+  const [quizAnswerDraft, setQuizAnswerDraft] = useState({ quizId: 0, text: '' })
+  const [quizFeedbackDraft, setQuizFeedbackDraft] = useState({ quizId: 0, text: '' })
+  const participantName = participant?.name || name.trim()
+  const participantGroup = getAnonymousParticipantGroup(participantId)
+  const departmentDisplay = ''
+  const managementLabel = participant ? getParticipantManagementLabel(participant) : getParticipantManagementLabel({ id: participantId })
+  const hasRegistrationInfo = Boolean(name.trim())
+  const sessionReady = state.sessionId > 0
+  const isRegistered = Boolean(participant)
+  const currentParticipantId = participant?.id ?? participantId
+  const participantQuestions = state.questions
+    .filter((question) => question.participantId === currentParticipantId)
+    .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)
+  const focusedOwnQuestion = focusedOwnQuestionId
+    ? participantQuestions.find((question) => question.id === focusedOwnQuestionId) || null
+    : null
+  const editingQuestion = editingQuestionId
+    ? participantQuestions.find((question) => question.id === editingQuestionId) || null
+    : null
+  const quizNow = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
+  const quizServerOffset =
+    typeof state.serverTime === 'number' && typeof state.receivedAt === 'number' ? state.serverTime - state.receivedAt : 0
+  const quizPhase = getQuizDisplayPhase(state.quiz, quizNow)
+  const quizActive = isRegistered && (quizPhase === 'intro' || quizPhase === 'countdown' || quizPhase === 'open' || quizPhase === 'settling')
+  const quizAnswerText = quizAnswerDraft.quizId === state.quiz.id ? quizAnswerDraft.text : ''
+  const quizFeedback = quizFeedbackDraft.quizId === state.quiz.id ? quizFeedbackDraft.text : ''
+  const myQuizAnswers = state.quiz.answers.filter((answer) => answer.participantId === currentParticipantId)
+  const quizAttemptCount = myQuizAnswers.length
+  const quizAttemptLimit = getQuizAnswerLimit(state)
+  const latestMyQuizAnswer = myQuizAnswers[0]
+  const myWinningQuizAnswer = state.quiz.winners.find((answer) => answer.participantId === currentParticipantId)
+
+  useEffect(() => {
+    if (!focusedOwnQuestion) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFocusedOwnQuestionId(null)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [focusedOwnQuestion])
+
+  const registerParticipant = async () => {
+    if (!sessionReady || !hasRegistrationInfo) return
+    const hiddenManagementGroup = getAnonymousParticipantGroup(participantId)
+    const response = await post('/api/register', {
+      sessionId: state.sessionId,
+      participantId,
+      name: name.trim(),
+      group: hiddenManagementGroup,
+      department: '',
+    })
+    if (response) {
+      onGroupChange(hiddenManagementGroup)
+      onDepartmentChange('')
+      storeValue(registeredKey, '1')
+      storeValue(registeredSessionKey, String(response.sessionId))
+    }
+  }
+
+  const handleRegistrationSubmit = (event: ReactFormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    void registerParticipant()
+  }
+
+  const sendQuestion = async () => {
+    const text = questionText.trim()
+    if (!sessionReady || !isRegistered || !text) return
+    if (editingQuestionId && !editingQuestion) {
+      setEditingQuestionId(null)
+      setQuestionText('')
+      setQuestionStatus('수정할 질문을 찾지 못했습니다.')
+      return
+    }
+
+    const response = editingQuestionId
+      ? await post('/api/question/update', {
+          sessionId: state.sessionId,
+          participantId,
+          questionId: editingQuestionId,
+          text,
+        })
+      : await post('/api/question', {
+          sessionId: state.sessionId,
+          participantId,
+          name: participantName,
+          group: participantGroup,
+          department: departmentDisplay,
+          text,
+        })
+
+    if (response) {
+      setQuestionText('')
+      setEditingQuestionId(null)
+      setQuestionStatus(editingQuestionId ? '질문을 수정했습니다.' : state.copy.qnaQuestionSentStatus)
+    } else {
+      setQuestionStatus(editingQuestionId ? '질문을 수정하지 못했습니다. 잠시 후 다시 시도해주세요.' : '질문을 올리지 못했습니다. 입장 상태와 연결을 확인해주세요.')
+    }
+  }
+
+  const editQuestion = (question: QuestionMessage) => {
+    setFocusedOwnQuestionId(null)
+    setEditingQuestionId(question.id)
+    setQuestionText(question.text)
+    setQuestionStatus('수정할 내용을 입력한 뒤 저장하세요.')
+  }
+
+  const cancelQuestionEdit = () => {
+    setEditingQuestionId(null)
+    setQuestionText('')
+    setQuestionStatus('')
+  }
+
+  const deleteQuestion = async (question: QuestionMessage) => {
+    const response = await post('/api/question/delete', {
+      sessionId: state.sessionId,
+      participantId,
+      questionId: question.id,
+    })
+
+    if (response) {
+      if (focusedOwnQuestionId === question.id) setFocusedOwnQuestionId(null)
+      if (editingQuestionId === question.id) {
+        setEditingQuestionId(null)
+        setQuestionText('')
+      }
+      setQuestionStatus('질문을 삭제했습니다.')
+    }
+  }
+
+  const handleQuestionKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+
+    event.preventDefault()
+    sendQuestion()
+  }
+
+  const sendQuizAnswer = async () => {
+    const text = quizAnswerText.trim()
+    if (quizAttemptCount >= quizAttemptLimit) {
+      setQuizFeedbackDraft({
+        quizId: state.quiz.id,
+        text: `이 문제는 최대 ${quizAttemptLimit}번까지만 제출할 수 있습니다.`,
+      })
+      return
+    }
+
+    if (!text || !isRegistered || (quizPhase !== 'open' && quizPhase !== 'settling')) return
+
+    const response = await post('/api/quiz/answer', {
+      sessionId: state.sessionId,
+      participantId,
+      name: participantName,
+      group: participantGroup,
+      department: departmentDisplay,
+      text,
+      quizId: state.quiz.id,
+      clientSubmittedAt: Date.now(),
+      clientServerOffsetMs: quizServerOffset,
+    })
+
+    if (!response) return
+
+    const submission = (response as QuizSubmissionResponse).quizSubmission
+    if (submission && !submission.accepted) {
+      setQuizFeedbackDraft({
+        quizId: state.quiz.id,
+        text: submission.reason || '답변을 접수하지 못했습니다.',
+      })
+      return
+    }
+
+    const submittedAnswer = response.quiz.answers.find(
+      (answer) => answer.participantId === currentParticipantId && answer.text === text,
+    )
+    setQuizAnswerDraft({ quizId: state.quiz.id, text: '' })
+    setQuizFeedbackDraft({
+      quizId: state.quiz.id,
+      text: (submission?.correct ?? submittedAnswer?.correct)
+        ? response.quiz.mode === 'settling'
+          ? '정답 후보입니다. 최종 정답 확인 중...'
+          : isQuizInitialConfirmHoldActive(response.quiz, response.serverTime || Date.now())
+            ? '정답 후보입니다. 사회자 확인 모드 대기 중...'
+          : '정답 후보로 접수되었습니다.'
+        : '정답이 아닙니다.',
+    })
+  }
+
+  const handleQuizKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+
+    event.preventDefault()
+    sendQuizAnswer()
+  }
+
+  return (
+    <section className="message-room-shell" aria-label={state.copy.qnaRoomTitle}>
+      <section className="message-room-hero">
+        <div>
+          <span className="message-room-badge">
+            {quizActive ? <Sparkles size={17} /> : <CircleHelp size={17} />}
+            <QnaFontText text={quizActive ? 'Quiz Mode' : state.copy.qnaRoomEyeline} />
+          </span>
+          <h2><QnaFontText text={quizActive ? 'Live Quiz' : state.copy.qnaRoomTitle} /></h2>
+          <p className="message-room-target"><QnaFontText text={quizActive ? '퀴즈가 시작되었습니다' : state.copy.qnaRoomTarget} /></p>
+          <p className="message-room-summary">
+            <QnaFontText text={quizActive ? '이 화면에서 바로 정답을 입력하세요. 퀴즈가 끝나면 Q&A 방으로 돌아옵니다.' : state.copy.qnaRoomSummary} />
+          </p>
+        </div>
+      </section>
+
+      {!isRegistered ? (
+        <section className="registration-shell message-registration-shell" aria-label={state.copy.qnaLoginTitle}>
+          <div className="section-heading compact">
+            <div>
+              <p className="section-kicker"><QnaFontText text={state.copy.qnaRoomEyeline} /></p>
+              <h2><QnaFontText text={state.copy.qnaLoginTitle} /></h2>
+            </div>
+          </div>
+          <form className="registration-form message-registration-form" onSubmit={handleRegistrationSubmit}>
+            <label>
+              <span><QnaFontText text="별명" /></span>
+              <input
+                value={name}
+                maxLength={18}
+                onChange={(event) => onNameChange(event.target.value)}
+                placeholder="예: 질문왕, AX러너"
+              />
+            </label>
+            <button type="submit" disabled={!hasRegistrationInfo || !sessionReady}>
+              <Check size={17} />
+              <QnaFontText text={state.copy.qnaLoginButtonLabel} />
+            </button>
+          </form>
+          <p className="registration-note">
+            <QnaFontText text={sessionReady ? state.copy.qnaLoginReady : state.copy.registrationConnecting} />
+          </p>
+        </section>
+      ) : quizActive ? (
+        <section className="message-room-card quiz-message-room" aria-label="QnA 퀴즈 참여">
+          <div className="message-room-participant">
+            <div>
+              <span><QnaFontText text="Quiz Participant" /></span>
+              <strong><QnaFontText text={participantName} /></strong>
+            </div>
+            <p><QnaFontText text={managementLabel} /></p>
+          </div>
+          <QuizParticipationView
+            quiz={state.quiz}
+            copy={state.copy}
+            serverTime={state.serverTime}
+            receivedAt={state.receivedAt}
+            answerText={quizAnswerText}
+            onAnswerTextChange={(value) => setQuizAnswerDraft({ quizId: state.quiz.id, text: value })}
+            onSubmit={sendQuizAnswer}
+            onKeyDown={handleQuizKeyDown}
+            latestAnswer={latestMyQuizAnswer}
+            winningAnswer={myWinningQuizAnswer}
+            feedback={quizFeedback}
+            attemptCount={quizAttemptCount}
+            attemptLimit={quizAttemptLimit}
+          />
+        </section>
+      ) : (
+        <section className="message-room-card" aria-label="QnA 질문 작성">
+          <div className="message-room-participant">
+            <div>
+              <span><QnaFontText text={state.copy.qnaLoginTitle} /></span>
+              <strong><QnaFontText text={participantName} /></strong>
+            </div>
+            <p><QnaFontText text={managementLabel} /></p>
+          </div>
+          <QuestionComposerPanel
+            state={state}
+            value={questionText}
+            recentQuestions={participantQuestions.slice(0, 50)}
+            status={questionStatus}
+            disabled={!sessionReady || !isRegistered}
+            editingQuestion={editingQuestion}
+            onChange={(value) => {
+              setQuestionText(value)
+              if (questionStatus) setQuestionStatus('')
+            }}
+            onSubmit={sendQuestion}
+            onKeyDown={handleQuestionKeyDown}
+            onCancelEdit={cancelQuestionEdit}
+            onSelectQuestion={(question) => setFocusedOwnQuestionId(question.id)}
+            onEditQuestion={editQuestion}
+            onDeleteQuestion={deleteQuestion}
+          />
+        </section>
+      )}
+      {focusedOwnQuestion ? (
+        <div className="own-question-backdrop" role="presentation" onClick={() => setFocusedOwnQuestionId(null)}>
+          <article
+            className="own-question-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="내가 보낸 질문"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header>
+              <span>Q</span>
+              <div>
+                <p><QnaFontText text="내가 보낸 질문" /></p>
+                <strong><QnaFontText text={focusedOwnQuestion.author || participantName || '익명'} /></strong>
+              </div>
+              <button type="button" onClick={() => setFocusedOwnQuestionId(null)} aria-label="질문 닫기">
+                닫기
+              </button>
+            </header>
+            <div className="own-question-text">
+              <p><QnaFontText text={focusedOwnQuestion.text} /></p>
+            </div>
+            <footer>
+              <div>
+                <Clock3 size={15} />
+                <time>{formatMessageTime(focusedOwnQuestion.editedAt || focusedOwnQuestion.createdAt)}</time>
+                {focusedOwnQuestion.editedAt ? <span><QnaFontText text="수정됨" /></span> : null}
+              </div>
+              <div className="own-question-actions">
+                <button type="button" onClick={() => editQuestion(focusedOwnQuestion)}>
+                  <Save size={14} />
+                  수정
+                </button>
+                <button type="button" className="danger" onClick={() => deleteQuestion(focusedOwnQuestion)}>
+                  <Trash2 size={14} />
+                  삭제
+                </button>
+              </div>
+            </footer>
+          </article>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function QnaFontText({ text }: { text: string }) {
+  return (
+    <>
+      {splitQnaFontText(text).map((chunk, index) => (
+        <span className={`qna-font-${chunk.kind}`} lang={chunk.kind === 'ko' ? 'ko' : 'en'} key={`${index}-${chunk.text}`}>
+          {chunk.text}
+        </span>
+      ))}
+    </>
+  )
+}
+
+function splitQnaFontText(text: string) {
+  const chunks: Array<{ kind: 'ko' | 'en'; text: string }> = []
+  let currentKind: 'ko' | 'en' = 'en'
+  let currentText = ''
+
+  for (const char of text) {
+    const nextKind = getQnaFontKind(char, currentKind)
+    if (currentText && nextKind !== currentKind) {
+      chunks.push({ kind: currentKind, text: currentText })
+      currentText = ''
+    }
+    currentKind = nextKind
+    currentText += char
+  }
+
+  if (currentText) chunks.push({ kind: currentKind, text: currentText })
+  return chunks
+}
+
+function getQnaFontKind(char: string, fallback: 'ko' | 'en'): 'ko' | 'en' {
+  if (/[ㄱ-ㅎㅏ-ㅣ가-힣]/u.test(char)) return 'ko'
+  if (/[A-Za-z0-9]/.test(char)) return 'en'
+  return fallback
+}
+
 function RaffleWinnerNotice({ state, winner, onDismiss }: { state: EventState; winner: RaffleWinner; onDismiss: () => void }) {
   const details = getRaffleWinnerDetails(state, winner)
 
@@ -2988,7 +3812,7 @@ function QuizWinnerNotice({ winner, onDismiss }: { winner: QuizAnswer; onDismiss
         <p className="section-kicker">Quiz Winner</p>
         <h2>정답을 맞혔습니다!</h2>
         <strong>{winner.author}</strong>
-        <span>{winner.rank ? `${winner.rank}번째 정답자` : '정답자'} · {[winner.group || 'ID 없음', winner.department].filter(Boolean).join(' · ')}</span>
+        <span>{winner.rank ? `${winner.rank}번째 정답자` : '정답자'} · {getParticipantManagementLabel({ id: winner.participantId })}</span>
         <button type="button" onClick={onDismiss}>
           확인하고 돌아가기
         </button>
@@ -3041,6 +3865,107 @@ function ParticipantAwardHistory({ awards, state }: { awards: AwardRecord[]; sta
         })}
       </div>
       {state.copy.awardHistoryNotice ? <p className="award-history-note">{state.copy.awardHistoryNotice}</p> : null}
+    </section>
+  )
+}
+
+function QuestionComposerPanel({
+  state,
+  value,
+  recentQuestions,
+  status,
+  disabled,
+  editingQuestion,
+  onChange,
+  onSubmit,
+  onKeyDown,
+  onCancelEdit,
+  onSelectQuestion,
+  onEditQuestion,
+  onDeleteQuestion,
+}: {
+  state: EventState
+  value: string
+  recentQuestions: QuestionMessage[]
+  status: string
+  disabled: boolean
+  editingQuestion: QuestionMessage | null
+  onChange: (value: string) => void
+  onSubmit: () => void
+  onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
+  onCancelEdit: () => void
+  onSelectQuestion: (question: QuestionMessage) => void
+  onEditQuestion: (question: QuestionMessage) => void
+  onDeleteQuestion: (question: QuestionMessage) => void
+}) {
+  const remaining = QUESTION_MAX_LENGTH - Array.from(value).length
+
+  return (
+    <section className="qna-composer-card" aria-label="Q&A 질문 작성">
+      <div className="qna-composer-heading">
+        <div>
+          <p className="section-kicker"><QnaFontText text={state.copy.qnaPromptEyeline} /></p>
+          <h3><QnaFontText text={state.copy.qnaPromptTitle} /></h3>
+          <p><QnaFontText text={state.copy.qnaPromptSummary} /></p>
+        </div>
+        <span>{Math.max(0, remaining)}</span>
+      </div>
+      <div className="qna-composer-form">
+        <textarea
+          value={value}
+          maxLength={QUESTION_MAX_LENGTH}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={state.copy.qnaInputPlaceholder}
+          disabled={disabled}
+        />
+        <button type="button" onClick={onSubmit} disabled={disabled || !value.trim()}>
+          {editingQuestion ? <Save size={16} /> : <Send size={16} />}
+          <QnaFontText text={editingQuestion ? '수정 저장' : state.copy.qnaSendLabel} />
+        </button>
+      </div>
+      {editingQuestion ? (
+        <div className="qna-editing-note" role="status">
+          <span><QnaFontText text="수정 중" /></span>
+          <em><QnaFontText text={editingQuestion.text} /></em>
+          <button type="button" onClick={onCancelEdit}>
+            취소
+          </button>
+        </div>
+      ) : null}
+      {status ? <p className="qna-composer-status" role="status"><QnaFontText text={status} /></p> : null}
+      {recentQuestions.length ? (
+        <section className="my-question-history" aria-label="내가 보낸 질문 기록">
+          <header>
+            <strong><QnaFontText text="보낸 질문" /></strong>
+            <span>{recentQuestions.length}개</span>
+          </header>
+          <div className="my-question-list">
+            {recentQuestions.map((question) => (
+              <article className={editingQuestion?.id === question.id ? 'is-editing' : ''} key={question.id}>
+                <button type="button" className="my-question-open" onClick={() => onSelectQuestion(question)}>
+                  <span>Q</span>
+                  <span className="my-question-copy">
+                    <span className="my-question-text"><QnaFontText text={question.text} /></span>
+                    <small>
+                      {formatMessageTime(question.editedAt || question.createdAt)}
+                      {question.editedAt ? ' · 수정됨' : ''}
+                    </small>
+                  </span>
+                </button>
+                <div className="my-question-actions">
+                  <button type="button" onClick={() => onEditQuestion(question)}>
+                    수정
+                  </button>
+                  <button type="button" className="danger" onClick={() => onDeleteQuestion(question)}>
+                    삭제
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </section>
   )
 }
@@ -3309,6 +4234,8 @@ function AdminView({
   const quizInitialConfirmDelaySeconds = getQuizInitialConfirmDelaySeconds(state)
   const cheerNameMode = getCheerNameMode(state)
   const themeMode = getThemeMode(state)
+  const wallEnabledPanels = getWallEnabledSessions(state)
+  const qnaWallFontScale = getQnaWallFontScale(state)
   const [draftTimerMode, setDraftTimerMode] = useState<TimerMode>(timerMode)
   const [draftDurationMinutes, setDraftDurationMinutes] = useState(String(durationMinutes))
   const [draftTargetTime, setDraftTargetTime] = useState(() => targetTime || formatKstTime(Date.now() + durationMinutes * 60 * 1000))
@@ -3431,6 +4358,8 @@ function AdminView({
       quizInitialConfirmDelaySeconds: data.get('quizInitialConfirmDelaySeconds'),
       cheerNameMode: data.get('cheerNameMode'),
       themeMode: data.get('themeMode'),
+      wallEnabledPanels: data.getAll('wallEnabledPanels'),
+      qnaWallFontScale: data.get('qnaWallFontScale'),
     })
   }
 
@@ -3447,6 +4376,8 @@ function AdminView({
       quizInitialConfirmDelaySeconds,
       cheerNameMode,
       themeMode: nextThemeMode,
+      wallEnabledPanels,
+      qnaWallFontScale,
     })
   }
 
@@ -3462,6 +4393,11 @@ function AdminView({
   const resetQuizHistory = () => {
     if (!window.confirm('퀴즈 정답 이력과 현재 표시된 답변 기록을 초기화할까요? 퀴즈 문제 목록은 유지됩니다.')) return
     post('/api/quiz/reset-history', {})
+  }
+
+  const resetQnaQuestions = () => {
+    if (!window.confirm(`Q&A 질문 ${state.questions.length}개를 모두 초기화할까요? 참가자 등록, 투표, 퀴즈 이력은 유지됩니다.`)) return
+    post('/api/question/reset', {})
   }
 
   const resetAll = () => {
@@ -3543,7 +4479,7 @@ function AdminView({
         </div>
         <form
           className="control-grid"
-          key={`${starBudget}:${maxStarsPerTeam}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${raffleCheerWeight}:${quizAnswerLimit}:${quizInitialConfirmDelaySeconds}:${cheerNameMode}:${themeMode}`}
+          key={`${starBudget}:${maxStarsPerTeam}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${raffleCheerWeight}:${quizAnswerLimit}:${quizInitialConfirmDelaySeconds}:${cheerNameMode}:${themeMode}:${wallEnabledPanels.join(',')}:${qnaWallFontScale}`}
           onSubmit={(event) => {
             event.preventDefault()
             applySettings(event.currentTarget)
@@ -3688,6 +4624,21 @@ function AdminView({
               <option value="real">실명모드</option>
             </select>
           </label>
+          <label>
+            <span>Q&A 카드 글씨 크기</span>
+            <div className="inline-input">
+              <input
+                name="qnaWallFontScale"
+                type="number"
+                min={0.85}
+                max={1.55}
+                step={0.05}
+                defaultValue={qnaWallFontScale}
+              />
+              <em>x</em>
+            </div>
+            <small className="control-hint">Q&A board의 질문 본문과 작성자 정보 크기를 조정합니다. 기본 1.12x입니다.</small>
+          </label>
           <fieldset className="theme-toggle-field">
             <legend>화면 테마</legend>
             <label>
@@ -3715,6 +4666,23 @@ function AdminView({
               <span>어두운 모드</span>
             </label>
           </fieldset>
+          <fieldset className="wall-session-field">
+            <legend>Wall 표시 세션</legend>
+            {wallSessionOptions.map((option) => (
+              <label key={option.value}>
+                <input
+                  type="checkbox"
+                  name="wallEnabledPanels"
+                  value={option.value}
+                  defaultChecked={wallEnabledPanels.includes(option.value)}
+                />
+                <span>
+                  <strong>{option.label}</strong>
+                  <small>{option.description}</small>
+                </span>
+              </label>
+            ))}
+          </fieldset>
           <button type="submit">
             <Clock3 size={16} />
             설정 적용
@@ -3728,6 +4696,9 @@ function AdminView({
           <button type="button" className="secondary-control" onClick={resetQuizHistory}>
             퀴즈 이력 Reset
           </button>
+          <button type="button" className="secondary-control danger-control" onClick={resetQnaQuestions} disabled={!state.questions.length}>
+            Q&A 질문 Reset
+          </button>
           <button type="button" className="secondary-control danger-control" onClick={resetAll}>
             전체 Reset
           </button>
@@ -3736,7 +4707,7 @@ function AdminView({
           </button>
         </form>
         <p className="control-note">
-          현재 중복 응모 방지는 이름과 ID 기준으로 판단합니다. 이메일을 입력하면 @ 뒤 주소는 제외하고 ID만 사용합니다.
+          현재 중복 응모 방지는 별명과 내부 관리 ID 기준으로 판단합니다. Q&A 화면에서는 별명만 입력받고, 운영 식별자는 브라우저별 익명 ID로 자동 관리합니다.
         </p>
       </section>
 
@@ -3821,6 +4792,7 @@ function PublicWallView({
   const selectedTeam = selectedTeamId === 'all' ? null : state.teams.find((team) => team.id === selectedTeamId) ?? null
   const raffleRule = state.raffleStage.rule
   const isDrawing = state.raffleStage.drawing
+  const wallStateReady = hasResolvedEventState(state)
   const wallSplitMin = 54
   const wallSplitMax = 82
 
@@ -3909,7 +4881,15 @@ function PublicWallView({
       ) : null}
 
       <section className="public-wall-shell" aria-label="관객 송출 보드">
-        {wallPanel === 'quiz' ? (
+        {!wallStateReady ? (
+          <div className="public-wall-loading" role="status" aria-live="polite">
+            <span className="public-wall-loading-mark" aria-hidden="true">
+              <Radio size={30} />
+            </span>
+            <p className="section-kicker">Audience Wall</p>
+            <h2>Q&A board 연결 중</h2>
+          </div>
+        ) : wallPanel === 'quiz' ? (
           <section className="public-quiz-board" aria-label="관객 퀴즈 송출">
             <QuizWallBoard state={state} onPrepareQuiz={() => post('/api/quiz/prepare', {})} />
           </section>
@@ -3946,6 +4926,8 @@ function PublicWallView({
               publicMode
             />
           </section>
+        ) : wallPanel === 'qna' ? (
+          <PublicQnaBoard state={state} post={post} />
         ) : (
           <div
             ref={wallGridRef}
@@ -4165,7 +5147,7 @@ function QuizWallBoard({ state, onPrepareQuiz }: { state: EventState; onPrepareQ
           answerHistory.map((item) => (
             <article className={`quiz-answer-message ${item.correct ? 'correct' : ''}`} key={`${item.quizId}-${item.id}`}>
               <strong>
-                <span>{[item.author, item.group || 'ID 없음', item.department].filter(Boolean).join(' · ')}</span>
+                <span>{[item.author, getParticipantManagementLabel({ id: item.participantId })].filter(Boolean).join(' · ')}</span>
                 {item.rank ? <em>{item.rank}등 정답</em> : item.correct ? <em>정답</em> : null}
               </strong>
               <p>{item.text}</p>
@@ -4229,9 +5211,7 @@ function QuizWinnerSpotlight({ winner, onDismiss }: { winner: QuizAnswer; onDism
         <Sparkles size={30} />
         <span>정답!</span>
         <strong>{winner.author}</strong>
-        {[winner.group, winner.department].filter(Boolean).length ? (
-          <p>{[winner.group ? `ID ${winner.group}` : '', winner.department].filter(Boolean).join(' · ')}</p>
-        ) : null}
+        <p>{getParticipantManagementLabel({ id: winner.participantId })}</p>
         {winner.rank ? <em>{winner.rank}번째 정답자</em> : null}
       </div>
     </div>
@@ -4494,7 +5474,7 @@ function QuizAdminPanel({
             state.quiz.answers.map((item) => (
               <article className={`quiz-answer-message ${item.correct ? 'correct' : ''}`} key={`${item.quizId}-${item.id}`}>
                 <strong>
-                  <span>{[item.author, item.group || 'ID 없음', item.department].filter(Boolean).join(' · ')}</span>
+                  <span>{[item.author, getParticipantManagementLabel({ id: item.participantId })].filter(Boolean).join(' · ')}</span>
                   {item.rank ? <em>{item.rank}등 정답</em> : item.correct ? <em>정답</em> : null}
                 </strong>
                 <p>{item.text}</p>
@@ -4518,7 +5498,7 @@ function QuizAdminPanel({
                   <em key={`${record.id}-${winner.id}-${winner.rank ?? 0}`}>
                     {winner.rank ? `${winner.rank}등 ` : ''}
                     {winner.name}
-                    {[winner.group, winner.department].filter(Boolean).length ? ` (${[winner.group, winner.department].filter(Boolean).join(' · ')})` : ''}
+                    {` (${getParticipantManagementLabel({ id: winner.id })})`}
                   </em>
                 ))}
               </div>
@@ -4527,6 +5507,648 @@ function QuizAdminPanel({
         </div>
       ) : null}
     </section>
+  )
+}
+
+function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventState }) {
+  const stackRef = useRef<HTMLDivElement | null>(null)
+  const readMarkedQuestionVersionsRef = useRef<Map<number, number>>(new Map())
+  const [focusedQuestionId, setFocusedQuestionId] = useState<number | null>(null)
+  const [optimisticReadQuestionVersions, setOptimisticReadQuestionVersions] = useState<Map<number, number>>(() => new Map())
+  const [selectedCloudWord, setSelectedCloudWord] = useState('')
+  const allVisibleQuestions = useMemo(() => {
+    return state.questions
+      .filter((question) => !question.hidden)
+      .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)
+      .slice(0, 90)
+  }, [state.questions])
+  const visibleQuestions = selectedCloudWord
+    ? allVisibleQuestions.filter((question) => questionMatchesQnaCloudWord(question, selectedCloudWord))
+    : allVisibleQuestions
+  const latestQuestionId = visibleQuestions[0]?.id ?? 0
+  const visibleQuestionTotal = state.visibleQuestionTotalCount ?? visibleQuestions.length
+  const focusedQuestion = focusedQuestionId ? visibleQuestions.find((question) => question.id === focusedQuestionId) || null : null
+  const qnaWallFontScale = getQnaWallFontScale(state)
+  const wordCloudSignature = allVisibleQuestions.map((question) => `${question.id}:${question.text}`).join('|')
+  const wordCloudSeeds = useMemo(() => buildQnaWordCloudSeeds(allVisibleQuestions), [allVisibleQuestions])
+
+  useEffect(() => {
+    stackRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [latestQuestionId])
+
+  useEffect(() => {
+    if (!focusedQuestionId) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFocusedQuestionId(null)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [focusedQuestionId])
+
+  const openQuestion = (question: QuestionMessage) => {
+    setFocusedQuestionId(question.id)
+    const revision = getQnaQuestionRevision(question)
+
+    if (!question.read && readMarkedQuestionVersionsRef.current.get(question.id) !== revision) {
+      readMarkedQuestionVersionsRef.current.set(question.id, revision)
+      setOptimisticReadQuestionVersions((current) => {
+        const next = new Map(current)
+        next.set(question.id, revision)
+        return next
+      })
+      post('/api/question/read', { questionId: question.id, read: true })
+    }
+  }
+
+  return (
+    <section
+      className={`public-qna-board ${focusedQuestion ? 'has-focused-question' : ''}`}
+      style={{ '--qna-font-scale': qnaWallFontScale } as CSSProperties}
+      aria-label="Q&A 질문 wall"
+    >
+      <div className="qna-board-header">
+        <div className="qna-board-title-wrap">
+          <div>
+            <p className="section-kicker">{state.copy.wallQnaEyeline}</p>
+            <h2>{state.copy.wallQnaTitle}</h2>
+          </div>
+          <QnaBrainWordCloud
+            seeds={wordCloudSeeds}
+            signature={wordCloudSignature}
+            selectedWord={selectedCloudWord}
+            onSelectWord={(word) => setSelectedCloudWord((current) => (current === word ? '' : word))}
+          />
+        </div>
+        <div className="qna-board-counter" aria-label="공개 질문 수">
+          <span>{state.copy.wallMetricQuestions}</span>
+          <strong>{selectedCloudWord ? visibleQuestions.length : visibleQuestionTotal}</strong>
+        </div>
+      </div>
+
+      {selectedCloudWord ? (
+        <div className="qna-word-filter" role="status">
+          <span>{selectedCloudWord}</span>
+          <em>관련 질문 {visibleQuestions.length}개</em>
+          <button type="button" onClick={() => setSelectedCloudWord('')}>
+            전체 보기
+          </button>
+        </div>
+      ) : null}
+
+      <div className="qna-stack" ref={stackRef} aria-live="polite">
+        {visibleQuestions.length ? (
+          visibleQuestions.map((question, index) => {
+            const cardShape = getQnaQuestionCardShape(question.text)
+            const questionIsRead = isQnaQuestionRead(question, optimisticReadQuestionVersions)
+            const questionEdited = Boolean(question.editedAt)
+
+            return (
+              <article
+                className={`qna-question-card ${questionIsRead ? 'is-read' : 'is-unread'} ${cardShape.sizeClass} qna-tone-${index % 5}`}
+                key={question.id}
+                role="button"
+                tabIndex={0}
+                style={{ '--qna-index': index, '--qna-row-span': cardShape.rowSpan } as CSSProperties}
+                aria-label={`${questionIsRead ? '읽은 질문' : '새 질문'}: ${question.text}`}
+                onClick={() => openQuestion(question)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return
+                  event.preventDefault()
+                  openQuestion(question)
+                }}
+              >
+                <span className="qna-question-mark" aria-hidden="true">Q</span>
+                <div className="qna-question-body">
+                  <p>{question.text}</p>
+                  <footer>
+                    <strong>{question.author || '익명'}</strong>
+                    <time>{formatMessageTime(question.editedAt || question.createdAt)}</time>
+                    {questionEdited ? <span className="qna-edited-badge">수정됨</span> : null}
+                    {questionIsRead ? (
+                      <span className="qna-read-badge">
+                        <Check size={14} />
+                        읽음
+                      </span>
+                    ) : null}
+                  </footer>
+                </div>
+              </article>
+            )
+          })
+        ) : (
+          <div className="qna-empty-state">
+            <CircleHelp size={44} />
+            <p>{state.copy.wallQnaEmpty}</p>
+          </div>
+        )}
+      </div>
+      {focusedQuestion ? (
+        <div className="qna-focus-backdrop" role="presentation" onClick={() => setFocusedQuestionId(null)}>
+          <article
+            className={`qna-focus-card ${isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions) ? 'is-read' : 'is-unread'}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label="질문 자세히 보기"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="qna-focus-orbit" aria-hidden="true" />
+            <header>
+              <span className="qna-focus-mark">Q</span>
+              <div>
+                <p>Question</p>
+                <strong>{focusedQuestion.author || '익명'}</strong>
+              </div>
+              <button type="button" aria-label="질문 닫기" onClick={() => setFocusedQuestionId(null)}>닫기</button>
+            </header>
+            <div className="qna-focus-text">
+              <p>{focusedQuestion.text}</p>
+            </div>
+            <footer>
+              <span className="qna-read-badge">
+                <Check size={15} />
+                읽음
+              </span>
+              {focusedQuestion.editedAt ? <span className="qna-edited-badge">수정됨</span> : null}
+              <time>{formatMessageTime(focusedQuestion.editedAt || focusedQuestion.createdAt)}</time>
+            </footer>
+          </article>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function getQnaQuestionRevision(question: QuestionMessage) {
+  return question.editedAt || question.createdAt
+}
+
+function isQnaQuestionRead(question: QuestionMessage, optimisticReadQuestionVersions: Map<number, number>) {
+  return question.read || optimisticReadQuestionVersions.get(question.id) === getQnaQuestionRevision(question)
+}
+
+function getQnaQuestionCardShape(text: string) {
+  const length = Array.from(text.trim()).length
+
+  if (length <= 18) return { sizeClass: 'is-brief', rowSpan: 6 }
+  if (length <= 44) return { sizeClass: 'is-standard', rowSpan: 7 }
+  if (length <= 88) return { sizeClass: 'is-roomy', rowSpan: 10 }
+  return { sizeClass: 'is-expanded', rowSpan: Math.min(15, 11 + Math.ceil(length / 110)) }
+}
+
+function buildQnaWordCloudSeeds(questions: QuestionMessage[]): QnaWordCloudSeed[] {
+  const counts = new Map<string, { text: string; count: number }>()
+
+  for (const question of questions) {
+    const words = new Set(extractQnaCloudTerms(question.text))
+
+    for (const word of words) {
+      const key = word.toLocaleLowerCase('ko-KR')
+      const current = counts.get(key)
+      counts.set(key, { text: current?.text || word, count: (current?.count || 0) + 1 })
+    }
+  }
+
+  const entries = Array.from(counts.values())
+    .sort((first, second) => second.count - first.count || first.text.localeCompare(second.text, 'ko'))
+    .slice(0, QNA_WORD_CLOUD_MAX_TERMS)
+
+  if (!entries.length) return []
+
+  const maxCount = Math.max(1, ...entries.map(({ count }) => count))
+  return entries.map(({ text, count }, index) => {
+    const countRatio = maxCount <= 1 ? Math.max(0.48, 0.78 - index * 0.016) : Math.sqrt(count / maxCount)
+    const rankRatio = Math.max(0, 1 - index / Math.max(1, entries.length - 1))
+    const rotationSeed = hashQnaWordCloudText(text)
+    const rotate = qnaWordCloudRotateOptions[rotationSeed % qnaWordCloudRotateOptions.length]
+    const shortText = truncateQnaCloudTerm(text)
+    const compactTermPenalty = Array.from(shortText.replace(/\s+/g, '')).length <= 2 ? 0.9 : 1
+
+    return {
+      term: text,
+      text: shortText,
+      size: Math.round((13 + countRatio * 18 + rankRatio * 9) * compactTermPenalty),
+      weight: Math.round(650 + countRatio * 260),
+      rotate,
+      color: qnaWordCloudColors[index % qnaWordCloudColors.length],
+    }
+  })
+}
+
+function normalizeQnaCloudWord(word: string) {
+  return word
+    .normalize('NFKC')
+    .replace(/[^\p{L}\p{N}+#&.\s-]/gu, '')
+    .replace(/^[.-]+|[.-]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function questionMatchesQnaCloudWord(question: QuestionMessage, word: string) {
+  const normalizedWord = normalizeQnaCloudWord(word).toLowerCase()
+  if (!normalizedWord) return true
+
+  const normalizedText = normalizeQnaCloudWord(question.text).toLocaleLowerCase('ko-KR')
+  if (normalizedText.includes(normalizedWord)) return true
+
+  return extractQnaCloudTerms(question.text).some((item) => item.toLocaleLowerCase('ko-KR').includes(normalizedWord))
+}
+
+function extractQnaCloudTerms(text: string) {
+  const normalizedText = text.normalize('NFKC')
+  const terms: string[] = []
+  const phrasePatterns: Array<[RegExp, string]> = [
+    [/\bAI\s*Cloud\b/giu, 'AI Cloud'],
+    [/인공지능\s*클라우드/gu, 'AI Cloud'],
+    [/워드\s*클라우드/gu, '워드클라우드'],
+    [/\bWord\s*Cloud\b/giu, 'Word Cloud'],
+    [/\bKPI\s*라벨/giu, 'KPI 라벨'],
+    [/인공지능\s*네트워크/gu, '인공지능 네트워크'],
+  ]
+
+  for (const [pattern, term] of phrasePatterns) {
+    if (pattern.test(normalizedText)) terms.push(term)
+  }
+
+  const rawWords = normalizedText.match(/[A-Za-z][A-Za-z0-9+#.-]*|[가-힣ㄱ-ㅎㅏ-ㅣ]+/gu) || []
+
+  for (const rawWord of rawWords) {
+    const word = normalizeQnaCloudWord(rawWord)
+    if (!word) continue
+
+    const candidate = /[가-힣]/u.test(word)
+      ? normalizeKoreanQnaCloudTerm(word)
+      : normalizeEnglishQnaCloudTerm(word)
+
+    if (isMeaningfulQnaCloudTerm(candidate)) terms.push(candidate)
+  }
+
+  return terms
+}
+
+function normalizeKoreanQnaCloudTerm(word: string) {
+  let current = word
+    .replace(/[ㄱ-ㅎㅏ-ㅣ]/gu, '')
+    .replace(/^\d+|\d+$/g, '')
+    .trim()
+
+  current = current.replace(
+    /(해주시겠습니까|해주실까요|하겠습니다|하겠습니까|했습니다|겠습니다|겠습니까|었습니까|았습니까|었습니다|았습니다|습니까|습니다|합니까|합니다|해요|한다|하는|하기|하다|됩니다|되나요|되었나요|되는|된다|되다|있나요|없나요|일까요|을까요|을까|ㄹ까요|ㄹ까|인가요|나요|세요|어요|아요|네요|군요|죠|요)$/u,
+    '',
+  )
+
+  let stripped = true
+  while (stripped) {
+    stripped = false
+    for (const suffix of qnaKoreanFunctionalSuffixes) {
+      if (current.length > suffix.length + 1 && current.endsWith(suffix)) {
+        current = current.slice(0, -suffix.length)
+        stripped = true
+        break
+      }
+    }
+  }
+
+  const verbStemMatch = current.match(/^(.{2,})(할|해야|해도|하면|해서|하고|하며|하는|하기|하게|했다|했다면|하나요|할지)$/u)
+  if (verbStemMatch) current = verbStemMatch[1]
+
+  current = current.replace(/(으므로|므로|면서|지만|도록|거나|어서|아서|니까|다고|라고|이고|이며|하며|하게|하고|해도|해야|하면|해서|할|고|어|아)$/u, '')
+
+  return current.trim()
+}
+
+function normalizeEnglishQnaCloudTerm(word: string) {
+  const current = word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9+#.-]+$/g, '').trim()
+  if (/^[A-Z0-9+#.-]{2,}$/u.test(current)) return current
+  return current.toLowerCase()
+}
+
+function isMeaningfulQnaCloudTerm(term: string) {
+  const compact = term.replace(/\s+/g, '')
+  const lower = term.toLocaleLowerCase('ko-KR')
+  if (compact.length < 2) return false
+  if (qnaWordCloudStopWords.has(lower) || qnaWordCloudStopWords.has(compact.toLocaleLowerCase('ko-KR'))) return false
+  if (/^[\d.]+$/u.test(compact)) return false
+  if (/[ㄱ-ㅎㅏ-ㅣ]/u.test(compact)) return false
+  if (/^(.)(\1){4,}$/iu.test(compact)) return false
+  if (/[가-힣]/u.test(compact) && /(읽히|보이|봐야|볼까|좋을까|좋을까요|맞추|살아났|봤|됐|됩|넘|녹아들|덮|잡으면|잡을까)$/u.test(compact)) return false
+  return true
+}
+
+function truncateQnaCloudTerm(term: string) {
+  const characters = Array.from(term)
+  if (characters.length <= 12) return term
+  return `${characters.slice(0, 11).join('')}…`
+}
+
+function layoutFallbackQnaWordCloudItems(
+  seeds: QnaWordCloudSeed[],
+): QnaWordCloudItem[] {
+  const placed: Array<{ x: number; y: number; width: number; height: number }> = []
+  const items: QnaWordCloudItem[] = []
+
+  for (const seed of seeds) {
+    const fitted = placeQnaWordCloudSeed(seed, placed)
+    if (!fitted) continue
+
+    placed.push({
+      x: fitted.x,
+      y: fitted.y,
+      width: estimateQnaWordCloudBox(fitted.text, fitted.size, fitted.rotate).width,
+      height: estimateQnaWordCloudBox(fitted.text, fitted.size, fitted.rotate).height,
+    })
+    items.push(fitted)
+  }
+
+  return items
+}
+
+function placeQnaWordCloudSeed(
+  seed: QnaWordCloudSeed,
+  placed: Array<{ x: number; y: number; width: number; height: number }>,
+) {
+  const centerX = QNA_WORD_CLOUD_WIDTH / 2
+  const centerY = QNA_WORD_CLOUD_HEIGHT / 2 + 6
+  const hash = hashQnaWordCloudText(seed.text)
+  const angleOffset = seededQnaWordCloudUnit(hash) * Math.PI * 2
+
+  for (const scale of [1, 0.92, 0.84, 0.76]) {
+    const size = Math.max(11, Math.round(seed.size * scale))
+    const box = estimateQnaWordCloudBox(seed.text, size, seed.rotate)
+
+    for (let step = 0; step < 620; step += 1) {
+      const radius = step * 0.82
+      const angle = angleOffset + step * 0.48
+      const x = centerX + Math.cos(angle) * radius * 1.72
+      const y = centerY + Math.sin(angle) * radius * 0.58
+
+      if (!qnaWordCloudBoxFits(x, y, box.width, box.height)) continue
+      if (placed.some((item) => qnaWordCloudBoxesOverlap({ x, y, ...box }, item))) continue
+
+      return {
+        ...seed,
+        x: Math.round(x),
+        y: Math.round(y),
+        size,
+        driftX: Math.round((seededQnaWordCloudUnit(hash + 13) - 0.5) * 7 * 10) / 10,
+        driftY: Math.round((seededQnaWordCloudUnit(hash + 29) - 0.5) * 5 * 10) / 10,
+        driftDelay: Math.round(seededQnaWordCloudUnit(hash + 47) * -42) / 10,
+        driftDuration: Math.round((7.4 + seededQnaWordCloudUnit(hash + 71) * 3.2) * 10) / 10,
+      }
+    }
+  }
+
+  return null
+}
+
+function estimateQnaWordCloudBox(text: string, size: number, rotate: number) {
+  const rawWidth = Array.from(text).reduce((sum, char) => {
+    if (char === ' ') return sum + size * 0.36
+    if (/[가-힣]/u.test(char)) return sum + size * 0.92
+    if (/[A-Z0-9]/u.test(char)) return sum + size * 0.68
+    return sum + size * 0.58
+  }, 0)
+  const rawHeight = size * 1.16
+  const radians = Math.abs(rotate * Math.PI / 180)
+  const width = Math.cos(radians) * rawWidth + Math.sin(radians) * rawHeight + 10
+  const height = Math.sin(radians) * rawWidth + Math.cos(radians) * rawHeight + 7
+  return { width, height }
+}
+
+function qnaWordCloudBoxFits(x: number, y: number, width: number, height: number) {
+  const points = [
+    [x - width / 2, y - height / 2],
+    [x + width / 2, y - height / 2],
+    [x - width / 2, y + height / 2],
+    [x + width / 2, y + height / 2],
+    [x, y],
+  ]
+  return points.every(([pointX, pointY]) => qnaWordCloudContainsPoint(pointX, pointY))
+}
+
+function qnaWordCloudContainsPoint(x: number, y: number) {
+  if (x < 32 || x > QNA_WORD_CLOUD_WIDTH - 30 || y < 22 || y > QNA_WORD_CLOUD_HEIGHT - 24) return false
+  const normalizedX = (x - QNA_WORD_CLOUD_WIDTH / 2) / (QNA_WORD_CLOUD_WIDTH * 0.47)
+  const normalizedY = (y - (QNA_WORD_CLOUD_HEIGHT / 2 + 6)) / (QNA_WORD_CLOUD_HEIGHT * 0.42)
+  return normalizedX * normalizedX + normalizedY * normalizedY <= 1
+}
+
+function qnaWordCloudBoxesOverlap(
+  first: { x: number; y: number; width: number; height: number },
+  second: { x: number; y: number; width: number; height: number },
+) {
+  const padding = 3
+  return !(
+    first.x + first.width / 2 + padding < second.x - second.width / 2 ||
+    first.x - first.width / 2 - padding > second.x + second.width / 2 ||
+    first.y + first.height / 2 + padding < second.y - second.height / 2 ||
+    first.y - first.height / 2 - padding > second.y + second.height / 2
+  )
+}
+
+function hashQnaWordCloudText(text: string) {
+  let hash = 0
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0
+  }
+  return hash || 1
+}
+
+function seededQnaWordCloudUnit(seed: number) {
+  const value = Math.sin(seed * 12.9898) * 43758.5453
+  return value - Math.floor(value)
+}
+
+function createQnaWordCloudRandom(signature: string) {
+  let seed = hashQnaWordCloudText(signature || 'qna-word-cloud')
+
+  return () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0
+    return seed / 4294967296
+  }
+}
+
+function toQnaWordCloudItem(seed: QnaWordCloudSeed, x: number, y: number, size = seed.size): QnaWordCloudItem {
+  const hash = hashQnaWordCloudText(`${seed.term}:${seed.text}`)
+
+  return {
+    ...seed,
+    x: Math.round(x),
+    y: Math.round(y),
+    size: Math.max(11, Math.round(size)),
+    driftX: Math.round((seededQnaWordCloudUnit(hash + 13) - 0.5) * 7 * 10) / 10,
+    driftY: Math.round((seededQnaWordCloudUnit(hash + 29) - 0.5) * 5 * 10) / 10,
+    driftDelay: Math.round(seededQnaWordCloudUnit(hash + 47) * -42) / 10,
+    driftDuration: Math.round((7.4 + seededQnaWordCloudUnit(hash + 71) * 3.2) * 10) / 10,
+  }
+}
+
+function loadD3QnaCloud() {
+  if (!d3QnaCloudLoader) {
+    d3QnaCloudLoader = import('d3-cloud').then((module) => {
+      const candidate = (module as unknown as { default?: D3QnaCloudFactory }).default
+      return candidate ?? (module as unknown as D3QnaCloudFactory)
+    })
+  }
+
+  return d3QnaCloudLoader
+}
+
+function useD3QnaWordCloudItems(seeds: QnaWordCloudSeed[], signature: string) {
+  const fallbackItems = useMemo(() => layoutFallbackQnaWordCloudItems(seeds), [seeds])
+  const [items, setItems] = useState<QnaWordCloudItem[]>(fallbackItems)
+
+  useEffect(() => {
+    if (!seeds.length) {
+      startTransition(() => setItems([]))
+      return
+    }
+
+    let cancelled = false
+    let layout: D3QnaCloudLayout<D3QnaCloudWord> | null = null
+
+    startTransition(() => setItems(fallbackItems))
+
+    const timeoutId = window.setTimeout(() => {
+      void loadD3QnaCloud()
+        .then((cloudFactory) => {
+          if (cancelled) return
+
+          const layoutWidth = QNA_WORD_CLOUD_WIDTH - 104
+          const layoutHeight = QNA_WORD_CLOUD_HEIGHT - 48
+          const centerX = QNA_WORD_CLOUD_WIDTH / 2
+          const centerY = QNA_WORD_CLOUD_HEIGHT / 2 + 5
+          const words = seeds.map((seed) => ({ ...seed }))
+
+          layout = cloudFactory<D3QnaCloudWord>()
+            .size([layoutWidth, layoutHeight])
+            .words(words)
+            .padding((_, index) => (index < 8 ? 5 : 3))
+            .rotate((word) => word.rotate)
+            .font('Gowun Dodum')
+            .fontWeight((word) => word.weight)
+            .fontSize((word) => word.size)
+            .text((word) => word.text)
+            .spiral('archimedean')
+            .random(createQnaWordCloudRandom(signature))
+            .timeInterval(16)
+            .on('end', (placedWords) => {
+              if (cancelled) return
+
+              const placedItems = placedWords
+                .filter((word) => typeof word.x === 'number' && typeof word.y === 'number')
+                .map((word) => toQnaWordCloudItem(word, centerX + (word.x ?? 0), centerY + (word.y ?? 0), word.size))
+
+              startTransition(() => setItems(placedItems.length ? placedItems : fallbackItems))
+            })
+            .start()
+        })
+        .catch(() => {
+          if (!cancelled) startTransition(() => setItems(fallbackItems))
+        })
+    }, 70)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+      layout?.stop()
+    }
+  }, [fallbackItems, seeds, signature])
+
+  return items
+}
+
+function QnaBrainWordCloud({
+  seeds,
+  signature,
+  selectedWord,
+  onSelectWord,
+}: {
+  seeds: QnaWordCloudSeed[]
+  signature: string
+  selectedWord: string
+  onSelectWord: (word: string) => void
+}) {
+  const items = useD3QnaWordCloudItems(seeds, signature)
+
+  if (!items.length) return null
+
+  return (
+    <svg className="qna-brain-word-cloud" viewBox={`0 0 ${QNA_WORD_CLOUD_WIDTH} ${QNA_WORD_CLOUD_HEIGHT}`} role="group" aria-label="질문 키워드 필터">
+      <defs>
+        <linearGradient id="qna-brain-line" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stopColor="#d8bfd0" />
+          <stop offset="52%" stopColor="#9bd8ff" />
+          <stop offset="100%" stopColor="#bfcce8" />
+        </linearGradient>
+      </defs>
+      <g className="qna-brain-cloud-shell">
+        <path
+          className="qna-brain-cloud-outline"
+          d="M96 144C57 141 35 116 40 84c5-35 39-55 79-47 24-31 70-39 107-18 31-28 84-27 116 2 42-24 105-18 140 14 44-19 111-4 140 31 46-8 98 16 112 57 48-2 88 26 92 64 4 42-36 72-92 66-36 25-103 21-132-10-43 22-105 19-141-8-43 26-111 22-149-8-48 22-116 14-150-22-38 12-85 3-111-24Z"
+        />
+        <text className="qna-brain-ai-label" x="430" y="132" textAnchor="middle">
+          AI
+        </text>
+        <path className="qna-brain-cloud-thread" d="M84 115c86-45 164-39 226 2 72 48 154 43 238-1 74-39 145-30 220 15" />
+        <path className="qna-brain-cloud-thread" d="M112 157c91-32 173-26 235 3 81 38 164 32 252-6 58-25 110-21 158 13" />
+        <path className="qna-brain-cloud-thread soft" d="M164 60c44 36 103 51 178 41 86-11 160 2 220 38 49 29 105 36 173 23" />
+        <path className="qna-brain-cloud-link" d="M150 70L224 96L304 66L388 96L474 68L560 96L650 72L760 124" />
+        <path className="qna-brain-cloud-link" d="M110 176L292 178L494 180L690 172L784 156" />
+        <path className="qna-brain-cloud-link soft" d="M224 96L292 178M388 96L494 180M560 96L690 172" />
+        {[
+          [96, 144],
+          [150, 70],
+          [224, 96],
+          [304, 66],
+          [388, 96],
+          [474, 68],
+          [560, 96],
+          [650, 72],
+          [760, 124],
+          [784, 156],
+          [690, 172],
+          [494, 180],
+          [292, 178],
+          [110, 176],
+        ].map(([cx, cy]) => (
+          <circle key={`${cx}-${cy}`} className="qna-brain-cloud-node" cx={cx} cy={cy} r="3.2" />
+        ))}
+      </g>
+      <g className="qna-brain-cloud-words">
+        {items.map((item, index) => (
+          <g key={`${item.term}-${index}`} transform={`translate(${item.x} ${item.y}) rotate(${item.rotate})`}>
+            <text
+              className={selectedWord === item.term ? 'qna-brain-word is-selected' : 'qna-brain-word'}
+              fill={item.color}
+              fontSize={item.size}
+              fontWeight={item.weight}
+              role="button"
+              tabIndex={0}
+              aria-label={`${item.term} 관련 질문만 보기`}
+              aria-pressed={selectedWord === item.term}
+              textAnchor="middle"
+              dominantBaseline="central"
+              style={{
+                '--qna-word-drift-x': `${item.driftX}px`,
+                '--qna-word-drift-y': `${item.driftY}px`,
+                '--qna-word-delay': `${item.driftDelay}s`,
+                '--qna-word-duration': `${item.driftDuration}s`,
+              } as CSSProperties}
+              onClick={() => onSelectWord(item.term)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                onSelectWord(item.term)
+              }}
+            >
+              {item.text}
+            </text>
+          </g>
+        ))}
+      </g>
+    </svg>
   )
 }
 
@@ -4918,7 +6540,7 @@ function ParticipantListPanel({ state, onOpen }: { state: EventState; onOpen: ()
             <article className={`participant-row ${person.statusClass}`} key={person.id}>
               <div className="participant-identity">
                 <strong>{person.name}</strong>
-                <span>{person.group}</span>
+                <span>{getParticipantManagementLabel(person)}</span>
               </div>
               <div className="participant-metrics" aria-label={`${person.name} 참여 현황`}>
                 <span>
@@ -4932,7 +6554,7 @@ function ParticipantListPanel({ state, onOpen }: { state: EventState; onOpen: ()
               </div>
               <p>{person.allocationSummary}</p>
               <div className="participant-foot">
-                <small>최근 {formatMessageTime(person.updatedAt)} · ID {person.id.slice(-6)}</small>
+                <small>최근 {formatMessageTime(person.updatedAt)} · {getParticipantManagementLabel(person)}</small>
                 <em>{person.status}</em>
               </div>
             </article>
@@ -4992,7 +6614,7 @@ function ParticipantDetailPanel({
       <div className="participant-filter-bar" aria-label="참여자 리스트 필터">
         <label className="participant-search-field">
           <Search size={15} />
-          <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="이름, ID, 소속, 팀명 검색" />
+          <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="별명, 관리 ID, 팀명 검색" />
         </label>
         <label>
           <span>팀</span>
@@ -5026,7 +6648,7 @@ function ParticipantDetailPanel({
           <article className={`participant-row detail ${person.statusClass}`} key={person.id}>
             <div className="participant-identity">
               <strong>{person.name}</strong>
-              <span>{person.group}{person.department ? ` · ${person.department}` : ''}</span>
+              <span>{getParticipantManagementLabel(person)}</span>
             </div>
             <div className="participant-metrics" aria-label={`${person.name} 참여 현황`}>
               <span>
@@ -5058,7 +6680,7 @@ function ParticipantDetailPanel({
               )}
             </div>
             <div className="participant-foot">
-              <small>최근 {formatMessageTime(person.updatedAt)} · ID {person.id}</small>
+              <small>최근 {formatMessageTime(person.updatedAt)} · 내부 {person.id}</small>
               <em>{person.status}</em>
             </div>
             <div className="participant-admin-actions" aria-label={`${person.name} 관리`}>
@@ -7249,7 +8871,7 @@ function RafflePanel({
           state.lastRaffle.winners.map((winner) => (
             <div className="winner" key={winner.id}>
               <strong>{winner.name}</strong>
-              <small>{[winner.group ? `ID ${winner.group}` : '', winner.department].filter(Boolean).join(' · ')}</small>
+              <small>{getParticipantManagementLabel({ id: winner.id })}</small>
             </div>
           ))
         ) : (
@@ -7388,7 +9010,7 @@ function RaffleDetailPanel({
                       ))}
                     </strong>
                     <small>
-                      {[winner.group ? `ID ${winner.group}` : '', winner.department ? winner.department : '', winner.cheered ? '응원 메시지 참여' : '투표 참여']
+                      {[getParticipantManagementLabel({ id: winner.id }), winner.cheered ? '응원 메시지 참여' : '투표 참여']
                         .filter(Boolean)
                         .join(' · ')}
                     </small>
@@ -8253,6 +9875,7 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
       settings: { ...fallbackState.settings, ...(nextState.settings ?? {}) },
       quiz: { ...fallbackState.quiz, ...nextQuiz },
       quizBank: Array.isArray(nextQuizBank) && nextQuizBank.length ? nextQuizBank : fallbackQuizBank,
+      questions: Array.isArray(nextState.questions) ? nextState.questions : fallbackState.questions,
       configRevision: nextState.configRevision || fallbackState.configRevision,
       configUpdatedAt: nextState.configUpdatedAt || fallbackState.configUpdatedAt,
       serverTime: nextState.serverTime || Date.now(),
@@ -8272,7 +9895,15 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
       const currentParticipant = nextWithRankMovement.participants.find((person) => {
         return person.id === participantId || getParticipantDeviceIds(person).includes(participantId)
       })
-      setVoteRealtime(Boolean(currentParticipant?.cheerSubmitted || currentParticipant?.visibleCheerCount || currentParticipant?.hiddenCheerCount))
+      const hasOwnQuestion = Boolean(
+        currentParticipant && nextWithRankMovement.questions.some((question) => question.participantId === currentParticipant.id),
+      )
+      setVoteRealtime(Boolean(
+        currentParticipant?.cheerSubmitted ||
+          currentParticipant?.visibleCheerCount ||
+          currentParticipant?.hiddenCheerCount ||
+          hasOwnQuestion,
+      ))
     }
   }, [mode, participantId])
 
@@ -8283,9 +9914,10 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
     let events: EventSource | null = null
     let pollTimer: number | undefined
     let hasFullMediaState = false
-    const realtime = allowProtectedRealtime && (mode === 'admin' || mode === 'wall' || mode === 'vote' || voteRealtime)
+    const realtime = allowProtectedRealtime && (mode === 'admin' || mode === 'wall' || mode === 'vote' || mode === 'message' || voteRealtime)
     const shouldPoll = !realtime
-    const roleQuery = `role=${encodeURIComponent(mode)}`
+    const eventRole = mode === 'message' ? 'vote' : mode
+    const roleQuery = `role=${encodeURIComponent(eventRole)}`
 
     const fetchState = async () => {
       try {
@@ -8389,7 +10021,11 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
         } catch {
           // Keep the generic message when the response is not JSON.
         }
-        throw new Error(detail)
+        const error = new Error(detail)
+        console.warn(`POST ${path} failed`, error)
+        setConnection('live')
+        if (options.throwOnError) throw error
+        return null
       }
       const nextState = (await response.json()) as EventState
       applyState(nextState)
@@ -9158,10 +10794,10 @@ function exportResultsWorkbook(state: EventState) {
     {
       name: '참여자',
       rows: [
-        ['이름', 'ID', '사용 별', '응모 상태', '공개 메시지', '숨김 메시지', '팀별 배분', '최근 업데이트'],
+        ['별명', '관리 ID', '사용 별', '응모 상태', '공개 메시지', '숨김 메시지', '팀별 배분', '최근 업데이트'],
         ...participants.map((person) => [
           person.name,
-          person.group,
+          getParticipantManagementLabel(person),
           person.spent,
           person.status,
           person.cheers.visible,
@@ -9187,14 +10823,14 @@ function exportResultsWorkbook(state: EventState) {
     {
       name: '추첨결과',
       rows: [
-        ['추첨시각', '룰', '후보 수', '순번', '이름', 'ID', '응원 참여'],
+        ['추첨시각', '룰', '후보 수', '순번', '별명', '관리 ID', '응원 참여'],
         ...(state.lastRaffle?.winners ?? []).map((winner, index) => [
           state.lastRaffle ? new Date(state.lastRaffle.createdAt).toLocaleString('ko-KR') : '',
           state.lastRaffle?.rule ?? '',
           state.lastRaffle?.candidates ?? 0,
           index + 1,
           winner.name,
-          winner.group ?? '',
+          getParticipantManagementLabel({ id: winner.id }),
           winner.cheered ? 'Y' : 'N',
         ]),
       ],
@@ -9379,6 +11015,18 @@ function createParticipantId() {
   return next
 }
 
+function getAnonymousParticipantGroup(participantId: string) {
+  return normalizeLetsIdDisplay(participantId) || 'anonymous'
+}
+
+function getParticipantManagementLabel(person: Pick<Participant, 'id'>) {
+  const compactId = String(person.id || '')
+    .replace(/^participant-/u, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+  const suffix = compactId.slice(-6).toUpperCase() || 'ANON'
+  return `관리 ID ${suffix}`
+}
+
 function isSameParticipantDevice(person: Participant, deviceId: string) {
   if (person.id === deviceId) return true
   if (getParticipantDeviceIds(person).includes(deviceId)) return true
@@ -9524,6 +11172,11 @@ function getQuizInitialConfirmDelaySeconds(state: EventState) {
     0,
     MAX_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS,
   )
+}
+
+function getQnaWallFontScale(state: EventState) {
+  const rawValue = Number(state.settings.qnaWallFontScale)
+  return Number(clamp(Number.isFinite(rawValue) ? rawValue : DEFAULT_QNA_WALL_FONT_SCALE, 0.85, 1.55).toFixed(2))
 }
 
 function getCheerNameMode(state: EventState): CheerNameMode {

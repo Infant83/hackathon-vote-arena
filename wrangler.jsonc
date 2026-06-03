@@ -15,7 +15,7 @@
     "run_worker_first": ["/api/*", "/events*"]
   },
   "vars": {
-    "ARENA_ROOM_NAME": "default"
+    "ARENA_ROOM_NAME": "2026-ax-q2-meeting"
   },
   "durable_objects": {
     "bindings": [
