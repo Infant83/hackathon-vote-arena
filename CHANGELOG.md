@@ -11,6 +11,12 @@
 - README의 라이브 접속 주소, 배포 확인 URL, deployments/rollback CLI 예시, 운영 audit URL을 새 도메인 기준으로 정리했습니다.
 - `ARENA_ROOM_NAME=2026-ax-q2-meeting`은 유지해 이번 AX Q&A 행사 room 분리는 그대로 보존합니다.
 
+### 운영 데이터와 배포 점검
+
+- 운영 중 수집된 Q&A 질문은 배포 파일이 아니라 Cloudflare Durable Object `ARENA_ROOM_NAME=2026-ax-q2-meeting` room의 storage snapshot에 저장되므로, 같은 Worker/room으로 코드와 정적 assets만 재배포하면 기존 질문은 유지됩니다.
+- README에 `/api/reset`, `/api/question/reset`, 관리자 `Q&A reset`, Worker 이름, Durable Object binding/class, `ARENA_ROOM_NAME` 변경이 운영 데이터에 영향을 줄 수 있음을 명시했습니다.
+- `git push` 후 Cloudflare deployment가 자동 생성되는 것은 확인되지 않았고, 현재 운영 반영은 수동 `wrangler deploy` 기준임을 README에 기록했습니다.
+
 ## 2026-06-03
 
 ### 2026 AX 그룹 2분기 모임 Q&A 전환

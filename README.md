@@ -303,6 +303,10 @@ Git Build는 푸시 직후 바로 끝나지 않습니다. 보통 2-5분 정도 �
 npx wrangler deployments list --name meeting --json
 ```
 
+2026-06-04 점검 기준으로는 `git push` 이후 새 Cloudflare deployment가 자동 생성되는 것을 확인하지 못했습니다. 현재 운영 배포는 수동 `wrangler deploy`로 반영된 상태입니다. Git Build 자동 배포를 운영에 쓰려면 Dashboard에서 repository, production branch, build/deploy command가 위 값으로 연결되어 있는지 먼저 확인하고, push 후 deployments 목록에 새 항목이 생기는지 검증합니다.
+
+코드와 정적 assets만 다시 배포하는 것은 기존 Q&A 질문을 지우지 않습니다. 질문, 참가자, 퀴즈 답변 같은 운영 상태는 `ARENA_ROOM_NAME=2026-ax-q2-meeting` Durable Object storage에 저장됩니다. 단, `wrangler.jsonc`의 Worker 이름, Durable Object binding/class, `ARENA_ROOM_NAME`을 바꾸거나 `/api/reset`, `/api/question/reset`, 관리자 `Q&A reset`을 실행하면 운영 데이터에 영향을 줄 수 있습니다.
+
 ### 5.6. 긴급 롤백
 
 운영 중 새 배포에서 오류가 급증하면 Cloudflare Dashboard에서 바로 이전 안정 버전으로 되돌립니다.
@@ -608,6 +612,8 @@ GET /api/export
 로컬 `npm run realtime` 서버에서는 참가자, 별, 응원 메시지, 추첨, 퀴즈 상태가 Node 프로세스 메모리에 있습니다. 서버를 종료하면 행사 상태는 사라지며, 팀/문구 기본 설정만 `teams.json`에 남습니다.
 
 Cloudflare 운영 배포에서는 행사 상태가 Durable Object `ArenaRoom`의 storage에 저장됩니다. 큰 inline 이미지(data URL)는 snapshot에 직접 넣지 않고 `event-media-v1:*` storage key로 분리 저장하며, snapshot에는 참조 token만 들어갑니다. 이 구조는 상품 이미지와 트로피 로고처럼 큰 미디어 때문에 Durable Object 저장 payload가 커지는 문제를 줄이기 위한 것입니다.
+
+같은 Worker `meeting`과 같은 `ARENA_ROOM_NAME=2026-ax-q2-meeting`으로 새 코드를 배포하면 Durable Object storage의 기존 질문은 유지됩니다. 워드클라우드 단어 추출 규칙이나 화면 UI를 개선해 배포하면 기존 질문 텍스트가 새 규칙으로 다시 표시될 뿐, 질문 자체를 수정하거나 삭제하지 않습니다.
 
 Durable Object storage는 운영 중 상태 저장소이지, 영구 아카이브나 분석 DB를 대체하지 않습니다. 행사 후 보존이 필요하면 `/api/export` JSON과 XLSX를 내려받아 별도 저장합니다.
 
