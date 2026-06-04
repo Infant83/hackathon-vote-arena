@@ -2,6 +2,56 @@
 
 이 문서는 `Vibe Vote Arena`의 주요 개발 진행 상황을 시간순으로 정리합니다.
 
+## 2026-06-04
+
+### Cloudflare workers.dev 도메인 변경
+
+- Cloudflare 계정 workers.dev 서브도메인 변경에 맞춰 운영 Worker 이름을 `hack`에서 `meeting`으로 변경했습니다.
+- 운영 주소를 `https://meeting.axgroup.workers.dev`로 전환하기 위해 `wrangler.jsonc`의 `name`을 `meeting`으로 갱신했습니다.
+- README의 라이브 접속 주소, 배포 확인 URL, deployments/rollback CLI 예시, 운영 audit URL을 새 도메인 기준으로 정리했습니다.
+- `ARENA_ROOM_NAME=2026-ax-q2-meeting`은 유지해 이번 AX Q&A 행사 room 분리는 그대로 보존합니다.
+
+## 2026-06-03
+
+### 2026 AX 그룹 2분기 모임 Q&A 전환
+
+- 이번 행사 기본 운영 모드를 해커톤 투표 중심에서 `2026 AX 그룹 2분기 모임` Q&A/퀴즈 중심으로 전환했습니다.
+- 참가자 진입 화면을 `/message`로 분리하고, 이름/ID/소속 대신 별명만 입력해 Q&A 방에 입장하도록 변경했습니다.
+- `/message` 상단 행사명은 `2026 AX 그룹 2분기 모임`으로, 방 이름은 `AX Group QnA`로 표시하도록 정리했습니다.
+- 참가자가 보낸 질문 이력을 화면 아래에 간단히 남기고, 보낸 질문을 다시 열어보거나 수정/삭제할 수 있게 했습니다.
+- 읽힌 질문이 수정되면 `수정됨` 표시를 붙이고 읽음 상태를 다시 해제해, 발표자가 변경된 질문을 놓치지 않도록 했습니다.
+- 퀴즈 세션이 열리면 `/message` 화면도 자동으로 퀴즈 화면으로 전환되고, 퀴즈가 끝나거나 Q&A로 돌아오면 질문 입력 화면으로 복귀하도록 했습니다.
+
+### Q&A wall과 워드클라우드
+
+- `/wall`에 Q&A board를 추가해 질문 카드가 질문 길이에 따라 다른 크기로 자연스럽게 쌓이도록 했습니다.
+- 질문 카드를 클릭하면 가운데 큰 카드로 열리고, 긴 질문은 모달 안에서 스크롤로 전체 내용을 볼 수 있게 했습니다.
+- 질문 카드의 `Q` 마크, matte 색감, 반투명 glow, 읽음/미읽음 테두리 차이를 조정해 발표장 화면에서 새 질문이 더 잘 구분되도록 했습니다.
+- Q&A empty state 문구를 `아직 질문이 없습니다. 무엇이 궁금하신가요?`로 바꾸고, 질문이 없을 때 화면 중앙에 안정적으로 배치했습니다.
+- 질문 텍스트 기반 워드클라우드를 AI cloud 형태로 추가하고, 단어를 클릭하면 관련 질문만 필터링하도록 했습니다.
+- 워드클라우드는 `d3-cloud`를 lazy import해 브라우저에서 계산합니다. 서버나 Durable Object가 매 질문마다 layout을 계산하지 않으므로 Cloudflare CPU 부담을 늘리지 않습니다.
+- 한국어 질문에서 조사, 어미, 기능어를 최대한 제외하고 명사/주제어 중심으로 보이도록 정규화 규칙을 추가했습니다.
+- 워드클라우드 단어와 배경이 아주 약하게 함께 움직이도록 해 발표장 화면의 실시간감을 살렸습니다.
+
+### 관리자 운영과 행사별 설정
+
+- `/admin`에서 wall에 표시할 세션을 선택할 수 있게 했고, 이번 행사 기본값은 `Q&A`, `퀴즈`만 열도록 설정했습니다.
+- wall 상단 상태 정보는 열린 세션과 연결되도록 정리했습니다. 실시간 현황을 숨기면 누적 별/응원 메시지 지표도 의미 없이 표시하지 않습니다.
+- Q&A wall 글자 크기(`qnaWallFontScale`)를 관리자 운영 설정에서 조정할 수 있게 했습니다.
+- `/admin`에 Q&A reset 버튼을 추가해 행사 리허설 후 질문만 빠르게 초기화할 수 있게 했습니다.
+- `event-configs/2026_ax_group_q2_meeting.json`을 추가해 이번 행사 문구, wall 세션, 퀴즈, Q&A 설정을 `teams.json`과 분리했습니다.
+- Cloudflare Worker는 `ARENA_ROOM_NAME=2026-ax-q2-meeting`일 때 위 행사 JSON을 초기 설정으로 번들링하고, Durable Object room도 이전 행사와 분리합니다.
+- 운영 전후 점검용 `scripts/ops-audit.mjs`와 `npm run ops:audit:ax-q2`를 추가했습니다.
+
+### 배포와 검증
+
+- Cloudflare Worker `hack`을 `https://hack.infant83.workers.dev`에 배포했습니다.
+- 배포 시점의 git 커밋은 `f710b41 feat: prepare AX QnA event deployment`입니다.
+- `ADMIN_PASSCODE` Cloudflare secret 존재를 확인했고, 배포 후 protected ops audit 로그인도 통과했습니다.
+- 배포 후 `/api/health`에서 runtime `cloudflare-workers`, room `2026-ax-q2-meeting`, admin passcode configured 상태를 확인했습니다.
+- 배포 후 `/message`, `/wall`, `/admin` route가 모두 HTTP 200으로 응답하는지 확인했습니다.
+- `npm run lint`, `npm run build`, `npm audit --omit=dev`, `npx wrangler deploy --dry-run`, Cloudflare 대상 `npm run ops:audit:ax-q2`가 모두 통과했습니다.
+
 ## 2026-05-24
 
 ### Cloudflare workers.dev 서빙 주소 이전

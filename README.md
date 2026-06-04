@@ -1,49 +1,67 @@
 # Vibe Vote Arena
 
-사내 해커톤 본선에서 관객이 팀별로 별을 나눠 주고, 응원 메시지를 남기고, 경품 추첨에 자동 응모할 수 있게 만든 실시간 투표 플랫폼입니다.
+사내 행사에서 관객 참여를 실시간으로 모으고 발표장 화면에 송출하기 위한 플랫폼입니다. 처음에는 해커톤 관객 투표, 응원 메시지, 행운권 추첨 시스템으로 시작했고, 현재 운영 기준은 **2026 AX 그룹 2분기 모임**의 Q&A/퀴즈 보드입니다.
+
+이번 행사 기본 흐름은 다음과 같습니다.
+
+1. 참가자는 `/message`에서 별명으로 입장합니다.
+2. 질문을 올리면 발표장 `/wall`의 Q&A board에 카드로 쌓입니다.
+3. 발표자/관리자가 질문 카드를 열면 읽음 표시가 자동 반영됩니다.
+4. 관리자는 `/admin`에서 Q&A/퀴즈 세션, 화면 문구, Q&A 글자 크기, 질문 초기화를 운영합니다.
+5. 관리자가 퀴즈를 열면 `/message` 참가자 화면도 퀴즈 화면으로 전환되고, 종료 후 다시 Q&A 입력 화면으로 돌아옵니다.
+
+해커톤용 `/vote`, 응원 메시지, 행운권 추첨 기능은 여전히 남아 있지만, 이번 AX 모임의 기본 wall 노출 세션은 `Q&A`와 `퀴즈`입니다.
 
 현재 라이브 배포 주소는 다음과 같습니다.
 
 ```text
-https://hack.infant83.workers.dev/vote
-https://hack.infant83.workers.dev/admin
+https://meeting.axgroup.workers.dev/message
+https://meeting.axgroup.workers.dev/wall
+https://meeting.axgroup.workers.dev/admin
+https://meeting.axgroup.workers.dev/vote
 ```
 
-운영 Worker 이름은 `hack`이고, Cloudflare workers.dev 서브도메인은 `infant83`입니다.
+운영 Worker 이름은 `meeting`이고, Cloudflare workers.dev 서브도메인은 `axgroup`입니다. 이번 행사 Durable Object room은 `2026-ax-q2-meeting`입니다.
 
 ## 1. 현재 개발 상태
 
-현재 MVP는 다음 흐름까지 구현되어 있습니다.
+현재 구현 상태는 AX Q&A 운영 기준으로 정리하면 다음과 같습니다.
 
-1. 관객은 `/vote`에서 이름과 ID를 등록합니다.
-2. 관객은 관리자가 정한 별 개수만큼 팀별로 별을 나눠 줍니다.
-3. 한 팀에 줄 수 있는 별은 기본 최대 5개이며, 관리자가 운영 설정에서 조정할 수 있습니다.
-4. 투표 마감 전에는 별을 회수하거나 다시 배분할 수 있습니다.
-5. 별을 준 팀에만 응원 메시지를 작성할 수 있습니다.
-6. 별 1개 이상을 사용하고 공개 응원 메시지를 남기면 경품 추첨 대상이 됩니다.
-7. 관리자는 `/admin`에서 실시간 순위, 참여자, 메시지, 추첨, 설정을 관리합니다.
-8. 관리자는 `/wall`에서 관객 송출용 실시간 현황/응원 메시지 보드를 띄울 수 있습니다.
-9. 관리자는 `/admin?showCheer=1`에서 응원 버블 Showup 화면을 띄울 수 있습니다.
-10. 관리자는 `/wall`의 `퀴즈` 모드에서 문제를 출제하고, 관객 답변과 선착순 정답자를 송출할 수 있습니다.
-    출제 후 기본 20초 동안은 사회자가 문제를 읽을 수 있도록 정답 후보만 모아두고, 관리자가 `정답 확인 모드 전환`을 누르거나 초기 딜레이가 끝나면 3초 보정 판정으로 넘어갑니다.
-    확인 중에도 다른 참가자의 답변 제출은 계속 받으며, 확인 시간이 끝나면 보정 제출시각 기준으로 최종 정답자를 확정합니다.
-11. 참가자는 퀴즈 한 문제당 기본 3번까지 답변을 제출할 수 있고, 관리자가 `/admin` 운영 설정에서 이 값을 조정할 수 있습니다.
-12. 관리자는 팀 정보와 안내 문구를 화면에서 편집하고, JSON/ZIP으로 가져오거나 내보낼 수 있습니다.
-13. 관리자는 행사 결과를 `.xlsx` 파일로 내보낼 수 있습니다.
-14. 행운권 추첨은 이미 당첨된 참여자를 제외하고, 관리자가 설정한 응원 메시지 가중치에 따라 메시지 개수와 총 글자수가 많은 참여자의 확률을 완만하게 높일 수 있습니다.
-15. 퀴즈 운영 창과 운영 콘텐츠 관리 모두에서 추가 인정 답을 입력할 수 있고, `*10*`처럼 별표를 붙인 포함 패턴도 정답으로 인정할 수 있습니다.
-16. 행운권 추첨은 룰별 기본값을 바탕으로, 현장에서 관리자가 추첨 룰·선발 인원·상품을 조합해 진행할 수 있으며 송출 화면은 여러 명이 동시에 뽑혀도 겹치지 않게 표시합니다.
-17. 공개 응원 메시지를 3개 이상 또는 5개 이상 보낸 참여자도 별도 행운권 추첨룰로 운영할 수 있습니다.
-18. 관객 `/vote` 화면은 SSE 실시간 연결을 기본 경로로 사용하고, 연결 오류가 날 때만 느린 fallback polling으로 복구합니다.
-19. 응원 메시지 live 상태는 최근 메시지만 싣고, 과거 메시지는 `/api/cheers` 페이지 조회로 불러옵니다.
-20. 관리자 인증 상태에서 `/api/export`로 참가자, 별 이벤트, 응원 메시지, 퀴즈 답변, 당첨 이력의 원본 JSON 백업을 받을 수 있습니다.
-21. 레포에 들어 있는 `teams.json`은 외부 공유와 개발 테스트를 위해 팀명, 참가자명, 소속, 프로젝트명, 사진 URL을 익명화한 샘플 데이터입니다.
+1. 참가자는 `/message`에서 이름/소속/ID 대신 별명만 입력해 Q&A 방에 입장합니다.
+2. 서버는 익명 브라우저 디바이스 ID와 관리 ID를 유지해, 익명성을 해치지 않으면서 운영 추적과 퀴즈 경품 확인이 가능하게 합니다.
+3. 참가자는 보낸 질문을 다시 열어볼 수 있고, 행사 중 자신의 질문을 수정하거나 삭제할 수 있습니다.
+4. 읽힌 질문이 수정되면 읽음 상태를 다시 해제하고 `수정됨` 배지를 표시합니다.
+5. `/wall`의 Q&A board는 질문 카드를 길이에 따라 다른 크기로 tessellation 배치하고, 긴 질문은 카드 안에서 높이를 제한한 뒤 클릭 시 큰 모달에서 전체 내용을 보여줍니다.
+6. 질문 카드를 열면 읽음 표시가 자동 반영되고, 읽은 질문과 읽지 않은 질문은 테두리와 glow 차이로 구분됩니다.
+7. Q&A board에는 질문 텍스트 기반 워드클라우드가 있으며, 단어를 클릭하면 관련 질문만 필터링합니다.
+8. 워드클라우드는 브라우저에서 `d3-cloud`로 계산하므로 서버 CPU를 쓰지 않고, 질문 수십 건 규모의 실시간 운영에 맞춰 가볍게 동작합니다.
+9. 관리자는 `/admin`에서 wall에 표시할 세션을 선택할 수 있습니다. 이번 행사 기본값은 `qna`, `quiz`입니다.
+10. 상태 지표는 열린 세션과 연결됩니다. 예를 들어 실시간 현황을 열지 않으면 누적 별/응원 메시지 지표를 wall에 노출하지 않습니다.
+11. 관리자는 Q&A 글자 크기(`qnaWallFontScale`)와 화면 문구를 관리자 페이지에서 조정할 수 있습니다.
+12. 관리자는 `/admin`에서 Q&A 질문 전체 reset을 할 수 있습니다.
+13. 퀴즈가 열리면 `/message` 참가자 화면도 퀴즈로 전환되고, 퀴즈가 끝나거나 Q&A로 돌아오면 질문 입력 화면으로 복귀합니다.
+14. `/vote` 기반 별 투표, 응원 메시지, 행운권 추첨, Showup 기능은 기존 해커톤 운영용으로 유지됩니다.
+15. Node realtime 서버와 Cloudflare Worker는 질문/퀴즈/관리자 인증/운영 설정 API를 같은 형태로 유지합니다.
+16. `event-configs/2026_ax_group_q2_meeting.json`은 이번 행사 전용 설정이며, `teams.json`은 익명화된 샘플/이전 행사 기본 설정으로 남깁니다.
+17. 관리자 인증 상태에서 `/api/export`로 참가자, 별 이벤트, 응원 메시지, 질문, 퀴즈 답변, 당첨 이력의 원본 JSON 백업을 받을 수 있습니다.
 
 ## 2. 주요 화면
 
+### `/message`
+
+이번 AX 모임의 참가자용 Q&A 화면입니다.
+
+- 별명 기반 입장
+- `2026 AX 그룹 2분기 모임` 행사명 표시
+- `AX Group QnA` 방 안내
+- 발표자에게 남길 질문 작성
+- 보낸 질문 이력 확인
+- 보낸 질문 수정/삭제
+- 퀴즈 세션이 열리면 자동으로 퀴즈 화면 전환
+
 ### `/vote`
 
-관객용 화면입니다.
+해커톤 투표 운영용 관객 화면입니다. 이번 AX Q&A 행사에서는 기본 진입 화면으로 쓰지 않습니다.
 
 - 이름과 ID 등록
 - 총 별 개수 안내
@@ -56,6 +74,11 @@ https://hack.infant83.workers.dev/admin
 
 관리자용 화면입니다.
 
+- AX Q&A/퀴즈 운영 상태 확인
+- wall 표시 세션 선택
+- Q&A 질문 reset
+- Q&A wall 글자 크기 조정
+- Q&A/퀴즈/행사 화면 문구 편집
 - 실시간 별 현황
 - 순위 변동 표시
 - 팀별 별 총합, 참여자 수, 환산점수
@@ -70,7 +93,7 @@ https://hack.infant83.workers.dev/admin
 
 ### `/admin?showCheer=1`
 
-발표장 스크린에 띄우는 응원 메시지 구름 화면입니다.
+해커톤 운영 때 발표장 스크린에 띄우는 응원 메시지 구름 화면입니다.
 
 - 팀별 영역 표시
 - 같은 팀 응원 버블끼리 가까이 모이는 움직임
@@ -83,12 +106,19 @@ https://hack.infant83.workers.dev/admin
 
 관객 송출용 공개 보드입니다.
 
+- Q&A board
+- 질문 카드 스택/tessellation
+- 질문 클릭 확대 보기
+- 읽음/미읽음/수정됨 표시
+- AI cloud 형태 워드클라우드
+- 워드 클릭 기반 질문 필터
+- Q&A 질문 수 표시
+- 퀴즈 출제, 답변 수집, 선착순 정답자 송출
 - 실시간 별 현황
 - 팀별 받은 별 개수
 - 최근 응원 메시지
 - 팀별 응원 메시지 필터
 - 응원 버블 Showup 바로 열기
-- 퀴즈 출제, 답변 수집, 선착순 정답자 송출
 - 심사용 환산점수와 투표자 이름은 노출하지 않음
 
 ## 3. 기술 구조
@@ -112,7 +142,9 @@ src/App.css          LGD 스타일 UI와 애니메이션
 server.mjs           로컬 Node/SSE 실시간 서버
 worker/index.ts      Cloudflare Worker + Durable Object 서버
 teams.json           팀 정보와 화면 문구의 기본 설정
+event-configs/       행사별 JSON 설정
 public/team-logos/   팀 로고 파일
+scripts/ops-audit.mjs 운영 전 정적/런타임 audit 스크립트
 wrangler.jsonc       Cloudflare Worker 배포 설정
 AGENTS.md            이 작업공간의 개발 규칙
 DESIGN.md            디자인 방향
@@ -140,26 +172,25 @@ npx npm@10.9.2 clean-install --progress=false --dry-run
 ### 4.2. 로컬 실시간 서버 실행
 
 ```powershell
+$env:EVENT_CONFIG_FILE = 'event-configs/2026_ax_group_q2_meeting.json'
+$env:ADMIN_PASSCODE="운영팀이_정한_passcode"
 npm run realtime
 ```
 
 브라우저에서 엽니다.
 
 ```text
-http://localhost:5173/vote
+http://localhost:5173/message
+http://localhost:5173/wall
 http://localhost:5173/admin
+http://localhost:5173/vote
 ```
 
 `npm run realtime`은 먼저 React 앱을 빌드한 뒤 `server.mjs`를 실행합니다. 모바일과 PC가 같은 투표 상태를 봐야 하므로 실제 테스트는 이 모드를 사용합니다.
 
-관리자 화면은 항상 passcode 로그인을 요구합니다. 실행 전에 `ADMIN_PASSCODE`를 설정합니다.
+관리자 화면은 항상 passcode 로그인을 요구합니다. `ADMIN_PASSCODE`가 비어 있으면 `/admin` 로그인 화면에서 설정 안내가 표시되고 관리자 기능은 열리지 않습니다. passcode가 설정되면 `/admin` 로그인 화면이 먼저 표시되고, 관리자 전용 API와 `/events?role=admin` 실시간 연결은 인증 쿠키가 있어야 사용할 수 있습니다.
 
-```powershell
-$env:ADMIN_PASSCODE="운영팀이_정한_passcode"
-npm run realtime
-```
-
-`ADMIN_PASSCODE`가 비어 있으면 `/admin` 로그인 화면에서 설정 안내가 표시되고 관리자 기능은 열리지 않습니다. passcode가 설정되면 `/admin` 로그인 화면이 먼저 표시되고, 관리자 전용 API와 `/events?role=admin` 실시간 연결은 인증 쿠키가 있어야 사용할 수 있습니다.
+AX Q&A 행사 설정을 쓰려면 `EVENT_CONFIG_FILE`을 함께 지정합니다. 지정하지 않으면 기존처럼 `teams.json`을 읽습니다.
 
 ### 4.3. 다른 포트로 실행하기
 
@@ -181,7 +212,7 @@ ipconfig
 예를 들어 PC IP가 `172.30.1.17`이면 모바일에서는 아래 주소로 접속합니다.
 
 ```text
-http://172.30.1.17:5173/vote
+http://172.30.1.17:5173/message
 ```
 
 ### 4.5. UI만 빠르게 개발하기
@@ -249,7 +280,7 @@ npm run cf:deploy
 배포가 성공하면 다음과 같은 주소가 표시됩니다.
 
 ```text
-https://hack.infant83.workers.dev
+https://meeting.axgroup.workers.dev
 ```
 
 ### 5.5. Git Build 자동 배포
@@ -269,23 +300,23 @@ Git Build는 푸시 직후 바로 끝나지 않습니다. 보통 2-5분 정도 �
 배포 목록은 CLI로도 볼 수 있습니다.
 
 ```powershell
-npx wrangler deployments list --name hack --json
+npx wrangler deployments list --name meeting --json
 ```
 
 ### 5.6. 긴급 롤백
 
 운영 중 새 배포에서 오류가 급증하면 Cloudflare Dashboard에서 바로 이전 안정 버전으로 되돌립니다.
 
-1. Cloudflare Dashboard > Workers & Pages > `hack` > `배포` 또는 버전 목록으로 이동
+1. Cloudflare Dashboard > Workers & Pages > `meeting` > `배포` 또는 버전 목록으로 이동
 2. 오류가 난 버전보다 앞선 안정 버전을 선택
 3. `Rollback` 또는 `이 버전 배포`를 실행
-4. `/vote`, `/wall`, `/admin` 접속과 Observability 오류 그래프를 확인
+4. `/message`, `/wall`, `/admin` 접속과 Observability 오류 그래프를 확인
 
 CLI로도 롤백할 수 있습니다.
 
 ```powershell
-npx wrangler deployments list --name hack
-npx wrangler rollback --name hack <되돌릴_version_id> --message "Rollback to stable event build" --yes
+npx wrangler deployments list --name meeting
+npx wrangler rollback --name meeting <되돌릴_version_id> --message "Rollback to stable event build" --yes
 ```
 
 스크린샷처럼 특정 버전에서 `SQLITE_TOOBIG` 오류가 몰리면, 해당 버전 직전의 정상 버전을 선택합니다. 롤백 뒤에는 운영 콘텐츠 저장이나 추첨 상태가 정상인지 `/admin`에서 짧게 확인합니다.
@@ -327,14 +358,14 @@ git push origin cloudflare-migration
 - Durable Object duration
 - 장시간 열려 있는 SSE/EventSource 연결
 
-특히 Durable Object duration은 단순히 배포를 많이 했다고 크게 늘어나는 항목이 아닙니다. 배포 후 `/vote`, `/admin`, `/wall`, `/admin?showCheer=1` 같은 페이지를 오래 열어두고 실시간 연결이 유지될 때 빠르게 늘어날 수 있습니다. 개발 테스트는 가능하면 Cloudflare 배포 URL이 아니라 로컬 `npm run realtime` 서버에서 진행합니다.
+특히 Durable Object duration은 단순히 배포를 많이 했다고 크게 늘어나는 항목이 아닙니다. 배포 후 `/message`, `/vote`, `/admin`, `/wall`, `/admin?showCheer=1` 같은 페이지를 오래 열어두고 실시간 연결이 유지될 때 빠르게 늘어날 수 있습니다. 개발 테스트는 가능하면 Cloudflare 배포 URL이 아니라 로컬 `npm run realtime` 서버에서 진행합니다.
 
 운영 전 최적화 목표는 다음과 같습니다.
 
-- `/vote`: SSE를 기본 실시간 경로로 사용하고, 연결이 정상일 때는 주기적인 전체 상태 polling을 하지 않음
-- `/vote`: SSE 오류가 발생한 브라우저만 30초 내외 fallback polling으로 복구
-- `/vote`: 퀴즈 출제, 퀴즈 상태, 당첨 이력, 공개 응원 메시지는 즉시성이 필요한 상태로 유지
-- `/vote`: 퀴즈 답변 제출은 제출자 자신의 POST 응답으로 즉시 결과를 받고, 모든 관객에게 매 답변마다 전체 상태를 다시 뿌리지 않음
+- `/message`, `/vote`: SSE를 기본 실시간 경로로 사용하고, 연결이 정상일 때는 주기적인 전체 상태 polling을 하지 않음
+- `/message`, `/vote`: SSE 오류가 발생한 브라우저만 30초 내외 fallback polling으로 복구
+- `/message`, `/vote`: Q&A 질문, 퀴즈 출제, 퀴즈 상태, 당첨 이력처럼 즉시성이 필요한 상태는 실시간으로 유지
+- `/message`, `/vote`: 퀴즈 답변 제출은 제출자 자신의 POST 응답으로 즉시 결과를 받고, 모든 관객에게 매 답변마다 전체 상태를 다시 뿌리지 않음
 - `/admin`: 관리자 화면은 운영 전체 상태가 필요하므로 SSE 유지
 - `/wall`, `/admin?showCheer=1`: 발표장 송출 화면은 SSE 유지
 - 숨겨진 브라우저 탭은 가능하면 실시간 연결 종료
@@ -346,7 +377,7 @@ git push origin cloudflare-migration
 1000명 x 30분 x 분당 4회 = 120,000회 상태 조회
 ```
 
-현재 구조는 SSE가 살아 있는 관객에게 이 반복 polling을 하지 않으므로, 정상 네트워크에서는 이 요청 대부분이 사라집니다. 여기에 등록, 별 조정, 응원 메시지 전송, 관리자 조작, fallback 재시도를 더한 실제 요청만 Worker/Durable Object에 들어갑니다.
+현재 구조는 SSE가 살아 있는 관객에게 이 반복 polling을 하지 않으므로, 정상 네트워크에서는 이 요청 대부분이 사라집니다. 여기에 입장, 질문 작성/수정, 별 조정, 응원 메시지 전송, 관리자 조작, fallback 재시도를 더한 실제 요청만 Worker/Durable Object에 들어갑니다.
 
 Free 플랜은 개발과 작은 리허설에는 사용할 수 있지만, 전사 행사 운영용으로는 권장하지 않습니다. 1000명이 30분 정도 참여하면 요청 수만으로도 Free 일일 한도에 닿거나 넘을 수 있고, 실시간 연결을 오래 열어두면 Durable Object duration 경고가 먼저 발생할 수 있습니다.
 
@@ -362,7 +393,7 @@ Free 플랜은 개발과 작은 리허설에는 사용할 수 있지만, 전사 
 | 300명 이상 행사 리허설 | Paid 권장 |
 | 1000명 전사 행사 | Paid 권장 |
 
-행사 전에는 Cloudflare Dashboard에서 사용량 알림과 비용 알림을 켜 둡니다. 행사 당일에는 사용하지 않는 `/vote`, `/admin`, Showup 탭을 닫고, 리허설이 끝나면 Durable Object 사용량이 불필요하게 계속 늘지 않도록 배포 URL을 열어둔 브라우저를 정리합니다.
+행사 전에는 Cloudflare Dashboard에서 사용량 알림과 비용 알림을 켜 둡니다. 행사 당일에는 사용하지 않는 `/message`, `/vote`, `/admin`, `/wall`, Showup 탭을 닫고, 리허설이 끝나면 Durable Object 사용량이 불필요하게 계속 늘지 않도록 배포 URL을 열어둔 브라우저를 정리합니다.
 
 ### 5.9. 운영 Preflight Audit
 
@@ -381,7 +412,7 @@ npm run ops:audit:ax-q2
 Cloudflare 배포 주소를 점검할 때는 `AUDIT_URL`을 배포 URL로 지정합니다.
 
 ```powershell
-$env:AUDIT_URL = 'https://hack.infant83.workers.dev'
+$env:AUDIT_URL = 'https://meeting.axgroup.workers.dev'
 $env:ADMIN_PASSCODE = '<운영 passcode>'
 npm run ops:audit:ax-q2
 ```
@@ -420,8 +451,10 @@ Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 �
 관리 가능한 항목:
 
 - 앱 제목
-- 화면별 문구(`/vote`, `/admin`, `/wall`, Showup, Quiz)
+- 화면별 문구(`/message`, `/vote`, `/admin`, `/wall`, Showup, Quiz, Q&A)
 - 등록 안내 문구
+- Q&A 방 안내 문구
+- Q&A 입력/전송 문구
 - 추첨 응모 안내 문구
 - 퀴즈 문제와 정답
 - 팀명
@@ -431,6 +464,8 @@ Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 �
 - 팀 색상
 - 팀 로고/팀 사진
 - 기본 로고 스타일
+- wall 표시 세션
+- Q&A wall 글자 크기
 - 테스트 데이터용 기본 별 수와 투표자 수
 
 운영 설정에서 화면 테마를 `현재 모드`와 `어두운 모드` 중 선택할 수 있습니다. 어두운 모드는 `ppt_sample/EDM_(일반진행)해커톤 간지 선정_양식(외부)_v0.1.pptx`의 블랙/네이비, 블루, 바이올렛, 마젠타 톤을 기준으로 합니다.
@@ -440,22 +475,25 @@ Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 �
 ```json
 {
   "copy": {
-    "appTitle": "Vibe Vote Arena",
-    "audienceEyeline": "Audience Vote"
+    "appTitle": "2026 AX 그룹 2분기 모임",
+    "qnaRoomTitle": "AX Group QnA",
+    "qnaRoomTarget": "AX Group에게 질문해주세요",
+    "wallQnaTitle": "실시간 Q&A"
   },
   "settings": {
     "themeMode": "stage",
-    "wallEnabledPanels": ["qna", "quiz"]
+    "wallEnabledPanels": ["qna", "quiz"],
+    "qnaWallFontScale": 1.12
   },
   "teams": [
     {
-      "id": "team-t1",
-      "code": "T1",
-      "editKey": "t1-edit",
-      "name": "Team One",
-      "title": "Submitted Project",
-      "members": ["Member A", "Member B", "Member C"],
-      "logoFile": "/team-logos/T1-logo.png",
+      "id": "ax-qna-room",
+      "code": "QNA",
+      "editKey": "ax-qna",
+      "name": "AX Group",
+      "title": "QnA Room",
+      "members": ["AX Group"],
+      "logoFile": "",
       "color": "#A50034",
       "logo": "orbit",
       "baseStars": 0,
@@ -493,7 +531,7 @@ Cloudflare Worker에서는 배포된 파일시스템을 직접 수정할 수 없
 
 레포에 커밋된 `teams.json`은 공개 저장소와 개발 환경에서 안전하게 다루기 위해 익명화되어 있습니다. 운영 중 Cloudflare Durable Object storage에 저장된 팀명, 프로젝트명, 팀원, 사진은 레포의 샘플 JSON과 다를 수 있습니다. 행사 후 운영 데이터를 보존하려면 관리자 화면에서 JSON을 내려받아 별도 보관하고, 공개 레포에 반영할 때는 실명/소속/사진을 다시 익명화합니다.
 
-Cloudflare 운영 중 `/admin > 운영 콘텐츠 > 관리`에서 `저장 및 반영`을 누르면 저장 완료 시각과 반영 버전이 표시됩니다. 이 값이 갱신되면 Durable Object 운영 상태에 저장된 것이며, 이미 열려 있는 `/wall`과 `/vote` 화면도 SSE/폴링 갱신으로 같은 설정을 받습니다. Google Drive 공유 링크와 원격 이미지 주소는 저장 전에 표시 가능한 주소로 정리됩니다.
+Cloudflare 운영 중 `/admin > 운영 콘텐츠 > 관리`에서 `저장 및 반영`을 누르면 저장 완료 시각과 반영 버전이 표시됩니다. 이 값이 갱신되면 Durable Object 운영 상태에 저장된 것이며, 이미 열려 있는 `/message`, `/wall`, `/vote` 화면도 SSE/폴링 갱신으로 같은 설정을 받습니다. Google Drive 공유 링크와 원격 이미지 주소는 저장 전에 표시 가능한 주소로 정리됩니다.
 
 사내망처럼 inbound 접속은 가능하지만 브라우저의 outbound HTTPS가 막힌 환경에서는 Cloudflare 운영 저장소로 직접 저장할 수 없습니다. 이 경우 먼저 `로컬 JSON 저장`으로 현재 편집본을 백업하고, 인터넷 연결이 가능한 관리자 PC에서 해당 JSON을 업로드하거나 같은 값을 다시 편집해 `저장 및 반영`합니다.
 
@@ -555,6 +593,7 @@ GET /api/export
 - `teams`: 현재 운영 상태의 팀 설정
 - `participants`: 참가자와 별 배분 상태
 - `cheers`: 서버/Cloudflare에 보관된 응원 메시지 이력
+- `questions`: 서버/Cloudflare에 보관된 Q&A 질문 이력
 - `quizAnswers`: 현재 퀴즈 라운드의 답변 이력
 - `quizWinners`: 현재 퀴즈 라운드의 정답자
 - `awardHistory`: 행운권/퀴즈 당첨 이력
@@ -562,7 +601,7 @@ GET /api/export
 - `settings`: 운영 설정
 - `configRevision`, `configUpdatedAt`: 운영 콘텐츠 반영 버전과 시각
 
-주의할 점이 있습니다. 화면 성능을 위해 `/api/state`는 최근 응원 메시지만 내려주지만, `/api/export`는 서버가 보관 중인 원본 배열을 내려줍니다. 현재 보관 한도는 응원 메시지 최대 5000개, 퀴즈 답변 최대 1000개입니다. 더 긴 장기 보존이 필요하면 행사 종료 직후 JSON/XLSX를 모두 내려받아 별도 보관합니다.
+주의할 점이 있습니다. 화면 성능을 위해 `/api/state`는 최근 응원 메시지와 질문 일부만 내려주지만, `/api/export`는 서버가 보관 중인 원본 배열을 내려줍니다. 현재 보관 한도는 응원 메시지 최대 5000개, Q&A 질문 최대 500개, 퀴즈 답변 최대 1000개입니다. 더 긴 장기 보존이 필요하면 행사 종료 직후 JSON/XLSX를 모두 내려받아 별도 보관합니다.
 
 ### 8.1. 데이터 저장 위치
 
@@ -574,7 +613,11 @@ Durable Object storage는 운영 중 상태 저장소이지, 영구 아카이브
 
 ## 9. 중복 참여 방지 설계
 
-이 플랫폼은 개인정보 수집을 늘리지 않는 방향으로 설계했습니다. 참가자는 다음 두 가지만 입력합니다.
+이 플랫폼은 개인정보 수집을 늘리지 않는 방향으로 설계했습니다.
+
+이번 AX Q&A 행사에서 `/message` 참가자는 별명만 입력합니다. 서버는 익명 브라우저 디바이스 ID와 관리 ID를 사용해 같은 브라우저의 질문 이력을 이어주고, 퀴즈 경품 운영에 필요한 최소한의 추적만 남깁니다. 참가자는 자신의 질문을 수정/삭제할 수 있고, 보낸 질문 목록을 다시 열어볼 수 있습니다.
+
+해커톤 투표용 `/vote` 흐름에서는 참가자가 다음 두 값을 입력합니다.
 
 1. 이름
 2. ID
@@ -629,19 +672,23 @@ npm run cf:deploy:dry-run
 
 1. `ADMIN_PASSCODE`가 로컬/운영 환경에 설정되어 있는지 확인
 2. `/admin` 접속 후 passcode 로그인
-3. `Reset` 실행
-4. 팀 정보와 안내 문구 확인
-5. 모바일 `/vote` 접속
-6. 이름/ID 등록
-7. 여러 팀에 별 배분
-8. 별 회수와 재배분 확인
-9. 별을 준 팀에 응원 메시지 작성
-10. `/admin`에서 실시간 별 현황과 메시지 확인
-11. 메시지 숨김/공개 확인
-12. `/admin?showCheer=1`에서 버블 표시 확인
-13. 행운권 추첨 테스트
-14. 결과 XLSX 다운로드 확인
-15. 최종 `Reset`
+3. 운영 콘텐츠에서 행사명, Q&A 문구, 퀴즈 문제 확인
+4. wall 표시 세션이 `Q&A`, `퀴즈`로 제한되어 있는지 확인
+5. `Q&A reset` 실행
+6. `/wall` 접속 후 초기 화면이 `아직 질문이 없습니다. 무엇이 궁금하신가요?`로 보이는지 확인
+7. 모바일 `/message` 접속
+8. 별명으로 Q&A 방 입장
+9. 질문 작성, 보낸 질문 다시 보기, 수정, 삭제 확인
+10. `/wall`에서 질문 카드 스택, 클릭 확대, 읽음 표시, 수정됨 표시 확인
+11. 워드클라우드 단어 클릭 후 관련 질문 필터가 한 줄 안내와 함께 동작하는지 확인
+12. `/admin`에서 Q&A 글자 크기 조정 후 `/wall` 반영 확인
+13. `/admin`에서 퀴즈 출제 후 `/message`가 퀴즈 화면으로 전환되는지 확인
+14. 퀴즈 종료 또는 Q&A 복귀 후 `/message`가 질문 입력 화면으로 돌아오는지 확인
+15. `npm run ops:audit:ax-q2` 또는 Cloudflare 배포 URL 대상 audit 실행
+16. 결과 XLSX와 `/api/export` JSON 다운로드 확인
+17. 최종 `Q&A reset` 또는 전체 `Reset`
+
+해커톤 투표 기능을 함께 쓰는 행사라면 추가로 `/vote` 이름/ID 등록, 별 배분, 응원 메시지, `/admin?showCheer=1`, 행운권 추첨도 확인합니다.
 
 ## 11. 개발 규칙
 
