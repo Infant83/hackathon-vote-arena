@@ -17,6 +17,11 @@
 - README에 `/api/reset`, `/api/question/reset`, 관리자 `Q&A reset`, Worker 이름, Durable Object binding/class, `ARENA_ROOM_NAME` 변경이 운영 데이터에 영향을 줄 수 있음을 명시했습니다.
 - `git push` 후 Cloudflare deployment가 자동 생성되는 것은 확인되지 않았고, 현재 운영 반영은 수동 `wrangler deploy` 기준임을 README에 기록했습니다.
 
+### Cloudflare Git Build lockfile 수정
+
+- Cloudflare Git Build의 `npm ci` 단계에서 `@emnapi/runtime@1.10.0`, `@emnapi/core@1.10.0`이 lockfile에 없다는 이유로 실패하던 문제를 수정했습니다.
+- Cloudflare build 환경과 맞추기 위해 `npm@10.9.2 install --package-lock-only`로 `package-lock.json`을 재생성했고, 같은 npm 버전의 `npm ci`가 통과하는지 확인했습니다.
+
 ## 2026-06-03
 
 ### 2026 AX 그룹 2분기 모임 Q&A 전환
