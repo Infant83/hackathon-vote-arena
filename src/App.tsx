@@ -5854,10 +5854,10 @@ function isQnaQuestionRead(question: QuestionMessage, optimisticReadQuestionVers
 function getQnaQuestionCardShape(text: string) {
   const length = Array.from(text.trim()).length
 
-  if (length <= 18) return { sizeClass: 'is-brief', rowSpan: 6 }
-  if (length <= 44) return { sizeClass: 'is-standard', rowSpan: 7 }
+  if (length <= 18) return { sizeClass: 'is-brief', rowSpan: 7 }
+  if (length <= 44) return { sizeClass: 'is-standard', rowSpan: 8 }
   if (length <= 88) return { sizeClass: 'is-roomy', rowSpan: 10 }
-  return { sizeClass: 'is-expanded', rowSpan: Math.min(15, 11 + Math.ceil(length / 110)) }
+  return { sizeClass: 'is-expanded', rowSpan: Math.min(16, 12 + Math.ceil(length / 110)) }
 }
 
 function buildQnaWordCloudSeeds(questions: QuestionMessage[]): QnaWordCloudSeed[] {
