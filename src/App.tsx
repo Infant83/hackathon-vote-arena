@@ -2321,6 +2321,10 @@ function Header({
   const wallShowupEnabled = isWallSessionEnabled(state, 'showup')
   const wallQnaEnabled = isWallSessionEnabled(state, 'qna')
   const wallQuizEnabled = isWallSessionEnabled(state, 'quiz')
+  const timerVisible =
+    !isMessageLikeMode &&
+    !(mode === 'wall' && (!wallStateReady || !wallOverviewEnabled)) &&
+    !(mode === 'vote' && hasResolvedEventState(state) && !isVoteRouteEnabled(state))
   const wallTotalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
   const wallVisibleCheers = state.cheers.filter((message) => !message.hidden).length
   const wallVisibleQuestions = state.questions.filter((question) => !question.hidden).length
@@ -2564,12 +2568,12 @@ function Header({
             <span>{isMessageLikeMode ? <QnaFontText text={statusPillText} /> : statusPillText}</span>
           </div>
         )}
-        {isMessageLikeMode || (mode === 'wall' && !wallStateReady) ? null : (
+        {timerVisible ? (
           <div className={`timer ${state.closed ? 'closed' : ''}`}>
             <Clock3 size={18} />
             <span>{state.closed ? '투표 마감' : formatTime(secondsLeft)}</span>
           </div>
-        )}
+        ) : null}
         <div className={`connection ${connection}`}>
           <span className="live-dot" />
           <span>{connectionLabel}</span>
@@ -5641,6 +5645,7 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
   const latestQuestionId = visibleQuestions[0]?.id ?? 0
   const visibleQuestionTotal = state.visibleQuestionTotalCount ?? visibleQuestions.length
   const focusedQuestion = focusedQuestionId ? visibleQuestions.find((question) => question.id === focusedQuestionId) || null : null
+  const focusedQuestionIsRead = focusedQuestion ? isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions) : false
   const qnaWallFontScale = getQnaWallFontScale(state)
   const wordCloudSignature = allVisibleQuestions.map((question) => `${question.id}:${question.text}`).join('|')
   const wordCloudSeeds = useMemo(() => buildQnaWordCloudSeeds(allVisibleQuestions), [allVisibleQuestions])
@@ -5755,10 +5760,12 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
                         <Check size={14} />
                         읽음
                       </span>
-                    ) : null}
+                    ) : (
+                      <span className="qna-read-frame" aria-label="안읽음" />
+                    )}
                     <button
                       type="button"
-                      className="qna-read-toggle"
+                      className={`qna-read-toggle ${questionIsRead ? 'is-revert' : 'is-read-action'}`}
                       aria-pressed={questionIsRead}
                       onClick={(event) => {
                         event.stopPropagation()
@@ -5766,7 +5773,7 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
                       }}
                     >
                       {questionIsRead ? <RefreshCcw size={13} /> : <Check size={13} />}
-                      {questionIsRead ? '안읽음' : '읽음'}
+                      {questionIsRead ? '안읽음' : '읽기'}
                     </button>
                   </footer>
                 </div>
@@ -5783,7 +5790,7 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
       {focusedQuestion ? (
         <div className="qna-focus-backdrop" role="presentation" onClick={() => setFocusedQuestionId(null)}>
           <article
-            className={`qna-focus-card ${isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions) ? 'is-read' : 'is-unread'}`}
+            className={`qna-focus-card ${focusedQuestionIsRead ? 'is-read' : 'is-unread'}`}
             role="dialog"
             aria-modal="true"
             aria-label="질문 자세히 보기"
@@ -5802,23 +5809,25 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
               <p>{focusedQuestion.text}</p>
             </div>
             <footer>
-              {isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions) ? (
+              {focusedQuestionIsRead ? (
                 <span className="qna-read-badge">
                   <Check size={15} />
                   읽음
                 </span>
-              ) : null}
+              ) : (
+                <span className="qna-read-frame" aria-label="안읽음" />
+              )}
               <button
                 type="button"
-                className="qna-read-toggle"
-                aria-pressed={isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions)}
+                className={`qna-read-toggle ${focusedQuestionIsRead ? 'is-revert' : 'is-read-action'}`}
+                aria-pressed={focusedQuestionIsRead}
                 onClick={() => setQuestionReadState(
                   focusedQuestion,
-                  !isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions),
+                  !focusedQuestionIsRead,
                 )}
               >
-                {isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions) ? <RefreshCcw size={13} /> : <Check size={13} />}
-                {isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions) ? '안읽음으로' : '읽음 표시'}
+                {focusedQuestionIsRead ? <RefreshCcw size={13} /> : <Check size={13} />}
+                {focusedQuestionIsRead ? '안읽음으로' : '읽기'}
               </button>
               {focusedQuestion.editedAt ? <span className="qna-edited-badge">수정됨</span> : null}
               <time>{formatMessageTime(focusedQuestion.editedAt || focusedQuestion.createdAt)}</time>
@@ -7071,7 +7080,7 @@ function MessageManagerDetail({
               <div className="moderation-actions">
                 <button type="button" onClick={() => toggleQuestionRead(question)}>
                   {question.read ? <RefreshCcw size={15} /> : <Check size={15} />}
-                  {question.read ? '안읽음' : '읽음'}
+                  {question.read ? '안읽음' : '읽기'}
                 </button>
               </div>
             </article>
