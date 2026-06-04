@@ -689,6 +689,13 @@ export default {
       return env.ARENA_ROOM.get(roomId).fetch(new Request(request, { headers }))
     }
 
+    if (!shouldServeAssetPath(url.pathname)) {
+      return new Response('Not found', {
+        status: 404,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      })
+    }
+
     return env.ASSETS.fetch(request)
   },
 } satisfies ExportedHandler<Env>
@@ -3011,6 +3018,26 @@ function json(data: unknown, status = 200, headers: HeadersInit = {}) {
       ...headers,
     },
   })
+}
+
+function shouldServeAssetPath(pathname: string) {
+  return isKnownAppPath(pathname) || /\.[a-zA-Z0-9]+$/.test(pathname)
+}
+
+function isKnownAppPath(pathname: string) {
+  const normalizedPath = pathname.replace(/\/+$/, '') || '/'
+  if (
+    normalizedPath === '/' ||
+    normalizedPath === '/vote' ||
+    normalizedPath === '/message' ||
+    normalizedPath === '/quiz' ||
+    normalizedPath === '/wall' ||
+    normalizedPath === '/admin'
+  ) {
+    return true
+  }
+
+  return normalizedPath.startsWith('/team/')
 }
 
 function byteLengthJson(value: unknown) {

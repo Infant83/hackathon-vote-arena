@@ -519,10 +519,11 @@ type AdminSessionState = {
   logout: () => Promise<void>
   refresh: () => Promise<void>
 }
-type AppMode = 'admin' | 'vote' | 'wall' | 'team' | 'message'
+type AppMode = 'admin' | 'vote' | 'wall' | 'team' | 'message' | 'quiz' | 'not-found'
 type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams' | 'quiz' | 'export'
 type WallPanel = 'overview' | 'cheer' | 'raffle' | 'quiz' | 'qna'
 type WallSession = 'overview' | 'raffle' | 'showup' | 'qna' | 'quiz'
+type OptimisticQuestionReadState = Map<number, { revision: number; read: boolean }>
 
 const raffleRuleOptions: Array<{ value: RaffleRule; label: string }> = [
   { value: 'all', label: '공개 응원 메시지 참여자' },
@@ -1840,7 +1841,7 @@ function App() {
   const protectedDisplayMode = mode === 'admin' || mode === 'wall'
   const adminSession = useAdminSession(protectedDisplayMode)
   const allowProtectedRealtime = !protectedDisplayMode || adminSession.authenticated
-  const eventStateEnabled = !protectedDisplayMode || adminSession.authenticated
+  const eventStateEnabled = mode !== 'not-found' && (!protectedDisplayMode || adminSession.authenticated)
   const { state, connection, post } = useEventState(mode, participantId, eventStateEnabled, allowProtectedRealtime)
   const themeMode = getThemeMode(state)
   const [name, setName] = useState(() => getStoredValue(nameKey))
@@ -1858,6 +1859,10 @@ function App() {
   const maxStarsPerTeam = getMaxStarsPerTeam(state)
   const spentStars = sumStars(allocations)
   const remainingStars = Math.max(0, starBudget - spentStars)
+  const stateReady = hasResolvedEventState(state)
+  const appQuizNow = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
+  const quizParticipationActive = stateReady && isQuizParticipationActive(state.quiz, appQuizNow)
+  const voteRouteEnabled = stateReady && isVoteRouteEnabled(state)
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode
@@ -1867,6 +1872,19 @@ function App() {
   useEffect(() => {
     document.title = getDocumentTitle(mode, syncedWallPanel)
   }, [mode, syncedWallPanel])
+
+  useEffect(() => {
+    if (!stateReady) return
+
+    if ((mode === 'message' || (mode === 'vote' && voteRouteEnabled)) && quizParticipationActive) {
+      window.location.assign('/quiz')
+      return
+    }
+
+    if (mode === 'quiz' && !quizParticipationActive) {
+      window.location.replace('/message')
+    }
+  }, [mode, quizParticipationActive, stateReady, voteRouteEnabled])
 
   const saveName = (nextName: string) => {
     setName(nextName)
@@ -1901,6 +1919,20 @@ function App() {
     setDepartment('')
   }
 
+  if (mode === 'not-found') {
+    return (
+      <main className={`app-shell theme-${themeMode} message-shell-app`}>
+        <RouteStatusView
+          eyebrow="Route"
+          title="알 수 없는 화면입니다."
+          summary="현재 행사는 Q&A 방과 퀴즈 화면을 중심으로 운영됩니다."
+          actionHref="/message"
+          actionLabel="Q&A 방으로 이동"
+        />
+      </main>
+    )
+  }
+
   if (protectedDisplayMode && (!adminSession.ready || (adminSession.required && !adminSession.authenticated))) {
     return (
       <main className={`app-shell theme-${themeMode}`}>
@@ -1910,7 +1942,7 @@ function App() {
   }
 
   return (
-    <main className={`app-shell theme-${themeMode} ${mode === 'wall' ? 'wall-shell-app' : ''} ${mode === 'message' ? 'message-shell-app' : ''}`}>
+    <main className={`app-shell theme-${themeMode} ${mode === 'wall' ? 'wall-shell-app' : ''} ${mode === 'message' || mode === 'quiz' ? 'message-shell-app' : ''}`}>
       <Header
         mode={mode}
         connection={connection}
@@ -1950,7 +1982,7 @@ function App() {
           return null
         }}
         adminSession={protectedDisplayMode ? adminSession : undefined}
-        onVoteLogout={mode === 'vote' || mode === 'message' ? switchVoteParticipant : undefined}
+        onVoteLogout={mode === 'vote' || mode === 'message' || mode === 'quiz' ? switchVoteParticipant : undefined}
       />
       {mode === 'admin' ? (
         <AdminView state={state} connection={connection} post={post} />
@@ -1965,7 +1997,16 @@ function App() {
         />
       ) : mode === 'team' ? (
         <TeamSelfEditView key={getEditableConfigSignature(state)} state={state} post={post} />
-      ) : mode === 'message' ? (
+      ) : mode === 'message' || mode === 'quiz' ? (
+        mode === 'quiz' && stateReady && !quizParticipationActive ? (
+          <RouteStatusView
+            eyebrow="Quiz"
+            title="지금은 진행 중인 퀴즈가 없습니다."
+            summary="퀴즈가 종료되었거나 아직 열리지 않았습니다. Q&A 방으로 돌아갑니다."
+            actionHref="/message"
+            actionLabel="Q&A 방으로 이동"
+          />
+        ) : (
         <MessageView
           state={state}
           participantId={participantId}
@@ -1975,6 +2016,22 @@ function App() {
           onGroupChange={saveGroup}
           onDepartmentChange={saveDepartment}
           post={post}
+          quizOnly={mode === 'quiz'}
+        />
+        )
+      ) : mode === 'vote' && stateReady && !voteRouteEnabled ? (
+        <RouteStatusView
+          eyebrow="Audience"
+          title="현재 투표 화면은 열려 있지 않습니다."
+          summary="관리자가 활성화한 Q&A 방이나 퀴즈 화면으로 참여해주세요."
+          actionHref="/message"
+          actionLabel="Q&A 방으로 이동"
+        />
+      ) : mode === 'vote' && !stateReady ? (
+        <RouteStatusView
+          eyebrow="Audience"
+          title="행사 상태를 확인하는 중입니다."
+          summary="화면 설정을 불러온 뒤 참여 가능한 화면으로 안내합니다."
         />
       ) : (
         <VoteView
@@ -2040,12 +2097,49 @@ function AdminLoginView({ session }: { session: AdminSessionState }) {
   )
 }
 
+function RouteStatusView({
+  eyebrow,
+  title,
+  summary,
+  actionHref,
+  actionLabel,
+}: {
+  eyebrow: string
+  title: string
+  summary: string
+  actionHref?: string
+  actionLabel?: string
+}) {
+  return (
+    <section className="route-status-shell" aria-label={title}>
+      <div className="route-status-card">
+        <span className="route-status-icon" aria-hidden="true">
+          <CircleHelp size={28} />
+        </span>
+        <p className="section-kicker"><QnaFontText text={eyebrow} /></p>
+        <h2><QnaFontText text={title} /></h2>
+        <p><QnaFontText text={summary} /></p>
+        {actionHref && actionLabel ? (
+          <a className="route-status-action" href={actionHref}>
+            <ArrowRight size={16} />
+            <QnaFontText text={actionLabel} />
+          </a>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
 function getAppMode(): AppMode {
-  if (window.location.pathname.startsWith('/admin')) return 'admin'
-  if (window.location.pathname.startsWith('/wall')) return 'wall'
-  if (window.location.pathname.startsWith('/team')) return 'team'
-  if (window.location.pathname.startsWith('/message')) return 'message'
-  return 'vote'
+  const pathname = window.location.pathname.replace(/\/+$/, '') || '/'
+  if (pathname === '/') return 'message'
+  if (pathname === '/admin') return 'admin'
+  if (pathname === '/wall') return 'wall'
+  if (pathname.startsWith('/team/')) return 'team'
+  if (pathname === '/message') return 'message'
+  if (pathname === '/quiz') return 'quiz'
+  if (pathname === '/vote') return 'vote'
+  return 'not-found'
 }
 
 function hasResolvedEventState(state: EventState) {
@@ -2070,6 +2164,11 @@ function isWallSessionEnabled(state: EventState, session: WallSession) {
 function isWallPanelEnabled(state: EventState, panel: WallPanel) {
   if (panel === 'cheer') return isWallSessionEnabled(state, 'overview')
   return isWallSessionEnabled(state, panel)
+}
+
+function isVoteRouteEnabled(state: EventState) {
+  const enabled = getWallEnabledSessions(state)
+  return enabled.includes('overview') || enabled.includes('raffle') || enabled.includes('showup')
 }
 
 function getFirstEnabledWallPanel(state: EventState): WallPanel {
@@ -2128,6 +2227,8 @@ function getDocumentTitle(mode: AppMode, wallPanel: WallPanel) {
     return `vibe-compete/team${teamId ? `/${teamId}` : ''}`
   }
   if (mode === 'message') return 'vibe-compete/message'
+  if (mode === 'quiz') return 'vibe-compete/quiz'
+  if (mode === 'not-found') return 'vibe-compete/not-found'
   return 'vibe-compete/vote'
 }
 
@@ -2202,17 +2303,18 @@ function Header({
   const secondsLeft = Math.max(0, Math.floor((state.closesAt - now) / 1000))
   const connectionLabel = connection === 'live' ? 'Live' : connection === 'connecting' ? '연결 중' : '오프라인 데모'
   const voteUrl = `${window.location.host}/vote`
+  const isMessageLikeMode = mode === 'message' || mode === 'quiz'
   const headerEyeline =
     mode === 'admin'
       ? state.copy.adminEyeline
       : mode === 'wall'
         ? state.copy.wallEyeline
-        : mode === 'message'
+        : isMessageLikeMode
           ? state.copy.qnaRoomEyeline
           : state.copy.audienceEyeline
   const headerTitle = state.copy.appTitle
-  const statusPillIcon = mode === 'team' ? <Settings2 size={16} /> : mode === 'message' ? <CircleHelp size={16} /> : <Radio size={16} />
-  const statusPillText = mode === 'team' ? '팀 정보 편집' : mode === 'message' ? state.copy.qnaRoomTitle : '관객 투표 화면'
+  const statusPillIcon = mode === 'team' ? <Settings2 size={16} /> : isMessageLikeMode ? <CircleHelp size={16} /> : <Radio size={16} />
+  const statusPillText = mode === 'team' ? '팀 정보 편집' : mode === 'quiz' ? 'AX Quiz' : mode === 'message' ? state.copy.qnaRoomTitle : '관객 투표 화면'
   const wallStateReady = mode !== 'wall' || hasResolvedEventState(state)
   const wallOverviewEnabled = isWallSessionEnabled(state, 'overview')
   const wallRaffleEnabled = isWallSessionEnabled(state, 'raffle')
@@ -2246,7 +2348,7 @@ function Header({
         <div>
           <p className="eyeline">{headerEyeline}</p>
           <div className="brand-title-row">
-            <h1>{mode === 'message' ? <QnaFontText text={headerTitle} /> : headerTitle}</h1>
+            <h1>{isMessageLikeMode ? <QnaFontText text={headerTitle} /> : headerTitle}</h1>
             {mode === 'admin' ? <span className="admin-console-badge">운영 콘솔</span> : null}
           </div>
         </div>
@@ -2459,10 +2561,10 @@ function Header({
         ) : (
           <div className="audience-status-pill" aria-label="현재 화면">
             {statusPillIcon}
-            <span>{mode === 'message' ? <QnaFontText text={statusPillText} /> : statusPillText}</span>
+            <span>{isMessageLikeMode ? <QnaFontText text={statusPillText} /> : statusPillText}</span>
           </div>
         )}
-        {mode === 'message' || (mode === 'wall' && !wallStateReady) ? null : (
+        {isMessageLikeMode || (mode === 'wall' && !wallStateReady) ? null : (
           <div className={`timer ${state.closed ? 'closed' : ''}`}>
             <Clock3 size={18} />
             <span>{state.closed ? '투표 마감' : formatTime(secondsLeft)}</span>
@@ -2472,7 +2574,7 @@ function Header({
           <span className="live-dot" />
           <span>{connectionLabel}</span>
         </div>
-        {(mode === 'vote' || mode === 'message') && onVoteLogout ? (
+        {(mode === 'vote' || isMessageLikeMode) && onVoteLogout ? (
           <button type="button" className="session-logout-button" onClick={onVoteLogout}>
             <LogOut size={15} />
             Logout
@@ -3384,6 +3486,7 @@ function MessageView({
   onGroupChange,
   onDepartmentChange,
   post,
+  quizOnly = false,
 }: {
   state: EventState
   participantId: string
@@ -3393,6 +3496,7 @@ function MessageView({
   onGroupChange: (group: string) => void
   onDepartmentChange: (department: string) => void
   post: PostEventState
+  quizOnly?: boolean
 }) {
   const [questionText, setQuestionText] = useState('')
   const [questionStatus, setQuestionStatus] = useState('')
@@ -3421,7 +3525,8 @@ function MessageView({
   const quizServerOffset =
     typeof state.serverTime === 'number' && typeof state.receivedAt === 'number' ? state.serverTime - state.receivedAt : 0
   const quizPhase = getQuizDisplayPhase(state.quiz, quizNow)
-  const quizActive = isRegistered && (quizPhase === 'intro' || quizPhase === 'countdown' || quizPhase === 'open' || quizPhase === 'settling')
+  const quizModeVisible = quizOnly || (isRegistered && isQuizParticipationActive(state.quiz, quizNow))
+  const quizActive = isRegistered && isQuizParticipationActive(state.quiz, quizNow)
   const quizAnswerText = quizAnswerDraft.quizId === state.quiz.id ? quizAnswerDraft.text : ''
   const quizFeedback = quizFeedbackDraft.quizId === state.quiz.id ? quizFeedbackDraft.text : ''
   const myQuizAnswers = state.quiz.answers.filter((answer) => answer.participantId === currentParticipantId)
@@ -3599,13 +3704,13 @@ function MessageView({
       <section className="message-room-hero">
         <div>
           <span className="message-room-badge">
-            {quizActive ? <Sparkles size={17} /> : <CircleHelp size={17} />}
-            <QnaFontText text={quizActive ? 'Quiz Mode' : state.copy.qnaRoomEyeline} />
+            {quizModeVisible ? <Sparkles size={17} /> : <CircleHelp size={17} />}
+            <QnaFontText text={quizModeVisible ? 'Quiz Mode' : state.copy.qnaRoomEyeline} />
           </span>
-          <h2><QnaFontText text={quizActive ? 'Live Quiz' : state.copy.qnaRoomTitle} /></h2>
-          <p className="message-room-target"><QnaFontText text={quizActive ? '퀴즈가 시작되었습니다' : state.copy.qnaRoomTarget} /></p>
+          <h2><QnaFontText text={quizModeVisible ? 'Live Quiz' : state.copy.qnaRoomTitle} /></h2>
+          <p className="message-room-target"><QnaFontText text={quizModeVisible ? '퀴즈가 시작되었습니다' : state.copy.qnaRoomTarget} /></p>
           <p className="message-room-summary">
-            <QnaFontText text={quizActive ? '이 화면에서 바로 정답을 입력하세요. 퀴즈가 끝나면 Q&A 방으로 돌아옵니다.' : state.copy.qnaRoomSummary} />
+            <QnaFontText text={quizModeVisible ? '이 화면에서 바로 정답을 입력하세요. 퀴즈가 끝나면 Q&A 방으로 돌아옵니다.' : state.copy.qnaRoomSummary} />
           </p>
         </div>
       </section>
@@ -3637,7 +3742,7 @@ function MessageView({
             <QnaFontText text={sessionReady ? state.copy.qnaLoginReady : state.copy.registrationConnecting} />
           </p>
         </section>
-      ) : quizActive ? (
+      ) : quizModeVisible ? (
         <section className="message-room-card quiz-message-room" aria-label="QnA 퀴즈 참여">
           <div className="message-room-participant">
             <div>
@@ -3646,21 +3751,29 @@ function MessageView({
             </div>
             <p><QnaFontText text={managementLabel} /></p>
           </div>
-          <QuizParticipationView
-            quiz={state.quiz}
-            copy={state.copy}
-            serverTime={state.serverTime}
-            receivedAt={state.receivedAt}
-            answerText={quizAnswerText}
-            onAnswerTextChange={(value) => setQuizAnswerDraft({ quizId: state.quiz.id, text: value })}
-            onSubmit={sendQuizAnswer}
-            onKeyDown={handleQuizKeyDown}
-            latestAnswer={latestMyQuizAnswer}
-            winningAnswer={myWinningQuizAnswer}
-            feedback={quizFeedback}
-            attemptCount={quizAttemptCount}
-            attemptLimit={quizAttemptLimit}
-          />
+          {quizActive ? (
+            <QuizParticipationView
+              quiz={state.quiz}
+              copy={state.copy}
+              serverTime={state.serverTime}
+              receivedAt={state.receivedAt}
+              answerText={quizAnswerText}
+              onAnswerTextChange={(value) => setQuizAnswerDraft({ quizId: state.quiz.id, text: value })}
+              onSubmit={sendQuizAnswer}
+              onKeyDown={handleQuizKeyDown}
+              latestAnswer={latestMyQuizAnswer}
+              winningAnswer={myWinningQuizAnswer}
+              feedback={quizFeedback}
+              attemptCount={quizAttemptCount}
+              attemptLimit={quizAttemptLimit}
+            />
+          ) : (
+            <div className="quiz-start-screen standby">
+              <CircleHelp size={34} />
+              <h2><QnaFontText text="퀴즈를 기다리는 중입니다." /></h2>
+              <p><QnaFontText text="사회자가 퀴즈를 열면 이 화면에서 바로 답변할 수 있습니다." /></p>
+            </div>
+          )}
         </section>
       ) : (
         <section className="message-room-card" aria-label="QnA 질문 작성">
@@ -5514,7 +5627,7 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
   const stackRef = useRef<HTMLDivElement | null>(null)
   const readMarkedQuestionVersionsRef = useRef<Map<number, number>>(new Map())
   const [focusedQuestionId, setFocusedQuestionId] = useState<number | null>(null)
-  const [optimisticReadQuestionVersions, setOptimisticReadQuestionVersions] = useState<Map<number, number>>(() => new Map())
+  const [optimisticReadQuestionVersions, setOptimisticReadQuestionVersions] = useState<OptimisticQuestionReadState>(() => new Map())
   const [selectedCloudWord, setSelectedCloudWord] = useState('')
   const allVisibleQuestions = useMemo(() => {
     return state.questions
@@ -5547,18 +5660,29 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [focusedQuestionId])
 
-  const openQuestion = (question: QuestionMessage) => {
-    setFocusedQuestionId(question.id)
+  const setQuestionReadState = (question: QuestionMessage, read: boolean) => {
     const revision = getQnaQuestionRevision(question)
 
-    if (!question.read && readMarkedQuestionVersionsRef.current.get(question.id) !== revision) {
+    if (read) {
       readMarkedQuestionVersionsRef.current.set(question.id, revision)
-      setOptimisticReadQuestionVersions((current) => {
-        const next = new Map(current)
-        next.set(question.id, revision)
-        return next
-      })
-      post('/api/question/read', { questionId: question.id, read: true })
+    } else {
+      readMarkedQuestionVersionsRef.current.delete(question.id)
+    }
+
+    setOptimisticReadQuestionVersions((current) => {
+      const next = new Map(current)
+      next.set(question.id, { revision, read })
+      return next
+    })
+    post('/api/question/read', { questionId: question.id, read })
+  }
+
+  const openQuestion = (question: QuestionMessage) => {
+    setFocusedQuestionId(question.id)
+    const questionIsRead = isQnaQuestionRead(question, optimisticReadQuestionVersions)
+
+    if (!questionIsRead && readMarkedQuestionVersionsRef.current.get(question.id) !== getQnaQuestionRevision(question)) {
+      setQuestionReadState(question, true)
     }
   }
 
@@ -5632,6 +5756,18 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
                         읽음
                       </span>
                     ) : null}
+                    <button
+                      type="button"
+                      className="qna-read-toggle"
+                      aria-pressed={questionIsRead}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setQuestionReadState(question, !questionIsRead)
+                      }}
+                    >
+                      {questionIsRead ? <RefreshCcw size={13} /> : <Check size={13} />}
+                      {questionIsRead ? '안읽음' : '읽음'}
+                    </button>
                   </footer>
                 </div>
               </article>
@@ -5666,10 +5802,24 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
               <p>{focusedQuestion.text}</p>
             </div>
             <footer>
-              <span className="qna-read-badge">
-                <Check size={15} />
-                읽음
-              </span>
+              {isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions) ? (
+                <span className="qna-read-badge">
+                  <Check size={15} />
+                  읽음
+                </span>
+              ) : null}
+              <button
+                type="button"
+                className="qna-read-toggle"
+                aria-pressed={isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions)}
+                onClick={() => setQuestionReadState(
+                  focusedQuestion,
+                  !isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions),
+                )}
+              >
+                {isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions) ? <RefreshCcw size={13} /> : <Check size={13} />}
+                {isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions) ? '안읽음으로' : '읽음 표시'}
+              </button>
               {focusedQuestion.editedAt ? <span className="qna-edited-badge">수정됨</span> : null}
               <time>{formatMessageTime(focusedQuestion.editedAt || focusedQuestion.createdAt)}</time>
             </footer>
@@ -5684,8 +5834,12 @@ function getQnaQuestionRevision(question: QuestionMessage) {
   return question.editedAt || question.createdAt
 }
 
-function isQnaQuestionRead(question: QuestionMessage, optimisticReadQuestionVersions: Map<number, number>) {
-  return question.read || optimisticReadQuestionVersions.get(question.id) === getQnaQuestionRevision(question)
+function isQnaQuestionRead(question: QuestionMessage, optimisticReadQuestionVersions: OptimisticQuestionReadState) {
+  const revision = getQnaQuestionRevision(question)
+  const optimistic = optimisticReadQuestionVersions.get(question.id)
+
+  if (optimistic && optimistic.revision === revision) return optimistic.read
+  return Boolean(question.read)
 }
 
 function getQnaQuestionCardShape(text: string) {
@@ -6792,13 +6946,36 @@ function MessageManagerDetail({
         .some((value) => String(value).toLowerCase().includes(normalizedKeyword))
     })
   }, [keyword, state.cheers, teamMap])
+  const filteredQuestions = useMemo(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase()
+
+    return state.questions
+      .filter((question) => !question.hidden)
+      .filter((question) => {
+        if (!normalizedKeyword) return true
+
+        return [question.author, question.text, question.group, question.department, question.read ? '읽음' : '안읽음']
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalizedKeyword))
+      })
+      .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)
+  }, [keyword, state.questions])
   const visibleFilteredCount = filteredMessages.filter((message) => !message.hidden).length
   const hiddenFilteredCount = filteredMessages.length - visibleFilteredCount
+  const readQuestionCount = filteredQuestions.filter((question) => question.read).length
+  const unreadQuestionCount = filteredQuestions.length - readQuestionCount
 
   const toggleMessage = (message: CheerMessage) => {
     post('/api/cheer/moderate', {
       messageId: message.id,
       hidden: !message.hidden,
+    })
+  }
+
+  const toggleQuestionRead = (question: QuestionMessage) => {
+    post('/api/question/read', {
+      questionId: question.id,
+      read: !question.read,
     })
   }
 
@@ -6819,7 +6996,7 @@ function MessageManagerDetail({
             type="search"
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
-            placeholder="작성자, 팀명, 메시지 키워드로 필터"
+            placeholder="작성자, 팀명, 메시지, 질문 키워드로 필터"
           />
         </label>
         <div className="bulk-actions">
@@ -6865,6 +7042,42 @@ function MessageManagerDetail({
           })
         ) : (
           <p className="empty-state">필터 조건에 맞는 메시지가 없습니다.</p>
+        )}
+      </div>
+
+      <div className="message-manager-section-heading">
+        <div>
+          <p className="section-kicker">Q&A Control</p>
+          <h3>Q&A 질문 읽음 관리</h3>
+        </div>
+        <span>{filteredQuestions.length}개 결과 · {unreadQuestionCount} 안읽음 · {readQuestionCount} 읽음</span>
+      </div>
+
+      <div className="detail-list message-detail-list question-detail-list">
+        {filteredQuestions.length ? (
+          filteredQuestions.map((question) => (
+            <article
+              className={`moderation-item detail question-moderation-item ${question.read ? 'read' : 'unread'}`}
+              key={question.id}
+              style={{ '--team-color': '#7ec8ff' } as CSSProperties}
+            >
+              <div>
+                <strong>{question.author || '익명'}</strong>
+                <span>{getParticipantManagementLabel({ id: question.participantId || `question-${question.id}` })}</span>
+                <time>{formatMessageTime(question.editedAt || question.createdAt)}</time>
+                {question.editedAt ? <span>수정됨</span> : null}
+              </div>
+              <p>{question.text}</p>
+              <div className="moderation-actions">
+                <button type="button" onClick={() => toggleQuestionRead(question)}>
+                  {question.read ? <RefreshCcw size={15} /> : <Check size={15} />}
+                  {question.read ? '안읽음' : '읽음'}
+                </button>
+              </div>
+            </article>
+          ))
+        ) : (
+          <p className="empty-state">필터 조건에 맞는 Q&A 질문이 없습니다.</p>
         )}
       </div>
     </div>
@@ -9914,9 +10127,9 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
     let events: EventSource | null = null
     let pollTimer: number | undefined
     let hasFullMediaState = false
-    const realtime = allowProtectedRealtime && (mode === 'admin' || mode === 'wall' || mode === 'vote' || mode === 'message' || voteRealtime)
+    const realtime = allowProtectedRealtime && (mode === 'admin' || mode === 'wall' || mode === 'vote' || mode === 'message' || mode === 'quiz' || voteRealtime)
     const shouldPoll = !realtime
-    const eventRole = mode === 'message' ? 'vote' : mode
+    const eventRole = mode === 'message' || mode === 'quiz' || mode === 'not-found' ? 'vote' : mode
     const roleQuery = `role=${encodeURIComponent(eventRole)}`
 
     const fetchState = async () => {

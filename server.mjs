@@ -3248,7 +3248,13 @@ async function handleApi(request, response, url) {
 
 async function serveStatic(request, response, url) {
   const pathname = decodeURIComponent(url.pathname)
-  const requestedPath = pathname === '/' ? '/vote' : pathname
+  if (!shouldServeAssetPath(pathname)) {
+    response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    response.end('Not found')
+    return
+  }
+
+  const requestedPath = pathname
   const hasExtension = path.extname(requestedPath).length > 0
   const candidate = hasExtension ? requestedPath : '/index.html'
   const filePath = path.normalize(path.join(distDir, candidate))
@@ -3273,6 +3279,26 @@ async function serveStatic(request, response, url) {
     response.writeHead(404)
     response.end('Not found')
   }
+}
+
+function shouldServeAssetPath(pathname) {
+  return isKnownAppPath(pathname) || path.extname(pathname).length > 0
+}
+
+function isKnownAppPath(pathname) {
+  const normalizedPath = pathname.replace(/\/+$/, '') || '/'
+  if (
+    normalizedPath === '/' ||
+    normalizedPath === '/vote' ||
+    normalizedPath === '/message' ||
+    normalizedPath === '/quiz' ||
+    normalizedPath === '/wall' ||
+    normalizedPath === '/admin'
+  ) {
+    return true
+  }
+
+  return normalizedPath.startsWith('/team/')
 }
 
 function getContentType(filePath) {
