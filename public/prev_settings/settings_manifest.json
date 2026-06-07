@@ -1,0 +1,12 @@
+{
+  "settings": [
+    {
+      "id": "2026-ax-hackathon-public-sample",
+      "label": "2026 AX Hackathon 익명 샘플",
+      "description": "공개 저장소에 둘 수 있도록 팀명, 구성원, 이미지 정보를 익명화한 기본 운영 설정입니다.",
+      "eventId": "2026-ax-hackathon-public-sample",
+      "settingsFile": "public/prev_settings/2026_ax_hackathon_public_sample.settings.json",
+      "file": "2026_ax_hackathon_public_sample.settings.json"
+    }
+  ]
+}

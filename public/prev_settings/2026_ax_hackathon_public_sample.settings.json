@@ -1,0 +1,150 @@
+{
+  "event": {
+    "id": "2026-ax-hackathon-public-sample",
+    "label": "2026 AX Hackathon 익명 샘플",
+    "settingsFile": "public/prev_settings/2026_ax_hackathon_public_sample.settings.json",
+    "description": "공개 저장소에 둘 수 있도록 익명화한 운영 설정 샘플입니다."
+  },
+  "copy": {
+    "appTitle": "2026 상반기 AX Hackathon",
+    "audienceHeroTitle": "응원하는 팀에 별을 투표하세요.",
+    "audienceHeroSubtitle": "총 {starBudget}개의 별을 팀별로 나눠 보낼 수 있습니다. 한 팀에는 최대 {maxStarsPerTeam}개까지 보낼 수 있습니다.",
+    "adminHeroTitle": "관리자 모드",
+    "adminHeroSubtitle": "팀 정보, 화면 문구, 퀴즈, 투표 운영 설정을 관리합니다.",
+    "contentPanelTitle": "운영 콘텐츠 관리",
+    "contentPanelSummary": "팀 정보, 화면 문구, 퀴즈 문제를 한 곳에서 수정합니다.",
+    "wallArenaTitle": "실시간 현황",
+    "wallCheerTitle": "응원 메시지",
+    "wallRaffleTitle": "행운권 추첨",
+    "showupTitle": "응원 메시지"
+  },
+  "settings": {
+    "starBudget": 10,
+    "maxStarsPerTeam": 5,
+    "durationMinutes": 10,
+    "timerMode": "duration",
+    "targetTime": "",
+    "minScore": 5,
+    "raffleCheerWeight": 0.2,
+    "quizAnswerLimit": 3,
+    "quizInitialConfirmDelaySeconds": 20,
+    "cheerNameMode": "masked",
+    "themeMode": "stage",
+    "wallEnabledPanels": ["overview", "raffle", "showup", "qna", "quiz"],
+    "qnaWallFontScale": 1.12
+  },
+  "teams": [
+    {
+      "id": "team-sample-01",
+      "code": "T01",
+      "name": "Team 01",
+      "title": "익명 프로젝트 01: 데이터 기반 업무 자동화",
+      "members": ["참가자 01-01", "참가자 01-02", "참가자 01-03"],
+      "color": "#A50034",
+      "sortOrder": 1
+    },
+    {
+      "id": "team-sample-02",
+      "code": "T02",
+      "name": "Team 02",
+      "title": "익명 프로젝트 02: 운영 비용 분석 지원",
+      "members": ["참가자 02-01", "참가자 02-02", "참가자 02-03"],
+      "color": "#D85A6A",
+      "sortOrder": 2
+    },
+    {
+      "id": "team-sample-03",
+      "code": "T03",
+      "name": "Team 03",
+      "title": "익명 프로젝트 03: 품질 리스크 탐지 자동화",
+      "members": ["참가자 03-01", "참가자 03-02", "참가자 03-03"],
+      "color": "#2F4858",
+      "sortOrder": 3
+    },
+    {
+      "id": "team-sample-04",
+      "code": "T04",
+      "name": "Team 04",
+      "title": "익명 프로젝트 04: 업무 인사이트 발굴 도구",
+      "members": ["참가자 04-01", "참가자 04-02", "참가자 04-03"],
+      "color": "#007A78",
+      "sortOrder": 4
+    },
+    {
+      "id": "team-sample-05",
+      "code": "T05",
+      "name": "Team 05",
+      "title": "익명 프로젝트 05: 운영 예측 정확도 개선",
+      "members": ["참가자 05-01", "참가자 05-02", "참가자 05-03"],
+      "color": "#8F6A00",
+      "sortOrder": 5
+    },
+    {
+      "id": "team-sample-06",
+      "code": "T06",
+      "name": "Team 06",
+      "title": "익명 프로젝트 06: 설계 검토 보조 Agent",
+      "members": ["참가자 06-01", "참가자 06-02", "참가자 06-03"],
+      "color": "#5C5F66",
+      "sortOrder": 6
+    },
+    {
+      "id": "team-sample-07",
+      "code": "T07",
+      "name": "Team 07",
+      "title": "익명 프로젝트 07: 분석 프로세스 효율화",
+      "members": ["참가자 07-01", "참가자 07-02", "참가자 07-03"],
+      "color": "#785EF0",
+      "sortOrder": 7
+    },
+    {
+      "id": "team-sample-08",
+      "code": "T08",
+      "name": "Team 08",
+      "title": "익명 프로젝트 08: 자원 사용량 예측 최적화",
+      "members": ["참가자 08-01", "참가자 08-02", "참가자 08-03"],
+      "color": "#4B7F52",
+      "sortOrder": 8
+    },
+    {
+      "id": "team-sample-09",
+      "code": "T09",
+      "name": "Team 09",
+      "title": "익명 프로젝트 09: 환경 조건 예측 모델링",
+      "members": ["참가자 09-01", "참가자 09-02"],
+      "color": "#33658A",
+      "sortOrder": 9
+    },
+    {
+      "id": "team-sample-10",
+      "code": "T10",
+      "name": "Team 10",
+      "title": "익명 프로젝트 10: 이미지 기반 수율 개선",
+      "members": ["참가자 10-01", "참가자 10-02", "참가자 10-03"],
+      "color": "#C44900",
+      "sortOrder": 10
+    }
+  ],
+  "quizzes": [
+    {
+      "id": "sample-quiz-1",
+      "title": "시스템 이름",
+      "question": "오늘 행사의 관객 참여 시스템 이름은 무엇일까요?",
+      "answer": "Vibe Vote Arena",
+      "acceptedAnswers": ["vibevotearena", "바이브보트아레나"],
+      "prizeImageFile": "",
+      "winnerCount": 2,
+      "enabled": true
+    },
+    {
+      "id": "sample-quiz-2",
+      "title": "별 예산",
+      "question": "참가자 한 명이 사용할 수 있는 기본 별 개수는 몇 개일까요?",
+      "answer": "10",
+      "acceptedAnswers": ["*10*"],
+      "prizeImageFile": "",
+      "winnerCount": 2,
+      "enabled": true
+    }
+  ]
+}

@@ -7,7 +7,7 @@
 1. 참가자는 `/message`에서 별명으로 입장합니다.
 2. 질문을 올리면 발표장 `/wall`의 Q&A board에 카드로 쌓입니다.
 3. 발표자/관리자가 질문 카드를 열면 읽음 표시가 자동 반영되고, 필요하면 다시 안읽음으로 되돌릴 수 있습니다.
-4. 관리자는 `/admin`에서 Q&A/퀴즈 세션, 화면 문구, Q&A 글자 크기, 질문 초기화를 운영합니다.
+4. 관리자는 `/admin` 운영 대시보드에서 Q&A/퀴즈 세션, 화면 문구, Q&A 글자 크기, 질문 초기화, 백업, reset 범위를 관리합니다.
 5. 관리자가 퀴즈를 열면 `/message` 참가자 화면은 `/quiz`로 전환되고, 종료 후 다시 Q&A 입력 화면으로 돌아옵니다.
 
 해커톤용 `/vote`, 응원 메시지, 행운권 추첨 기능은 여전히 남아 있지만, 이번 AX 모임의 기본 wall 노출 세션은 `Q&A`와 `퀴즈`입니다.
@@ -19,9 +19,44 @@ https://meeting.axgroup.workers.dev/message
 https://meeting.axgroup.workers.dev/wall
 https://meeting.axgroup.workers.dev/admin
 https://meeting.axgroup.workers.dev/vote
+https://meeting.axgroup.workers.dev/help
 ```
 
 운영 Worker 이름은 `meeting`이고, Cloudflare workers.dev 서브도메인은 `axgroup`입니다. 이번 행사 Durable Object room은 `2026-ax-q2-meeting`입니다.
+
+## 0. 앱/행사 운영 규칙 요약
+
+행사 운영은 아래 네 가지 이름을 일관되게 맞추는 것을 기본 원칙으로 합니다.
+
+```text
+event26q1.axgroup.workers.dev
+Worker name: event26q1
+ARENA_ROOM_NAME: event26q1
+event.roomName: event26q1
+settings file: event-configs/event26q1.json
+```
+
+운영 규칙은 다음과 같습니다.
+
+1. `ARENA_ROOM_NAME`은 Durable Object namespace 안에서 특정 행사 room을 고르는 이름입니다. 운영 관점에서는 사실상 행사 DB 이름으로 봅니다.
+2. Worker 이름이 달라도 `ARENA_ROOM_NAME`이 같으면 같은 room을 볼 수 있고, 같은 Worker라도 `ARENA_ROOM_NAME`을 바꾸면 다른 room을 봅니다.
+3. 관리자 화면에서 preset/settings를 불러와도 DB room은 자동 전환되지 않습니다. 현재 room에 설정만 적용됩니다.
+4. 관리자 화면의 Reset은 현재 접속한 Worker가 가리키는 현재 DB room 안의 운영 데이터만 초기화합니다. 다른 room은 건드리지 않습니다.
+5. 관리자 화면에서는 `ARENA_ROOM_NAME`을 바꿀 수 없습니다. DB room 변경은 `wrangler deploy --name ... --var ARENA_ROOM_NAME:...` 같은 배포 단계에서만 합니다.
+6. 새 행사는 새 Worker name과 새 `ARENA_ROOM_NAME`을 사용합니다. 기존 행사를 다시 보려면 같은 Durable Object namespace/class와 같은 `ARENA_ROOM_NAME`으로 접속합니다.
+7. 행사 종료 후에는 `/api/export` JSON, `결과 내보내기 > XLSX`, `운영 콘텐츠 > settings.json 저장`을 함께 보관합니다.
+8. `public/prev_settings/`에 공개 preset을 둘 때는 실명, 내부 소속, 비공개 사진, 민감한 상품 정보를 익명화합니다.
+
+운영자가 가장 자주 확인하는 작업은 아래 순서로 처리합니다.
+
+| 작업 | 관리자 위치 | 확인할 점 |
+| --- | --- | --- |
+| 현재 행사/DB 확인 | `/admin` Ops Guard | Worker, 현재 DB room, settings 권장 room이 의도한 조합인지 확인 |
+| 행사 설정 불러오기 | `/admin?panel=teams` 저장된 설정 | preset은 DB를 바꾸지 않고 현재 room에 설정만 적용 |
+| 문구 수정 | `/admin?panel=teams` 화면별 문구 관리 | 오른쪽 프리뷰에서 `/vote`, `/message`, `/wall`, Quiz, Showup 노출 형태 확인 |
+| 팀 사진 조정 | `/admin?panel=teams` 팀별 정보 | 실제 `/wall` 선택 팀 카드 기준 프리뷰와 프레임 preset 확인 |
+| 데이터 백업 | `/admin?panel=export` | 원본 JSON, XLSX, settings를 같은 행사 폴더에 함께 저장 |
+| 초기화 | `/admin` reset 카드 | reset 전에 백업 완료 여부와 현재 DB room 확인 |
 
 ## 1. 현재 개발 상태
 
@@ -37,14 +72,21 @@ https://meeting.axgroup.workers.dev/vote
 8. 워드클라우드는 브라우저에서 `d3-cloud`로 계산하므로 서버 CPU를 쓰지 않고, 질문 수십 건 규모의 실시간 운영에 맞춰 가볍게 동작합니다.
 9. 관리자는 `/admin`에서 wall에 표시할 세션을 선택할 수 있습니다. 이번 행사 기본값은 `qna`, `quiz`입니다.
 10. 상태 지표는 열린 세션과 연결됩니다. 예를 들어 실시간 현황을 열지 않으면 누적 별/응원 메시지 지표를 wall에 노출하지 않습니다.
-11. 관리자는 Q&A 글자 크기(`qnaWallFontScale`)와 화면 문구를 관리자 페이지에서 조정할 수 있습니다.
-12. 관리자는 `/admin`에서 Q&A 질문 전체 reset을 할 수 있습니다.
-13. 퀴즈가 열리면 `/message` 참가자 화면은 `/quiz`로 전환되고, 퀴즈가 끝나거나 Q&A로 돌아오면 질문 입력 화면으로 복귀합니다.
-14. `/vote`는 투표/응원/행운권 관련 wall 세션이 열려 있을 때만 참가 화면으로 쓰며, Q&A/퀴즈만 열린 행사에서는 `/vote` 접근 시 안내 화면으로 막습니다.
-15. 알 수 없는 SPA 경로는 `/vote`로 떨어지지 않고 404로 응답합니다.
-16. Node realtime 서버와 Cloudflare Worker는 질문/퀴즈/관리자 인증/운영 설정 API를 같은 형태로 유지합니다.
-17. `event-configs/2026_ax_group_q2_meeting.json`은 이번 행사 전용 설정이며, `teams.json`은 익명화된 샘플/이전 행사 기본 설정으로 남깁니다.
-18. 관리자 인증 상태에서 `/api/export`로 참가자, 별 이벤트, 응원 메시지, 질문, 퀴즈 답변, 당첨 이력의 원본 JSON 백업을 받을 수 있습니다.
+11. `/admin` 기본 대시보드는 실시간 별 현황, 별 이벤트 피드, 응원 메시지 본문을 상시 노출하지 않고, 설정/세션/백업/초기화/상세 관리 진입에 집중합니다.
+12. 관리자는 Q&A 글자 크기(`qnaWallFontScale`)와 화면 문구를 관리자 페이지에서 조정할 수 있습니다.
+13. 관리자는 `/admin`에서 Q&A 질문 전체 reset을 할 수 있습니다.
+14. 퀴즈가 열리면 `/message` 참가자 화면은 `/quiz`로 전환되고, 퀴즈가 끝나거나 Q&A로 돌아오면 질문 입력 화면으로 복귀합니다.
+15. `/vote`는 투표/응원/행운권 관련 wall 세션이 열려 있을 때만 참가 화면으로 쓰며, Q&A/퀴즈만 열린 행사에서는 `/vote` 접근 시 안내 화면으로 막습니다.
+16. 알 수 없는 SPA 경로는 `/vote`로 떨어지지 않고 404로 응답합니다.
+17. Node realtime 서버와 Cloudflare Worker는 질문/퀴즈/관리자 인증/운영 설정 API를 같은 형태로 유지합니다.
+18. `event-configs/2026_ax_group_q2_meeting.json`은 이번 행사 전용 설정이며, `teams.json`은 익명화된 샘플/이전 행사 기본 설정으로 남깁니다.
+19. 관리자 인증 상태에서 `/api/export`로 참가자, 별 이벤트, 응원 메시지, 질문, 퀴즈 답변, 당첨 이력의 원본 JSON 백업을 받을 수 있습니다.
+20. `event-configs/`에는 해커톤, 분기 모임, 특별 세션처럼 서로 다른 기능 조합의 preset을 둘 수 있고 `npm run ops:audit:all`로 함께 검사합니다.
+21. `/admin?panel=teams`의 화면별 문구 관리는 그룹별 live preview를 제공해 저장 전에 참가자/관리자/송출 화면 노출 형태를 확인할 수 있습니다.
+22. `/admin?panel=teams`의 팀 사진 편집은 실제 `/wall` 선택 팀 카드 구조와 같은 프리뷰를 사용하고, `송출 기본`, `16:9`, `4:3`, `전체보기` preset을 제공합니다.
+23. `/admin?panel=export`는 행사 요약, 현재 DB room, JSON/XLSX/settings 저장 버튼을 한 곳에 배치합니다.
+24. 관리자 화면의 운영 규칙 안내는 README의 room/reset/export 원칙과 같은 기준을 말해야 합니다.
+25. `/admin` 상단과 필수 관리 작업에는 `/help` 운영 가이드 링크가 있으며, 이 가이드는 배포, room, 초기화, 백업, 문제 상황 대응 순서를 한 화면에서 안내합니다.
 
 ## 2. 주요 화면
 
@@ -85,21 +127,23 @@ https://meeting.axgroup.workers.dev/vote
 관리자용 화면입니다.
 
 - AX Q&A/퀴즈 운영 상태 확인
+- 필수 관리 작업 대시보드
 - wall 표시 세션 선택
+- 현재 DB room, 설정 room, preset 적용 범위 확인
+- JSON/XLSX 백업
+- reset 범위별 실행
 - Q&A 질문 reset
 - Q&A wall 글자 크기 조정
 - Q&A/퀴즈/행사 화면 문구 편집
-- 실시간 별 현황
-- 순위 변동 표시
-- 팀별 별 총합, 참여자 수, 환산점수
-- 참여자 리스트
-- 별 이동 이벤트 피드
-- 응원 메시지 관리
+- 참여자 리스트 상세 관리
+- 응원 메시지와 Q&A 질문 상세 관리
 - 운영 콘텐츠 관리
 - 결과 XLSX 내보내기
 - 투표 타이머, 별 개수, 마감/재개, Reset, 테스트 데이터 주입
 - 행운권 추첨과 응원 메시지 기반 확률 가중치 설정
 - 퀴즈 추가 인정 답과 행운권 룰/선발 인원/상품 조합 설정
+
+기본 `/admin` 화면은 실시간 현황판이 아닙니다. 실시간 별 순위, 별 이동 이벤트, 응원 메시지 본문은 기본 대시보드에 상시 노출하지 않고 `/wall`, `/admin?panel=messages`, `/admin?panel=participants`, `/admin?panel=raffle` 같은 역할별 화면에서 확인합니다.
 
 ### `/admin?showCheer=1`
 
@@ -244,10 +288,19 @@ Cloudflare Worker
 - /events SSE 연결 처리
 
 Durable Object ArenaRoom
-- 하나의 행사 방 상태 유지
+- `ARENA_ROOM_NAME`별 행사 방 상태 유지
 - 참가자, 별 배분, 응원 메시지, 추첨 결과 저장
 - 현재 상태를 Durable Object storage에 저장
 ```
+
+Cloudflare 운영에서 특정 행사 DB를 가리키는 실무 조합은 다음과 같습니다.
+
+```text
+Worker name + Durable Object binding/class + ARENA_ROOM_NAME
+= 특정 행사 DB room
+```
+
+권장 운영명은 `event26q1`, `event26q2`, `event26hackathon`처럼 행사 slug를 정하고, Worker name, `ARENA_ROOM_NAME`, `event.roomName`을 같은 값으로 맞추는 방식입니다.
 
 ### 5.1. 로그인 확인
 
@@ -266,6 +319,8 @@ npx wrangler login
 ```powershell
 npx wrangler secret put ADMIN_PASSCODE
 ```
+
+passcode를 바꿀 때도 같은 명령으로 새 값을 다시 입력한 뒤 Worker를 재배포하거나 새 배포가 뜬 것을 확인합니다. 관리자 쿠키는 `ADMIN_PASSCODE`를 해시한 값으로 검증하므로, passcode를 바꾸면 기존 로그인 세션은 더 이상 인증되지 않고 `/admin`에서 다시 로그인해야 합니다. 로컬 Node 서버에서는 PowerShell에서 `$env:ADMIN_PASSCODE = '<새 passcode>'`를 지정하고 `node server.mjs` 또는 `npm run realtime`을 다시 시작합니다.
 
 ### 5.2. 로컬 Cloudflare 런타임
 
@@ -293,12 +348,30 @@ npm run cf:deploy
 https://meeting.axgroup.workers.dev
 ```
 
+행사별 Worker와 DB room을 분리해 동시에 운영하려면 Worker 이름과 `ARENA_ROOM_NAME`을 함께 지정합니다.
+
+```powershell
+npx wrangler deploy --name event26q1 --var ARENA_ROOM_NAME:event26q1
+npx wrangler deploy --name event26q2 --var ARENA_ROOM_NAME:event26q2
+```
+
+이 경우 `event26q1.axgroup.workers.dev`와 `event26q2.axgroup.workers.dev`는 같은 코드와 Durable Object class를 쓰더라도 서로 다른 room storage를 봅니다.
+
+현재 번들에 등록된 예시 room은 다음과 같습니다.
+
+| 행사 | Worker/room 권장 slug | 설정 파일 | 기본 조합 |
+| --- | --- | --- | --- |
+| 2026 AX 해커톤 1분기 본선 | `hackathon26q1` | `event-configs/2026_ax_hackathon_q1_vote_quiz_luckydraw.json` | vote + quiz + luckydraw |
+| 2026 AX 그룹 1분기 모임 | `meeting26q1` | `event-configs/2026_ax_group_q1_meeting.json` | message/Q&A + quiz |
+| 2026 AX 그룹 2분기 모임 | `2026-ax-q2-meeting` | `event-configs/2026_ax_group_q2_meeting.json` | message/Q&A + quiz |
+| 2026 AX 특별 세션 | `special26ax` | `event-configs/2026_ax_special_message_vote_quiz.json` | message/Q&A + vote + quiz |
+
 ### 5.5. Git Build 자동 배포
 
 Cloudflare Dashboard의 Git 연결 설정은 다음 기준입니다.
 
 ```text
-Repository: Infant83/hackathon-vote-arena
+Repository: Infant83/vibe-arena
 Production branch: main
 Build command: npm run build
 Deploy command: npx wrangler deploy
@@ -414,6 +487,8 @@ Free 플랜은 개발과 작은 리허설에는 사용할 수 있지만, 전사 
 행사 전에는 정적 설정과 실행 중 서버 상태를 함께 점검합니다.
 
 ```powershell
+npm run ops:audit:all
+
 $env:EVENT_CONFIG_FILE = 'event-configs/2026_ax_group_q2_meeting.json'
 $env:ADMIN_PASSCODE = '<운영 passcode>'
 npm run realtime
@@ -422,6 +497,8 @@ npm run realtime
 $env:ADMIN_PASSCODE = '<운영 passcode>'
 npm run ops:audit:ax-q2
 ```
+
+`ops:audit:all`은 `event-configs/*.json` 전체를 정적으로 검사합니다. 각 파일의 `event.features`와 `settings.wallEnabledPanels`를 비교해 vote/message/quiz/luckydraw 조합이 맞는지, `event.roomName`, 팀 수, 퀴즈 수, 팀 사진 표시값, inline media, 팀 편집 키, HTTP 이미지 URL을 확인합니다. 실행 중 서버를 같이 점검하려면 행사별 `ops:audit:*` 명령에 `ADMIN_PASSCODE`와 `AUDIT_URL`을 함께 지정합니다.
 
 Cloudflare 배포 주소를 점검할 때는 `AUDIT_URL`을 배포 URL로 지정합니다.
 
@@ -433,7 +510,7 @@ npm run ops:audit:ax-q2
 
 Audit 결과 기준:
 
-- `FAIL`: 운영 전 반드시 수정합니다. 예: admin passcode 없음, 행사별 `ARENA_ROOM_NAME` 미분리, payload 과대.
+- `FAIL`: 운영 전 반드시 수정합니다. 예: admin passcode 없음, 행사별 `ARENA_ROOM_NAME` 미분리, 공개 state의 편집 키 노출, 비인증 설정 변경, payload 과대.
 - `WARN`: 리허설 전에 확인하고 의도한 값인지 판단합니다. 예: 서버가 꺼져 있어 runtime audit을 못 한 상태, 열어둔 SSE 탭이 많은 상태.
 - `PASS`: 해당 항목은 현재 기준으로 안전합니다.
 
@@ -450,11 +527,17 @@ $env:EVENT_CONFIG_FILE = 'event-configs/2026_ax_group_q2_meeting.json'
 npm run realtime
 ```
 
-이렇게 실행하면 로컬 Node 서버는 선택된 행사 JSON을 읽고, 관리자 화면에서 저장한 팀/문구/퀴즈/운영 설정도 같은 행사 JSON에 씁니다. 기존 Hackathon 설정은 `teams.json`에 그대로 남습니다.
+이렇게 실행하면 로컬 Node 서버는 선택된 행사 JSON을 읽고, 관리자 화면에서 저장한 팀/문구/퀴즈/운영 설정도 같은 행사 JSON에 씁니다. 기존 Hackathon 설정은 `teams.json`에 그대로 남습니다. 같은 행사를 이듬해 다시 열 때는 이전 `event-configs/*.json` 또는 `settings.json` 백업을 복사해 새 파일명으로 만들고, 행사명/팀/문구/퀴즈/운영 설정만 수정하는 방식으로 재사용합니다.
 
-Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 런타임에 바꿔 읽을 수 없습니다. Cloudflare 운영에서는 행사별로 `ARENA_ROOM_NAME`을 다르게 지정해 Durable Object 저장소를 분리합니다. 예를 들어 이번 행사는 `ARENA_ROOM_NAME=2026-ax-q2-meeting`처럼 별도 룸 이름을 쓰면 이전 행사 DB와 섞이지 않습니다.
+관리자 화면에서 바로 불러올 사전/과거 설정은 `event-configs/`와 `public/prev_settings/`를 함께 활용합니다. 로컬 Node 서버는 `event-configs/*.json`을 관리자 전용 preset API(`/api/settings-presets`)로 노출하고, Cloudflare Worker는 번들에 포함된 행사 설정을 같은 API로 노출합니다. `public/prev_settings/settings_manifest.json`에 등록된 파일도 같은 드롭다운에 함께 표시됩니다. 단, `public/prev_settings/`는 공개 배포에 포함되므로 실명, 내부 소속, 비공개 사진이 들어간 설정은 익명화하거나 비공개 운영 저장소에 따로 보관합니다.
 
-`worker/index.ts`는 `2026-ax-q2-meeting` 룸의 초기 설정으로 `event-configs/2026_ax_group_q2_meeting.json`을 함께 번들링합니다. 운영 중 내용이 바뀌면 `/admin > 운영 콘텐츠 > 관리`에서 저장 적용하고, 행사 후에는 관리자 화면에서 JSON을 내려받아 `event-configs/`에 반영합니다.
+운영 중 만든 편집 초안은 `/admin?panel=teams`의 `새 보관 이름`에 이름을 넣고 `이름으로 보관`을 누르면 같은 브라우저의 설정 보관함에 저장됩니다. 보관한 설정은 `저장된 설정` 드롭다운에 즉시 나타나며, 다음 리허설이나 행사 준비 때 현재 DB room에 다시 적용할 수 있습니다. 이 보관함은 빠른 재사용용입니다. 다른 관리자 PC로 옮기거나 행사 종료 자료로 남길 때는 `settings.json 저장`으로 파일 백업을 함께 보관합니다.
+
+`settings.json`과 `event-configs/*.json`의 `event.roomName`은 해당 설정이 원래 의도한 Durable Object room을 기록하는 운영 메타데이터입니다. 관리자 화면에서 preset을 불러와도 DB room이 자동 전환되지는 않습니다. 현재 DB room은 Worker의 `ARENA_ROOM_NAME`으로 결정되며, Cloudflare 런타임에서 preset의 권장 room과 현재 room이 다르면 관리자 화면이 한 번 더 확인합니다.
+
+Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 런타임에 바꿔 읽을 수 없습니다. Cloudflare 운영에서는 행사별로 `ARENA_ROOM_NAME`을 다르게 지정해 Durable Object 저장소를 분리합니다. 예를 들어 이번 행사는 `ARENA_ROOM_NAME=2026-ax-q2-meeting`처럼 별도 룸 이름을 쓰면 이전 행사 DB와 섞이지 않습니다. Worker에서 새 `event-configs/*.json`을 preset으로 쓰려면 해당 JSON을 `worker/index.ts`에 import하고 `bundledEventConfigPresets`와 `initialConfigByRoomName`에 함께 등록한 뒤 배포합니다.
+
+`worker/index.ts`는 현재 `hackathon26q1`, `meeting26q1`, `2026-ax-q2-meeting`, `special26ax` 룸의 초기 설정을 함께 번들링합니다. 새 행사 프리셋을 추가할 때는 `event-configs/<행사>.json`을 만든 뒤 Worker import, `initialConfigByRoomName`, `bundledEventConfigPresets`, `npm run ops:audit:all`을 함께 갱신합니다. 운영 중 내용이 바뀌면 `/admin > 운영 콘텐츠 > 관리`에서 저장 적용하고, 행사 후에는 관리자 화면에서 settings 파일을 내려받아 `event-configs/` 또는 비공개 운영 보관함에 반영합니다.
 
 관리자 화면에서도 수정할 수 있습니다.
 
@@ -478,9 +561,14 @@ Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 �
 - 팀 색상
 - 팀 로고/팀 사진
 - 기본 로고 스타일
+- wall 선택 팀 카드 기준의 와이드 사진 프레임, 크기, 맞춤, 확대, 초점 위치
 - wall 표시 세션
 - Q&A wall 글자 크기
 - 테스트 데이터용 기본 별 수와 투표자 수
+
+화면 문구 관리 섹션은 각 그룹 오른쪽에 저장 전 프리뷰를 보여줍니다. 프리뷰는 입력 중인 draft를 기준으로 즉시 갱신되며, `{starBudget}`, `{maxStarsPerTeam}` 같은 운영 변수는 예시값으로 치환해 실제 문장 길이를 가늠할 수 있게 합니다. 긴 문구는 저장 전에 `/message`, `/vote`, `/wall`, Quiz, Showup 중 어느 화면에서 과해지는지 이 프리뷰로 먼저 확인합니다.
+
+팀 사진은 작은 로고와 wall 하단 선택 팀 카드가 서로 다른 프레임을 씁니다. 운영 콘텐츠의 사진 편집 미리보기는 실제 `/wall` 응원 보드의 선택 팀 카드 구조를 따라 렌더링됩니다. `송출 기본`, `16:9`, `4:3`, `전체보기` 프리셋으로 프레임을 빠르게 잡고, 드래그/슬라이더로 초점과 확대를 조정한 뒤 `/wall`에서 최종 확인합니다.
 
 운영 설정에서 화면 테마를 `현재 모드`와 `어두운 모드` 중 선택할 수 있습니다. 어두운 모드는 `ppt_sample/EDM_(일반진행)해커톤 간지 선정_양식(외부)_v0.1.pptx`의 블랙/네이비, 블루, 바이올렛, 마젠타 톤을 기준으로 합니다.
 
@@ -488,6 +576,15 @@ Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 �
 
 ```json
 {
+  "event": {
+    "id": "2026-ax-q2-meeting",
+    "label": "2026 AX 그룹 2분기 모임",
+    "workerName": "meeting",
+    "roomName": "2026-ax-q2-meeting",
+    "settingsFile": "event-configs/2026_ax_group_q2_meeting.json",
+    "description": "Q&A와 퀴즈 중심 운영 프로필",
+    "features": ["message", "quiz"]
+  },
   "copy": {
     "appTitle": "2026 AX 그룹 2분기 모임",
     "qnaRoomTitle": "AX Group QnA",
@@ -503,7 +600,7 @@ Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 �
     {
       "id": "ax-qna-room",
       "code": "QNA",
-      "editKey": "ax-qna",
+      "editKey": "ax-qna-admin-rotated-20260607",
       "name": "AX Group",
       "title": "QnA Room",
       "members": ["AX Group"],
@@ -518,13 +615,13 @@ Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 �
 }
 ```
 
-`id`는 투표, 응원 메시지, 수상 이력과 연결되는 내부 키이므로 운영 중에는 바꾸지 않습니다. 팀별 직접 편집 링크를 짧게 관리해야 할 때는 `editKey`를 사용합니다. 예를 들어 Aurora Lab의 `editKey`가 `tabfy8`이면 관리자 화면에서 생성되는 팀 편집 링크의 인증 키로 이 값이 쓰입니다.
+`id`는 투표, 응원 메시지, 수상 이력과 연결되는 내부 키이므로 운영 중에는 바꾸지 않습니다. `editKey`는 관리자 화면에서 팀 편집 링크를 검증하는 보조 키입니다. 이 키는 공개 `/vote`/`/wall` state에 노출되지 않아야 하며, `/team/...` 편집 저장도 관리자 인증을 통과한 브라우저에서만 동작합니다. 짧거나 행사명이 그대로 드러나는 키는 회귀 위험이 있으므로 16자 이상으로 관리합니다.
 
 ### 6.2. ZIP 업로드 구조
 
-관리자 화면은 `team_info.json` 단일 파일 또는 `team_infos.zip` 파일을 받을 수 있습니다.
+관리자 화면은 `settings.json` 단일 파일 또는 `settings.zip` 파일을 받을 수 있습니다. `settings.json 저장`으로 내려받는 `settings.json`에는 팀 정보뿐 아니라 화면 문구(`copy`), 운영 설정(`settings`), 퀴즈 목록(`quizzes`)이 함께 들어갑니다. 따라서 행사 후에는 이 파일을 운영 백업으로 보관하고, 다음 행사에서는 이 파일을 업로드한 뒤 필요한 값만 수정해 재사용할 수 있습니다. 기존 자료 호환을 위해 `team_info.json` 단일 파일과 `team_infos.zip`도 계속 받을 수 있습니다.
 
-권장 ZIP 구조:
+기존 호환 ZIP 구조:
 
 ```text
 team_infos.zip
@@ -537,21 +634,36 @@ team_infos.zip
       └─ ...
 ```
 
+새 표준 ZIP 구조:
+
+```text
+settings.zip
+└─ settings/
+   ├─ settings.json
+   └─ logos/
+      ├─ T1-logo.png
+      ├─ T2-logo.jpg
+      ├─ T3-logo.webp
+      └─ ...
+```
+
 팀별 `logoFile`에는 `/team-logos/T1-logo.png` 같은 배포 경로, `https://...` 인터넷 이미지 주소, 공개 공유된 Google Drive 이미지 링크, 또는 관리자 화면에서 업로드한 이미지 data URL을 사용할 수 있습니다. Google Drive 파일 링크는 관리자 화면에서 저장할 때 표시 가능한 thumbnail 주소로 자동 정리됩니다.
 
 로컬 Node 서버에서는 ZIP으로 업로드한 로고를 `public/team-logos/`에 저장하고 `teams.json`도 갱신합니다.
 
-Cloudflare Worker에서는 배포된 파일시스템을 직접 수정할 수 없습니다. 그래서 행사 중 수정한 팀 정보와 로고는 `저장 및 반영`을 통해 Cloudflare Durable Object storage에 직접 저장됩니다. 즉, Cloudflare 배포 주소에서 누른 저장은 로컬 PC의 `server.mjs`나 `teams.json`을 호출하지 않고, Cloudflare Worker 안의 운영 상태를 바로 바꿉니다. 행사 후 이 설정을 코드에 영구 반영하려면 관리자 화면에서 `로컬 JSON 저장`을 눌러 파일을 내려받고, 그 내용을 레포의 `teams.json`에 반영합니다.
+Cloudflare Worker에서는 배포된 파일시스템을 직접 수정할 수 없습니다. 그래서 행사 중 수정한 팀 정보와 로고는 `저장 및 반영`을 통해 Cloudflare Durable Object storage에 직접 저장됩니다. 즉, Cloudflare 배포 주소에서 누른 저장은 로컬 PC의 `server.mjs`나 `teams.json`을 호출하지 않고, Cloudflare Worker 안의 운영 상태를 바로 바꿉니다. 행사 후 이 설정을 코드에 영구 반영하려면 관리자 화면에서 `settings.json 저장`을 눌러 `settings.json`을 내려받고, 그 내용을 레포의 `event-configs/<행사명>.json`, `public/prev_settings/<행사명>.settings.json`, 또는 개발 기본값인 `teams.json`에 반영합니다.
+
+`이름으로 보관`은 관리자 브라우저의 로컬 보관함에 현재 편집 draft를 저장합니다. Cloudflare Durable Object에는 `저장 및 반영`을 누른 설정만 들어갑니다. 운영자는 행사 중 안전하게 여러 초안을 보관해 비교할 수 있고, 실제 송출 화면에 적용할 시점에 `불러오기`와 `저장 및 반영` 순서로 처리합니다.
 
 레포에 커밋된 `teams.json`은 공개 저장소와 개발 환경에서 안전하게 다루기 위해 익명화되어 있습니다. 운영 중 Cloudflare Durable Object storage에 저장된 팀명, 프로젝트명, 팀원, 사진은 레포의 샘플 JSON과 다를 수 있습니다. 행사 후 운영 데이터를 보존하려면 관리자 화면에서 JSON을 내려받아 별도 보관하고, 공개 레포에 반영할 때는 실명/소속/사진을 다시 익명화합니다.
 
 Cloudflare 운영 중 `/admin > 운영 콘텐츠 > 관리`에서 `저장 및 반영`을 누르면 저장 완료 시각과 반영 버전이 표시됩니다. 이 값이 갱신되면 Durable Object 운영 상태에 저장된 것이며, 이미 열려 있는 `/message`, `/wall`, `/vote` 화면도 SSE/폴링 갱신으로 같은 설정을 받습니다. Google Drive 공유 링크와 원격 이미지 주소는 저장 전에 표시 가능한 주소로 정리됩니다.
 
-사내망처럼 inbound 접속은 가능하지만 브라우저의 outbound HTTPS가 막힌 환경에서는 Cloudflare 운영 저장소로 직접 저장할 수 없습니다. 이 경우 먼저 `로컬 JSON 저장`으로 현재 편집본을 백업하고, 인터넷 연결이 가능한 관리자 PC에서 해당 JSON을 업로드하거나 같은 값을 다시 편집해 `저장 및 반영`합니다.
+사내망처럼 inbound 접속은 가능하지만 브라우저의 outbound HTTPS가 막힌 환경에서는 Cloudflare 운영 저장소로 직접 저장할 수 없습니다. 이 경우 먼저 `settings.json 저장`으로 현재 편집본을 백업하고, 인터넷 연결이 가능한 관리자 PC에서 해당 JSON을 업로드하거나 같은 값을 다시 편집해 `저장 및 반영`합니다.
 
-특정 사내망에서만 `Cloudflare 저장 실패(403)`이 뜨고 모바일/외부망에서는 저장되는 경우, 관리자 인증이나 앱 오류가 아니라 사내 보안망/프록시가 Cloudflare 저장 POST 요청을 거절한 상황으로 봅니다. 이때는 모바일 핫스팟/외부망에서 저장하거나 JSON 백업 파일을 옮겨 적용합니다.
+특정 사내망에서만 `Cloudflare 저장 실패(403)`이 뜨고 모바일/외부망에서는 저장되는 경우, 사내 보안망/프록시가 Cloudflare 저장 요청을 가로막았거나 관리자 mutation의 Origin/Referer 검증이 실패한 상황으로 봅니다. 같은 브라우저의 `/admin`에서 로그인한 뒤 다시 저장하고, 계속 실패하면 모바일 핫스팟/외부망에서 저장하거나 JSON 백업 파일을 옮겨 적용합니다.
 
-운영 화면은 Cloudflare 저장 POST가 403으로 거절되면 같은 내용을 압축한 관리자 전용 GET 저장 경로로 한 번 더 자동 시도합니다. 이 우회 저장도 같은 관리자 쿠키가 있어야 동작하며, 사내망이 POST만 막는 경우에는 별도 업로드 없이 바로 반영될 수 있습니다. 저장 시 이미 운영 상태에 들어 있는 inline 이미지(data URL)는 다시 보내지 않고 기존 값을 보존하므로, 로고나 상품 이미지를 그대로 둔 문구/팀 정보 수정은 훨씬 작은 payload로 처리됩니다.
+운영 화면은 Cloudflare 저장 POST가 403으로 거절되면 같은 내용을 압축한 관리자 전용 GET 저장 경로로 한 번 더 자동 시도합니다. 이 우회 저장도 같은 관리자 쿠키와 같은 출처의 Referer가 있어야 동작하며, 사내망이 POST만 막는 경우에는 별도 업로드 없이 바로 반영될 수 있습니다. 저장 시 이미 운영 상태에 들어 있는 inline 이미지(data URL)는 다시 보내지 않고 기존 값을 보존하므로, 로고나 상품 이미지를 그대로 둔 문구/팀 정보 수정은 훨씬 작은 payload로 처리됩니다.
 
 큰 로고/상품 이미지는 첫 화면 진입과 미디어가 실제로 바뀌는 운영 콘텐츠 저장 때만 full 상태로 내려갑니다. 이후 별 투표, 응원 메시지, 퀴즈 상태 같은 빈번한 갱신은 `/api/state?media=slim` 및 slim SSE payload를 사용하고, 브라우저는 직전 full 상태의 이미지를 보존합니다. 따라서 트로피 로고 같은 시각 자산은 유지하면서도 반복 상태 전송량을 줄입니다.
 
@@ -613,9 +725,17 @@ GET /api/export
 - `awardHistory`: 행운권/퀴즈 당첨 이력
 - `voteEvents`: 별 이동 이벤트
 - `settings`: 운영 설정
+- `eventProfile`: 현재 event id, Worker 이름, 현재 DB room, 설정 권장 room
 - `configRevision`, `configUpdatedAt`: 운영 콘텐츠 반영 버전과 시각
 
 주의할 점이 있습니다. 화면 성능을 위해 `/api/state`는 최근 응원 메시지와 질문 일부만 내려주지만, `/api/export`는 서버가 보관 중인 원본 배열을 내려줍니다. 현재 보관 한도는 응원 메시지 최대 5000개, Q&A 질문 최대 500개, 퀴즈 답변 최대 1000개입니다. 더 긴 장기 보존이 필요하면 행사 종료 직후 JSON/XLSX를 모두 내려받아 별도 보관합니다.
+
+행사 종료 백업 순서는 다음을 권장합니다.
+
+1. 관리자 화면 `결과 내보내기 > 원본 JSON 백업` 또는 `/api/export`로 현재 room의 원본 운영 데이터를 보관합니다.
+2. 관리자 화면 `결과 내보내기 > XLSX 결과 저장`으로 사람이 보기 좋은 결과표를 보관합니다.
+3. 관리자 화면 `결과 내보내기 > settings 저장` 또는 `운영 콘텐츠 > settings 저장`으로 다음 행사에 재사용할 설정/preset을 보관합니다.
+4. reset을 실행하기 전에 위 세 파일이 모두 저장되어 있는지 확인합니다.
 
 ### 8.1. 데이터 저장 위치
 
@@ -626,6 +746,8 @@ Cloudflare 운영 배포에서는 행사 상태가 Durable Object `ArenaRoom`의
 같은 Worker `meeting`과 같은 `ARENA_ROOM_NAME=2026-ax-q2-meeting`으로 새 코드를 배포하면 Durable Object storage의 기존 질문은 유지됩니다. 워드클라우드 단어 추출 규칙이나 화면 UI를 개선해 배포하면 기존 질문 텍스트가 새 규칙으로 다시 표시될 뿐, 질문 자체를 수정하거나 삭제하지 않습니다.
 
 Durable Object storage는 운영 중 상태 저장소이지, 영구 아카이브나 분석 DB를 대체하지 않습니다. 행사 후 보존이 필요하면 `/api/export` JSON과 XLSX를 내려받아 별도 저장합니다.
+
+기존 행사 DB를 내려받으려면 해당 DB room을 가리키는 Worker로 접속해야 합니다. 예전 room이 `event26q1`이라면 임시 Worker를 같은 Durable Object binding/class와 `ARENA_ROOM_NAME=event26q1`로 배포한 뒤 `/api/export`만 내려받고, reset은 실행하지 않는 방식이 가장 안전합니다.
 
 ## 9. 중복 참여 방지 설계
 
@@ -688,21 +810,24 @@ npm run cf:deploy:dry-run
 
 1. `ADMIN_PASSCODE`가 로컬/운영 환경에 설정되어 있는지 확인
 2. `/admin` 접속 후 passcode 로그인
-3. 운영 콘텐츠에서 행사명, Q&A 문구, 퀴즈 문제 확인
-4. wall 표시 세션이 `Q&A`, `퀴즈`로 제한되어 있는지 확인
-5. `Q&A reset` 실행
-6. `/wall` 접속 후 초기 화면이 `아직 질문이 없습니다. 무엇이 궁금하신가요?`로 보이는지 확인
-7. 모바일 `/message` 접속
-8. 별명으로 Q&A 방 입장
-9. 질문 작성, 보낸 질문 다시 보기, 수정, 삭제 확인
-10. `/wall`에서 질문 카드 스택, 클릭 확대, 읽음 표시, 수정됨 표시 확인
-11. 워드클라우드 단어 클릭 후 관련 질문 필터가 한 줄 안내와 함께 동작하는지 확인
-12. `/admin`에서 Q&A 글자 크기 조정 후 `/wall` 반영 확인
-13. `/admin`에서 퀴즈 출제 후 `/message`가 퀴즈 화면으로 전환되는지 확인
-14. 퀴즈 종료 또는 Q&A 복귀 후 `/message`가 질문 입력 화면으로 돌아오는지 확인
-15. `npm run ops:audit:ax-q2` 또는 Cloudflare 배포 URL 대상 audit 실행
-16. 결과 XLSX와 `/api/export` JSON 다운로드 확인
-17. 최종 `Q&A reset` 또는 전체 `Reset`
+3. `npm run ops:audit:all`로 모든 `event-configs/*.json`의 기능 조합과 room 설정 확인
+4. 운영 콘텐츠에서 행사명, Q&A 문구, 퀴즈 문제 확인
+5. 화면별 문구 관리 오른쪽 프리뷰가 수정 문구를 즉시 반영하는지 확인
+6. 운영 콘텐츠의 팀 사진 미리보기가 실제 `/wall` 선택 팀 카드와 맞는지 확인
+7. wall 표시 세션이 해당 행사 조합에 맞게 제한되어 있는지 확인
+8. `Q&A reset` 실행
+9. `/wall` 접속 후 초기 화면이 `아직 질문이 없습니다. 무엇이 궁금하신가요?`로 보이는지 확인
+10. 모바일 `/message` 접속
+11. 별명으로 Q&A 방 입장
+12. 질문 작성, 보낸 질문 다시 보기, 수정, 삭제 확인
+13. `/wall`에서 질문 카드 스택, 클릭 확대, 읽음 표시, 수정됨 표시 확인
+14. 워드클라우드 단어 클릭 후 관련 질문 필터가 한 줄 안내와 함께 동작하는지 확인
+15. `/admin`에서 Q&A 글자 크기 조정 후 `/wall` 반영 확인
+16. `/admin`에서 퀴즈 출제 후 `/message`가 퀴즈 화면으로 전환되는지 확인
+17. 퀴즈 종료 또는 Q&A 복귀 후 `/message`가 질문 입력 화면으로 돌아오는지 확인
+18. `npm run ops:audit:ax-q2` 또는 Cloudflare 배포 URL 대상 audit 실행
+19. 원본 JSON, XLSX, settings 다운로드 확인
+20. 최종 `Q&A reset` 또는 전체 `Reset`
 
 해커톤 투표 기능을 함께 쓰는 행사라면 추가로 `/vote` 이름/ID 등록, 별 배분, 응원 메시지, `/admin?showCheer=1`, 행운권 추첨도 확인합니다.
 
@@ -720,6 +845,10 @@ npm run cf:deploy:dry-run
 
 - `CHANGELOG.md`: 지금까지 구현된 변경 내역
 - `TODO.md`: 남은 작업과 우선순위
+- `memory-bank/active-context.md`: 현재 운영 기준, 최근 검증, 다음 작업 인수인계
+- `docs/DEPLOYMENT_AND_OPERATIONS_RUNBOOK.md`: 배포 절차, 행사별 분리 배포, 운영 대응 명령어
+- `public/help/index.html`: `/admin`에서 `/help`로 여는 운영 가이드 페이지
+- `app_introduction/remotion-deck`: 운영자 교육용 Remotion 소개 덱
 - `docs/OPERATIONS_ISSUE_REPORT_2026-05-23.md`: 행사 로그 기반 이슈 진단, 개선 내역, 예방 체크리스트
 - `AGENTS.md`: 이 작업공간에서 Codex가 따라야 하는 개발 규칙
 - `DESIGN.md`: UI/시각 디자인 기준

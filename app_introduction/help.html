@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vibe Arena 운영 가이드 제작 노트</title>
+    <style>
+      body {
+        margin: 0;
+        color: #181b22;
+        background: #f6f7fb;
+        font-family: Inter, system-ui, "Noto Sans KR", sans-serif;
+      }
+
+      main {
+        width: min(920px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 64px 0;
+      }
+
+      section {
+        padding: 28px;
+        border: 1px solid #e4e8f0;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: 0 18px 50px rgba(22, 28, 38, 0.1);
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 46px;
+        line-height: 1;
+        word-break: keep-all;
+      }
+
+      p,
+      li {
+        color: #444b5a;
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.6;
+      }
+
+      a {
+        color: #a50034;
+        font-weight: 900;
+      }
+
+      code {
+        font-family: "Cascadia Code", Consolas, monospace;
+      }
+
+      @media (max-width: 620px) {
+        main {
+          width: min(100vw - 24px, 920px);
+          padding: 36px 0;
+        }
+
+        section {
+          padding: 22px;
+        }
+
+        h1 {
+          font-size: 34px;
+          line-height: 1.08;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <h1>Vibe Arena 운영 가이드 제작 노트</h1>
+        <p>
+          운영 배포에서 바로 여는 가이드는 <code>public/help/index.html</code>이며, 관리자 콘솔에서는
+          <code>/help</code> 링크로 연결됩니다.
+        </p>
+        <p>
+          Remotion 소개 덱은 <code>app_introduction/remotion-deck</code>에 있습니다. 이 덱은
+          앱 구조, DB room 규칙, 관리자 콘솔, 배포, 운영 점검, 장애 대응, 종료 백업을 단계별로 설명합니다.
+        </p>
+        <ul>
+          <li><code>cd app_introduction/remotion-deck</code></li>
+          <li><code>npm install</code></li>
+          <li><code>npm run dev</code></li>
+          <li><code>npm run still</code></li>
+          <li><code>npm run render</code></li>
+        </ul>
+        <p>
+          정적 가이드를 수정할 때는 Remotion 덱의 <code>deckData.ts</code>와
+          <code>deck.config.json</code>도 같은 운영 기준으로 맞춥니다.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

@@ -2,6 +2,62 @@
 
 이 문서는 `Vibe Vote Arena`의 주요 개발 진행 상황을 시간순으로 정리합니다.
 
+## 2026-06-08
+
+### 다중 행사 운영과 설정 관리
+
+- `event-configs/`에 해커톤 본선, 1분기 모임, 2분기 모임, 특별 세션처럼 서로 다른 기능 조합의 행사 preset을 정리했습니다.
+- 각 행사 설정에 `event.features`, Worker/room/settingsFile 메타데이터를 두고, Worker 번들 초기 설정과 관리자 preset 목록에서 함께 활용하도록 맞췄습니다.
+- `npm run ops:audit:all`을 추가해 모든 `event-configs/*.json`의 기능 조합, wall 세션, 팀 수, 퀴즈 수, 팀 사진 표시값, inline media, 팀 편집 키, HTTP 이미지 URL을 정적으로 검사합니다.
+- Q2 설정은 기존 운영 URL 유지를 위해 `workerName=meeting`, `roomName=2026-ax-q2-meeting` 조합을 유지하며, audit에서는 추적성 WARN으로 표시합니다.
+
+### 관리자 운영 콘솔과 백업
+
+- `/admin` 운영 규칙 안내에 현재 Worker, 현재 DB room, settings 권장 room, reset/export 경계를 표시했습니다.
+- `/admin?panel=export`에 행사 요약, 현재 DB room, 참여자/팀 수, 별/메시지 수를 표시하고 JSON 백업, XLSX 저장, settings 저장 버튼을 한 곳에 배치했습니다.
+- `/admin?panel=teams`에 `새 보관 이름`과 `이름으로 보관`을 추가해 현재 편집 draft를 브라우저 보관함에 저장하고, 같은 드롭다운에서 다시 불러올 수 있게 했습니다.
+- 보관 설정 삭제 버튼과 room mismatch 안내를 함께 두어, 빠른 재사용과 실제 DB 반영 흐름을 분리했습니다.
+- README와 AGENTS에 `ARENA_ROOM_NAME`을 행사 DB room으로 보는 운영 규칙, reset 범위, preset 적용 범위, 행사 종료 백업 순서를 정리했습니다.
+- 관리자 passcode 설정과 변경 방법을 `ADMIN_PASSCODE` 환경변수/Cloudflare secret 기준으로 문서화했습니다.
+
+### 운영 콘텐츠 편집 편의성
+
+- 운영 콘텐츠 팀 사진 편집 프리뷰를 실제 `/wall` 선택 팀 카드 구조와 맞추고, `송출 기본`, `16:9`, `4:3`, `전체보기`, `초점 초기화` 조작을 추가했습니다.
+- 화면별 문구 관리에 live preview를 추가해 `/vote`, `/admin`, `/wall`, Q&A, Showup, Quiz 문구가 어느 화면에서 어떻게 보이는지 저장 전 확인할 수 있게 했습니다.
+- 문구 프리뷰는 입력 중인 draft를 즉시 반영하고 `{starBudget}`, `{maxStarsPerTeam}` 같은 운영 변수는 예시값으로 치환합니다.
+
+### 검증
+
+- `npm run lint`, `npm run build`, `npm run ops:audit:all`을 통과했습니다.
+- 로컬 Node 서버에서 Q2 설정과 `ADMIN_PASSCODE`를 사용해 `/api/health`, `npm run ops:audit:ax-q2`, `/admin?panel=teams`, `/admin?panel=export`, `/wall`, 모바일 `/message`를 확인했습니다.
+- Chrome Playwright 검증에서 관리자 문구 프리뷰 7개 렌더링, 입력 즉시 반영, `/message` 모바일 가로 overflow 없음, `/wall` Q&A/퀴즈 전환, console error/warning 없음을 확인했습니다.
+- 검증 중 생성된 로컬 테스트 상태는 `/api/reset`으로 정리했습니다.
+
+### 배포/운영 runbook
+
+- `docs/DEPLOYMENT_AND_OPERATIONS_RUNBOOK.md`를 추가해 기본 배포, 행사별 Worker/room 분리 배포, 새 행사 preset 추가, 배포 후 smoke test, rollback, reset, export, 저장 실패, 송출 버벅임, 이전 행사 DB export 대응 명령어를 정리했습니다.
+
+### 운영 가이드와 소개 덱
+
+- `/help` 운영 가이드 페이지를 추가하고 `/admin` 상단 내비게이션과 필수 관리 작업 카드에서 바로 열 수 있게 했습니다.
+- `app_introduction/remotion-deck`에 앱 구조, DB room 규칙, 관리자 콘솔, 배포, 운영 점검, 문제 상황 대응, 마감 백업을 설명하는 Remotion 소개 덱을 정리했습니다.
+- 운영 가이드와 Remotion 덱의 문구를 긍정형 운영 문장으로 정리하고, 대조형·금지형 설명을 운영 순서와 확인 기준으로 바꿨습니다.
+
+## 2026-06-07
+
+### Vibe Arena repo rename
+
+- GitHub repository를 `Infant83/hackathon-vote-arena`에서 `Infant83/vibe-arena`로 rename했습니다.
+- local `origin` remote를 `https://github.com/Infant83/vibe-arena.git`로 갱신했습니다.
+- Cloudflare Worker 운영 URL `https://meeting.axgroup.workers.dev`는 rename 전후 `/api/health`, `/message`, `/wall`에서 HTTP 200 응답을 확인했습니다.
+- npm package name과 브라우저 title의 작업공간 표기를 `vibe-arena`로 정리하고, 현재 구현을 상위 `Vibe Arena` 플랫폼 관점으로 정리한 `docs/VIBE_ARENA_REORIENTATION_2026-06-07.md`를 추가했습니다.
+- 운영 콘텐츠 백업 표준 파일명을 `settings.json`으로 정리하고, 기존 `team_info.json`/`team_infos.zip`은 업로드 호환용으로 유지했습니다.
+- 관리자 화면이 `public/prev_settings/settings_manifest.json`에 등록된 과거/사전 설정 파일을 불러올 수 있도록 준비했습니다.
+- 관리자 preset 목록이 로컬 `event-configs/*.json`, Worker 번들 행사 설정, `public/prev_settings` 공개 preset을 함께 표시하도록 통합했습니다.
+- 행사 설정에 `event` 메타데이터를 추가하고, 관리자 화면에서 현재 DB room과 preset 권장 room을 함께 표시해 room mismatch 시 확인 후 적용하도록 했습니다.
+- README/AGENTS에 `event slug = Worker name = ARENA_ROOM_NAME = event.roomName` 운영 규칙, reset/export/preset 경계를 정리하고 관리자 화면에 행사 운영 규칙 안내 패널을 추가했습니다.
+- `/admin` 기본 화면을 실시간 현황판에서 운영 대시보드로 재구성해, 실시간 별 현황/별 이벤트 피드/응원 메시지 본문은 제거하고 필수 관리 작업, wall 세션, 데이터 상태, 백업/초기화, 운영 설정을 중심으로 배치했습니다.
+
 ## 2026-06-05
 
 ### Q&A/퀴즈 라우팅과 읽음 관리

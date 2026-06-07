@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -6,6 +6,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
 const args = parseArgs(process.argv.slice(2))
 const configPath = path.resolve(rootDir, args.config || process.env.EVENT_CONFIG_FILE || 'teams.json')
+const auditAllConfigs = Boolean(args['all-configs'])
 const targetUrl = normalizeBaseUrl(args.url || process.env.AUDIT_URL || 'http://127.0.0.1:5173')
 const passcode = String(args.passcode || process.env.ADMIN_PASSCODE || '').trim()
 const skipServer = Boolean(args['no-server'])
@@ -19,7 +20,7 @@ main().catch((error) => {
 })
 
 async function main() {
-  await auditStaticFiles()
+  await auditStaticFiles(await getAuditConfigPaths())
   if (!skipServer) await auditRuntimeServer()
 
   printReport()
@@ -28,17 +29,20 @@ async function main() {
   process.exitCode = hasFail || (strict && hasWarn) ? 1 : 0
 }
 
-async function auditStaticFiles() {
-  const eventConfig = await readJsonFile(configPath)
-  const relativeConfigPath = path.relative(rootDir, configPath) || path.basename(configPath)
-  addCheck(
-    'event-config-file',
-    eventConfig ? 'pass' : 'fail',
-    eventConfig ? `행사 JSON을 읽었습니다: ${relativeConfigPath}` : `행사 JSON을 읽지 못했습니다: ${relativeConfigPath}`,
-    'EVENT_CONFIG_FILE 또는 --config 값을 확인하세요.',
-  )
+async function auditStaticFiles(configPaths) {
+  for (const currentConfigPath of configPaths) {
+    const eventConfig = await readJsonFile(currentConfigPath)
+    const relativeConfigPath = path.relative(rootDir, currentConfigPath) || path.basename(currentConfigPath)
+    const prefix = getConfigCheckPrefix(relativeConfigPath)
+    addCheck(
+      `${prefix}:file`,
+      eventConfig ? 'pass' : 'fail',
+      eventConfig ? `행사 JSON을 읽었습니다: ${relativeConfigPath}` : `행사 JSON을 읽지 못했습니다: ${relativeConfigPath}`,
+      auditAllConfigs ? 'event-configs 폴더의 JSON 파일을 확인하세요.' : 'EVENT_CONFIG_FILE 또는 --config 값을 확인하세요.',
+    )
 
-  if (eventConfig) auditEventConfig(eventConfig, relativeConfigPath)
+    if (eventConfig) auditEventConfig(eventConfig, relativeConfigPath)
+  }
 
   const wrangler = await readJsonFile(path.join(rootDir, 'wrangler.jsonc'), { jsonc: true })
   addCheck(
@@ -51,53 +55,205 @@ async function auditStaticFiles() {
 }
 
 function auditEventConfig(config, relativeConfigPath) {
+  const prefix = getConfigCheckPrefix(relativeConfigPath)
+  const event = config.event && typeof config.event === 'object' ? config.event : {}
   const appTitle = String(config.copy?.appTitle || '')
   const wallPanels = normalizePanels(config.settings?.wallEnabledPanels)
   const teams = Array.isArray(config.teams) ? config.teams : []
   const quizzes = Array.isArray(config.quizzes) ? config.quizzes : []
   const enabledQuizCount = quizzes.filter((quiz) => quiz?.enabled !== false && quiz?.question && quiz?.answer).length
+  const eventFeatures = getEventFeatures(config, wallPanels, teams.length, enabledQuizCount)
   const inlineMedia = collectInlineMedia(config)
+  const remoteMedia = collectRemoteMedia(config)
   const inlineMediaTotal = inlineMedia.reduce((total, item) => total + item.bytes, 0)
   const largestInlineMedia = inlineMedia.reduce((largest, item) => item.bytes > largest.bytes ? item : largest, { path: '', bytes: 0 })
-  const isAxMeeting = appTitle.includes('AX') || relativeConfigPath.includes('2026_ax_group_q2')
+  const weakEditKeys = teams
+    .map((team, index) => ({ index, id: team?.id || `team-${index + 1}`, editKey: String(team?.editKey || '').trim() }))
+    .filter((team) => team.editKey && (team.editKey.length < 16 || team.editKey === 'ax-q2'))
+  const insecureRemoteMedia = remoteMedia.filter((item) => item.protocol === 'http:')
+  const photoReadyTeams = teams.filter((team) => hasPhotoDisplayConfig(team))
+  const roomName = String(event.roomName || '').trim()
+  const workerName = String(event.workerName || '').trim()
+  const settingsFile = String(event.settingsFile || '').replace(/\\/g, '/').trim()
 
   addCheck(
-    'event-title',
+    `${prefix}:event-title`,
     appTitle ? 'pass' : 'fail',
     appTitle ? `행사 제목: ${appTitle}` : '행사 제목이 비어 있습니다.',
     '관리자/관객/Wall 화면에서 같은 행사명을 볼 수 있어야 합니다.',
   )
   addCheck(
-    'wall-panel-scope',
-    isAxMeeting && panelsEqual(wallPanels, ['qna', 'quiz']) ? 'pass' : wallPanels.length <= 3 ? 'warn' : 'fail',
+    `${prefix}:event-profile`,
+    roomName && settingsFile ? (workerName && workerName !== roomName ? 'warn' : 'pass') : 'warn',
+    `room=${roomName || '(없음)'} · worker=${workerName || '(없음)'}`,
+    workerName && roomName && workerName !== roomName
+      ? '동시 운영 행사에서는 workerName과 ARENA_ROOM_NAME을 같은 slug로 두는 것이 가장 추적하기 쉽습니다.'
+      : `settingsFile=${settingsFile || '(없음)'}`,
+  )
+  addCheck(
+    `${prefix}:feature-profile`,
+    eventFeatures.length ? 'pass' : 'warn',
+    `운영 기능: ${eventFeatures.join(', ') || '(추론 불가)'}`,
+    'event.features가 있으면 audit가 vote/message/quiz/luckydraw 조합을 더 정확히 검사합니다.',
+  )
+  addCheck(
+    `${prefix}:wall-panel-scope`,
+    getWallPanelCheckStatus(eventFeatures, wallPanels),
     `행사 JSON wall 세션: ${wallPanels.join(', ') || '(없음)'}`,
-    '이번 AX 모임은 Q&A와 퀴즈만 기본 표시하는 구성이 가장 가볍습니다.',
+    getWallPanelCheckDetail(eventFeatures, wallPanels),
   )
   addCheck(
-    'team-count',
-    teams.length > 0 && teams.length <= 3 ? 'pass' : teams.length ? 'warn' : 'fail',
+    `${prefix}:team-count`,
+    getTeamCountCheckStatus(eventFeatures, teams.length),
     `행사 JSON 팀/방 개수: ${teams.length}`,
-    '이번 QnA 중심 행사는 불필요한 Hackathon 팀 목록이 섞이지 않는지 확인합니다.',
+    getTeamCountCheckDetail(eventFeatures),
   )
   addCheck(
-    'quiz-bank',
-    enabledQuizCount > 0 ? 'pass' : 'warn',
+    `${prefix}:quiz-bank`,
+    eventFeatures.includes('quiz') && enabledQuizCount <= 0 ? 'fail' : enabledQuizCount > 0 ? 'pass' : 'warn',
     `사용 가능한 퀴즈: ${enabledQuizCount}개`,
-    '퀴즈 세션을 열어둘 예정이면 최소 1개 이상의 문제와 정답이 필요합니다.',
+    eventFeatures.includes('quiz') ? '퀴즈 세션을 열어둘 예정이면 최소 1개 이상의 문제와 정답이 필요합니다.' : '퀴즈를 쓰지 않는 행사라면 wallEnabledPanels에서 quiz를 빼도 됩니다.',
   )
   addCheck(
-    'inline-media-total',
+    `${prefix}:team-photo-controls`,
+    teams.length && photoReadyTeams.length === teams.length ? 'pass' : teams.length ? 'warn' : 'fail',
+    teams.length ? `사진 표시 조절값 보유 팀: ${photoReadyTeams.length}/${teams.length}` : '팀 정보가 없습니다.',
+    '팀 사진/로고가 실제 wall 카드와 맞도록 photoFit/photoShape/photoFrame/photoWidth/photoHeight/photoFocus 값을 설정에 보관합니다.',
+  )
+  addCheck(
+    `${prefix}:inline-media-total`,
     inlineMediaTotal > 1_000_000 ? 'fail' : inlineMediaTotal > 500_000 ? 'warn' : 'pass',
     `행사 JSON inline media 총량: ${formatBytes(inlineMediaTotal)}`,
     '큰 data URL 이미지는 상태 저장과 full 상태 전송을 무겁게 만듭니다.',
   )
   addCheck(
-    'inline-media-largest',
+    `${prefix}:inline-media-largest`,
     largestInlineMedia.bytes > 500_000 ? 'warn' : 'pass',
     largestInlineMedia.bytes
       ? `가장 큰 inline media: ${largestInlineMedia.path} (${formatBytes(largestInlineMedia.bytes)})`
       : 'inline media가 없습니다.',
     '이미지는 가능하면 public/team-logos 파일 경로나 원격 URL로 둡니다.',
+  )
+  addCheck(
+    `${prefix}:team-edit-key-strength`,
+    weakEditKeys.length ? 'fail' : 'pass',
+    weakEditKeys.length
+      ? `짧거나 알려진 팀 편집 키: ${weakEditKeys.map((team) => `${team.id}(${team.editKey})`).join(', ')}`
+      : '팀 편집 키가 짧은 공개형 값으로 남아 있지 않습니다.',
+    '팀 편집 저장은 관리자 인증이 필요하지만, 기존 짧은 키가 남아 있으면 링크 오용과 회귀 위험이 커집니다.',
+  )
+  addCheck(
+    `${prefix}:remote-media-https`,
+    insecureRemoteMedia.length ? 'fail' : 'pass',
+    insecureRemoteMedia.length
+      ? `HTTP media URL: ${insecureRemoteMedia.map((item) => item.path).join(', ')}`
+      : '원격 media URL은 HTTP를 사용하지 않습니다.',
+    '행사장 HTTPS 페이지에서는 HTTP 이미지가 깨지거나 혼합 콘텐츠/추적 문제가 생길 수 있습니다.',
+  )
+}
+
+async function getAuditConfigPaths() {
+  if (!auditAllConfigs) return [configPath]
+
+  const eventConfigDir = path.join(rootDir, 'event-configs')
+  const entries = await readdir(eventConfigDir, { withFileTypes: true }).catch(() => [])
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.json'))
+    .map((entry) => path.join(eventConfigDir, entry.name))
+    .sort((left, right) => left.localeCompare(right))
+}
+
+function getConfigCheckPrefix(relativeConfigPath) {
+  return `config:${path.basename(relativeConfigPath, '.json').replace(/[^a-zA-Z0-9_-]/g, '-')}`
+}
+
+function getEventFeatures(config, wallPanels, teamsCount, enabledQuizCount) {
+  const explicitFeatures = normalizeFeatures(config.event?.features || config.features)
+  if (explicitFeatures.length) return explicitFeatures
+
+  const inferred = new Set()
+  if (wallPanels.includes('qna')) inferred.add('message')
+  if (wallPanels.includes('quiz') || enabledQuizCount > 0) inferred.add('quiz')
+  if (wallPanels.includes('raffle')) inferred.add('luckydraw')
+  if (wallPanels.includes('overview') || wallPanels.includes('showup') || teamsCount > 1) inferred.add('vote')
+  return [...inferred]
+}
+
+function normalizeFeatures(value) {
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : []
+  const aliases = new Map([
+    ['qna', 'message'],
+    ['message', 'message'],
+    ['messages', 'message'],
+    ['vote', 'vote'],
+    ['voting', 'vote'],
+    ['quiz', 'quiz'],
+    ['quize', 'quiz'],
+    ['luckydraw', 'luckydraw'],
+    ['lucky-draw', 'luckydraw'],
+    ['raffle', 'luckydraw'],
+  ])
+  return [...new Set(raw.map((item) => aliases.get(String(item || '').trim().toLowerCase())).filter(Boolean))]
+}
+
+function getWallPanelCheckStatus(features, wallPanels) {
+  if (!wallPanels.length) return 'fail'
+  const problems = getWallPanelProblems(features, wallPanels)
+  if (problems.some((problem) => problem.status === 'fail')) return 'fail'
+  if (problems.length) return 'warn'
+  return 'pass'
+}
+
+function getWallPanelCheckDetail(features, wallPanels) {
+  const problems = getWallPanelProblems(features, wallPanels)
+  if (problems.length) return problems.map((problem) => problem.detail).join(' ')
+  return '운영 기능과 wall 표시 세션이 일관됩니다.'
+}
+
+function getWallPanelProblems(features, wallPanels) {
+  const problems = []
+  if (features.includes('message') && !wallPanels.includes('qna')) {
+    problems.push({ status: 'fail', detail: 'message/Q&A 행사는 qna wall 세션이 필요합니다.' })
+  }
+  if (features.includes('quiz') && !wallPanels.includes('quiz')) {
+    problems.push({ status: 'fail', detail: 'quiz 행사는 quiz wall 세션이 필요합니다.' })
+  }
+  if (features.includes('luckydraw') && !wallPanels.includes('raffle')) {
+    problems.push({ status: 'fail', detail: 'luckydraw 행사는 raffle wall 세션이 필요합니다.' })
+  }
+  if (features.includes('vote') && !wallPanels.includes('overview')) {
+    problems.push({ status: 'warn', detail: 'vote 행사는 overview 세션을 열어두면 운영자가 별 흐름을 확인하기 쉽습니다.' })
+  }
+  if (!features.includes('luckydraw') && wallPanels.includes('raffle')) {
+    problems.push({ status: 'warn', detail: 'luckydraw를 쓰지 않는 행사라면 raffle 세션을 닫는 편이 안전합니다.' })
+  }
+  if (!features.includes('vote') && (wallPanels.includes('overview') || wallPanels.includes('showup'))) {
+    problems.push({ status: 'warn', detail: 'vote를 쓰지 않는 행사라면 overview/showup 세션은 불필요할 수 있습니다.' })
+  }
+  return problems
+}
+
+function getTeamCountCheckStatus(features, teamCount) {
+  if (!teamCount) return 'fail'
+  if (features.includes('vote')) return teamCount >= 2 ? 'pass' : 'fail'
+  return teamCount <= 3 ? 'pass' : 'warn'
+}
+
+function getTeamCountCheckDetail(features) {
+  if (features.includes('vote')) return '투표형 행사는 비교 대상 팀/트랙이 2개 이상이어야 합니다.'
+  return 'Q&A/퀴즈 중심 행사는 방/그룹 카드만 남기고 해커톤 팀 목록을 섞지 않는 편이 안전합니다.'
+}
+
+function hasPhotoDisplayConfig(team) {
+  if (!team || typeof team !== 'object') return false
+  return Boolean(
+    team.photoFit &&
+    team.photoShape &&
+    team.photoFrame &&
+    Number.isFinite(Number(team.photoWidth)) &&
+    Number.isFinite(Number(team.photoHeight)) &&
+    Number.isFinite(Number(team.photoFocusX)) &&
+    Number.isFinite(Number(team.photoFocusY)),
   )
 }
 
@@ -148,6 +304,8 @@ async function auditRuntimeServer() {
   const cookie = await loginForAudit(health.data)
   if (!cookie) return
 
+  await auditRuntimeSecurityBoundaries(cookie)
+
   const audit = await fetchJson('/api/ops/audit', { cookie })
   if (!audit.ok) {
     addCheck('runtime-ops-audit', 'warn', '보호된 운영 audit endpoint를 읽지 못했습니다.', audit.error)
@@ -179,7 +337,7 @@ async function loginForAudit(health) {
 
   const response = await fetch(`${targetUrl}/api/admin/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Origin: targetUrl },
     body: JSON.stringify({ passcode }),
   }).catch((error) => ({ ok: false, error }))
 
@@ -193,15 +351,79 @@ async function loginForAudit(health) {
   return cookie
 }
 
+async function auditRuntimeSecurityBoundaries(cookie) {
+  const publicState = await fetchJson('/api/state?media=slim')
+  addCheck(
+    'runtime:public-state-edit-key',
+    publicState.ok && !containsObjectKey(publicState.data, 'editKey') ? 'pass' : 'fail',
+    publicState.ok
+      ? '공개 state에 team editKey가 노출되지 않습니다.'
+      : '공개 state를 읽지 못했습니다.',
+    publicState.ok ? '비관리자 /api/state 응답에는 팀 편집 키가 없어야 합니다.' : publicState.error,
+  )
+
+  const invalidRoleState = await fetchJson('/api/state?role=team&media=slim')
+  addCheck(
+    'runtime:invalid-role-is-public',
+    invalidRoleState.ok && !containsObjectKey(invalidRoleState.data, 'editKey') ? 'pass' : 'fail',
+    invalidRoleState.ok
+      ? '알 수 없는 role 요청이 관리자 state로 승격되지 않습니다.'
+      : '알 수 없는 role state를 읽지 못했습니다.',
+    'role 파라미터가 비어 있거나 잘못되어도 공개 vote 범위로만 처리되어야 합니다.',
+  )
+
+  const teamSelfWithoutAuth = await fetchJson('/api/team-self-config', {
+    method: 'POST',
+    body: {
+      teamId: 'ax-group',
+      teamKey: 'ax-q2',
+      team: { name: 'audit-probe' },
+    },
+  })
+  addCheck(
+    'runtime:team-self-auth',
+    teamSelfWithoutAuth.status === 401 ? 'pass' : 'fail',
+    `비인증 팀 셀프 설정 저장 응답: HTTP ${teamSelfWithoutAuth.status || 'n/a'}`,
+    '팀 셀프 설정 저장은 관리자 인증 없이 성공하면 안 됩니다.',
+  )
+
+  const csrfProbe = await fetchJson('/api/team-self-config', {
+    method: 'POST',
+    cookie,
+    body: {
+      teamId: 'ax-group',
+      teamKey: 'ax-q2',
+      team: { name: 'audit-probe' },
+    },
+  })
+  addCheck(
+    'runtime:admin-same-origin',
+    csrfProbe.status === 403 ? 'pass' : 'fail',
+    `Origin/Referer 없는 관리자 mutation 응답: HTTP ${csrfProbe.status || 'n/a'}`,
+    '관리자 쿠키가 있더라도 Origin/Referer 없는 상태 변경 요청은 거절되어야 합니다.',
+  )
+}
+
 async function fetchJson(route, options = {}) {
   try {
+    const headers = { ...(options.headers || {}) }
+    if (options.cookie) headers.Cookie = options.cookie
+    let body
+    if (options.body !== undefined) {
+      headers['Content-Type'] = headers['Content-Type'] || 'application/json'
+      body = JSON.stringify(options.body)
+    }
     const response = await fetch(`${targetUrl}${route}`, {
-      headers: options.cookie ? { Cookie: options.cookie } : undefined,
+      method: options.method || 'GET',
+      headers,
+      body,
     })
     const data = await response.json().catch(() => ({}))
-    return response.ok ? { ok: true, data } : { ok: false, error: data.error || `HTTP ${response.status}`, data }
+    return response.ok
+      ? { ok: true, status: response.status, data }
+      : { ok: false, status: response.status, error: data.error || `HTTP ${response.status}`, data }
   } catch (error) {
-    return { ok: false, error: error.message || String(error), data: {} }
+    return { ok: false, status: 0, error: error.message || String(error), data: {} }
   }
 }
 
@@ -234,12 +456,42 @@ function collectInlineMedia(value, currentPath = '$', out = []) {
   return out
 }
 
-function normalizePanels(value) {
-  return Array.isArray(value) ? value.map((item) => String(item || '').trim()).filter(Boolean) : []
+function collectRemoteMedia(value, currentPath = '$', out = []) {
+  if (typeof value === 'string') {
+    try {
+      const url = new URL(value)
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        out.push({ path: currentPath, protocol: url.protocol, url: value })
+      }
+    } catch {
+      // Non-URL strings are not remote media.
+    }
+    return out
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectRemoteMedia(item, `${currentPath}[${index}]`, out))
+    return out
+  }
+
+  if (value && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      collectRemoteMedia(child, `${currentPath}.${key}`, out)
+    }
+  }
+
+  return out
 }
 
-function panelsEqual(left, right) {
-  return left.length === right.length && right.every((panel) => left.includes(panel))
+function containsObjectKey(value, key) {
+  if (Array.isArray(value)) return value.some((item) => containsObjectKey(item, key))
+  if (!value || typeof value !== 'object') return false
+  if (Object.prototype.hasOwnProperty.call(value, key)) return true
+  return Object.values(value).some((item) => containsObjectKey(item, key))
+}
+
+function normalizePanels(value) {
+  return Array.isArray(value) ? value.map((item) => String(item || '').trim()).filter(Boolean) : []
 }
 
 function addCheck(id, status, summary, detail = '') {
@@ -256,7 +508,7 @@ function printReport() {
       : 'PASS'
 
   console.log(`\nVibe Vote Arena 운영 Audit: ${overall}`)
-  console.log(`Config: ${path.relative(rootDir, configPath) || configPath}`)
+  console.log(`Config: ${auditAllConfigs ? 'event-configs/*.json' : path.relative(rootDir, configPath) || configPath}`)
   console.log(`Server: ${skipServer ? '(skipped)' : targetUrl}\n`)
 
   for (const check of sorted) {

@@ -1,0 +1,1844 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vibe Vote Arena Deck Editor</title>
+    <style>
+      :root {
+        --red: #a50034;
+        --active-red: #fd312e;
+        --ink: #202124;
+        --body: #4a4a4f;
+        --muted: #777982;
+        --line: #e3e5ea;
+        --canvas: #f5f6f8;
+        --surface: #ffffff;
+        --soft-red: #fff0f4;
+        --blue: #3157d5;
+        --green: #177553;
+        --violet: #6f42d9;
+        --amber: #ba7100;
+        --night: #07142f;
+        --shadow: 0 18px 42px rgba(16, 24, 40, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--canvas);
+        font-family:
+          "Inter", "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic",
+          system-ui, sans-serif;
+      }
+
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        cursor: pointer;
+      }
+
+      button:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible,
+      select:focus-visible {
+        outline: 2px solid var(--active-red);
+        outline-offset: 2px;
+      }
+
+      .app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: grid;
+        grid-template-columns: minmax(260px, 1fr) auto auto;
+        gap: 16px;
+        align-items: center;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.94);
+        backdrop-filter: blur(16px);
+      }
+
+      .brand {
+        min-width: 0;
+      }
+
+      .brand strong {
+        display: block;
+        font-size: 17px;
+        line-height: 1.2;
+        font-weight: 850;
+      }
+
+      .brand span {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 210px;
+        color: var(--body);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .status-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--amber);
+        box-shadow: 0 0 0 5px rgba(186, 113, 0, 0.12);
+      }
+
+      .status.is-live .status-dot {
+        background: var(--green);
+        box-shadow: 0 0 0 5px rgba(23, 117, 83, 0.12);
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .button {
+        min-height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--ink);
+        background: var(--surface);
+        font-size: 13px;
+        font-weight: 780;
+      }
+
+      .button:hover {
+        border-color: #c9ccd4;
+        background: #f9fafb;
+      }
+
+      .button.primary {
+        border-color: var(--red);
+        color: #fff;
+        background: var(--red);
+      }
+
+      .button.primary:hover {
+        background: #8f002d;
+      }
+
+      .button.ghost {
+        color: var(--body);
+        background: transparent;
+      }
+
+      .button.icon {
+        width: 34px;
+        min-height: 34px;
+        padding: 0;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: 282px minmax(520px, 1fr) 390px;
+        min-height: 0;
+      }
+
+      .sidebar,
+      .inspector {
+        min-height: calc(100vh - 65px);
+        overflow: auto;
+        padding: 16px;
+        border-color: var(--line);
+        background: #fbfbfc;
+      }
+
+      .sidebar {
+        border-right: 1px solid var(--line);
+      }
+
+      .inspector {
+        border-left: 1px solid var(--line);
+      }
+
+      .panel-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .panel-title h2,
+      .panel-title h3 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 850;
+      }
+
+      .slide-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .slide-button {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-left: 5px solid transparent;
+        border-radius: 8px;
+        color: var(--ink);
+        background: var(--surface);
+        text-align: left;
+        box-shadow: 0 6px 18px rgba(16, 24, 40, 0.04);
+      }
+
+      .slide-button:hover {
+        border-left-color: #c5cad6;
+      }
+
+      .slide-button.is-active {
+        border-color: rgba(165, 0, 52, 0.28);
+        border-left-color: var(--red);
+        background: var(--soft-red);
+      }
+
+      .slide-button small {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--red);
+        font-size: 11px;
+        font-weight: 850;
+        text-transform: uppercase;
+      }
+
+      .slide-button span {
+        display: block;
+        font-size: 13px;
+        line-height: 1.35;
+        font-weight: 780;
+        word-break: keep-all;
+      }
+
+      .main {
+        min-width: 0;
+        overflow: auto;
+        padding: 18px;
+      }
+
+      .stage-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .stage-head h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 850;
+      }
+
+      .stage-head p {
+        margin: 3px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .stage-tools {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .stage-frame {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #d8dce5;
+        box-shadow: var(--shadow);
+      }
+
+      .canvas {
+        position: relative;
+        container-type: inline-size;
+        aspect-ratio: 16 / 9;
+        width: 100%;
+        overflow: hidden;
+        background:
+          linear-gradient(135deg, #f7f7f8 0%, #fff 55%, #f2f5fb 100%);
+      }
+
+      .canvas::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(32, 33, 36, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(32, 33, 36, 0.04) 1px, transparent 1px);
+        background-size: 3.333% 5.926%;
+      }
+
+      .canvas.hero {
+        background: var(--night);
+      }
+
+      .hero-img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform: scale(1.08) rotate(10deg);
+      }
+
+      .hero-shade {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        background: linear-gradient(
+          90deg,
+          rgba(3, 6, 17, 0.95),
+          rgba(7, 20, 47, 0.74) 54%,
+          rgba(7, 20, 47, 0.22)
+        );
+      }
+
+      .region {
+        position: absolute;
+        z-index: 2;
+        min-width: 90px;
+        min-height: 46px;
+        padding: 0;
+        border: 1px solid transparent;
+      }
+
+      .region:hover,
+      .region.is-selected {
+        border-color: rgba(49, 87, 213, 0.7);
+        background: rgba(49, 87, 213, 0.045);
+      }
+
+      .region.is-selected {
+        box-shadow: 0 0 0 2px rgba(49, 87, 213, 0.18);
+      }
+
+      .region-label {
+        position: absolute;
+        left: 0;
+        top: -22px;
+        display: none;
+        padding: 3px 7px;
+        border-radius: 6px;
+        color: #fff;
+        background: var(--blue);
+        font-size: 10px;
+        line-height: 1;
+        font-weight: 850;
+      }
+
+      .region:hover .region-label,
+      .region.is-selected .region-label {
+        display: block;
+      }
+
+      .resize-handle {
+        position: absolute;
+        right: -6px;
+        bottom: -6px;
+        display: none;
+        width: 13px;
+        height: 13px;
+        border: 2px solid #fff;
+        border-radius: 4px;
+        background: var(--blue);
+        box-shadow: 0 3px 8px rgba(16, 24, 40, 0.24);
+        cursor: nwse-resize;
+      }
+
+      .region.is-selected .resize-handle {
+        display: block;
+      }
+
+      .kicker-line {
+        width: 9.4%;
+        height: 5px;
+        margin-bottom: 0.95%;
+        border-radius: 999px;
+        background: var(--active-red);
+      }
+
+      .kicker {
+        margin: 0;
+        color: var(--red);
+        font-size: clamp(10px, 1.3cqw, 25px);
+        font-weight: 850;
+        text-transform: uppercase;
+      }
+
+      .slide-title,
+      .hero-title {
+        margin: 0.73cqw 0 0;
+        font-weight: 850;
+        line-height: 1.12;
+        word-break: keep-all;
+      }
+
+      .slide-title {
+        color: var(--ink);
+        font-size: clamp(18px, 3cqw, 58px);
+      }
+
+      .slide-subtitle {
+        margin: 0;
+        color: var(--body);
+        font-size: clamp(12px, 1.45cqw, 28px);
+        line-height: 1.55;
+        font-weight: 520;
+        word-break: keep-all;
+      }
+
+      .hero-title {
+        color: #fff;
+        font-size: clamp(30px, 5.85cqw, 112px);
+        line-height: 0.96;
+      }
+
+      .hero-subtitle {
+        max-width: 83%;
+        margin: 1.2cqw 0 1.85cqw;
+        color: #f4f7ff;
+        font-size: clamp(14px, 1.77cqw, 34px);
+        line-height: 1.55;
+        font-weight: 520;
+        word-break: keep-all;
+      }
+
+      .hero-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 1.6cqw;
+      }
+
+      .hero-pills span {
+        padding: 0.45cqw 0.75cqw;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 999px;
+        color: #fff;
+        background: rgba(255, 255, 255, 0.12);
+        font-size: clamp(10px, 1.05cqw, 20px);
+        font-weight: 800;
+      }
+
+      .hero-note {
+        margin: 0;
+        color: #dbe8ff;
+        font-size: clamp(11px, 1.25cqw, 24px);
+        font-weight: 780;
+      }
+
+      .content-grid {
+        display: grid;
+        height: 100%;
+        gap: 1.25cqw;
+      }
+
+      .cards-grid {
+        grid-template-columns: repeat(4, 1fr);
+      }
+
+      .flow-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .preview-card,
+      .preview-flow,
+      .preview-row,
+      .preview-code {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 14px 34px rgba(16, 24, 40, 0.07);
+      }
+
+      .preview-card {
+        min-height: 17cqw;
+        padding: 1.75cqw;
+        border-top: 7px solid var(--red);
+      }
+
+      .preview-card small {
+        display: block;
+        margin-bottom: 1.2cqw;
+        color: var(--red);
+        font-size: clamp(10px, 1.05cqw, 20px);
+        font-weight: 850;
+      }
+
+      .preview-card strong {
+        display: block;
+        margin-bottom: 0.8cqw;
+        font-size: clamp(15px, 1.85cqw, 36px);
+        line-height: 1.2;
+        font-weight: 850;
+        word-break: keep-all;
+      }
+
+      .preview-card p,
+      .preview-flow p,
+      .preview-row p {
+        margin: 0;
+        color: var(--body);
+        font-size: clamp(11px, 1.25cqw, 24px);
+        line-height: 1.5;
+        word-break: keep-all;
+      }
+
+      .preview-flow {
+        display: grid;
+        grid-template-columns: 4.4cqw 1fr;
+        gap: 1.3cqw;
+        min-height: 10cqw;
+        padding: 1.55cqw;
+      }
+
+      .preview-flow b {
+        display: grid;
+        place-items: center;
+        width: 3.8cqw;
+        height: 3.8cqw;
+        border-radius: 50%;
+        color: #fff;
+        background: var(--red);
+        font-size: clamp(14px, 1.55cqw, 30px);
+      }
+
+      .preview-flow strong {
+        display: block;
+        margin-bottom: 0.55cqw;
+        font-size: clamp(15px, 1.75cqw, 34px);
+        line-height: 1.22;
+      }
+
+      .arch-grid {
+        grid-template-columns: repeat(4, 1fr);
+      }
+
+      .arch-grid .preview-card {
+        min-height: 21cqw;
+      }
+
+      .hosting-grid {
+        grid-template-columns: 1.2fr 1fr;
+      }
+
+      .preview-code {
+        min-height: 22cqw;
+        margin: 0;
+        padding: 2cqw;
+        color: #f8fafc;
+        background: #111827;
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: clamp(13px, 1.55cqw, 30px);
+        line-height: 1.48;
+        white-space: pre-wrap;
+      }
+
+      .table-grid {
+        grid-template-columns: 1fr;
+        gap: 0.9cqw;
+      }
+
+      .preview-row {
+        display: grid;
+        grid-template-columns: 18% 28% 1fr;
+        gap: 1.2cqw;
+        align-items: center;
+        min-height: 6.1cqw;
+        padding: 1.3cqw 1.5cqw;
+      }
+
+      .preview-row small {
+        color: var(--red);
+        font-size: clamp(10px, 1.05cqw, 20px);
+        font-weight: 850;
+      }
+
+      .preview-row strong {
+        font-size: clamp(13px, 1.45cqw, 28px);
+        line-height: 1.25;
+      }
+
+      .closing-preview {
+        display: grid;
+        grid-template-columns: 1.25fr 0.75fr;
+        gap: 2cqw;
+        align-items: center;
+        height: 100%;
+      }
+
+      .closing-copy {
+        padding: 3cqw;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.95);
+        box-shadow: 0 14px 34px rgba(16, 24, 40, 0.08);
+      }
+
+      .closing-copy small {
+        color: var(--red);
+        font-size: clamp(12px, 1.45cqw, 28px);
+        font-weight: 850;
+      }
+
+      .closing-copy strong {
+        display: block;
+        margin: 1.1cqw 0;
+        font-size: clamp(20px, 3cqw, 58px);
+        line-height: 1.16;
+        word-break: keep-all;
+      }
+
+      .closing-copy p {
+        margin: 0 0 1cqw;
+        color: var(--body);
+        font-size: clamp(13px, 1.5cqw, 29px);
+        line-height: 1.5;
+        word-break: keep-all;
+      }
+
+      .trophy-placeholder {
+        display: grid;
+        place-items: center;
+        width: 22cqw;
+        height: 22cqw;
+        margin: 0 auto;
+        border: 1px solid #f1d9a7;
+        border-radius: 50%;
+        color: var(--amber);
+        background: #fff9ed;
+        font-size: clamp(28px, 4cqw, 78px);
+        font-weight: 900;
+      }
+
+      .form-section {
+        display: grid;
+        gap: 12px;
+        margin-bottom: 18px;
+        padding-bottom: 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .field label {
+        color: var(--body);
+        font-size: 12px;
+        font-weight: 820;
+      }
+
+      .field input,
+      .field textarea,
+      .field select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--ink);
+        background: var(--surface);
+        font-size: 13px;
+      }
+
+      .field input,
+      .field select {
+        height: 38px;
+        padding: 0 10px;
+      }
+
+      .field textarea {
+        min-height: 76px;
+        padding: 10px;
+        line-height: 1.45;
+        resize: vertical;
+      }
+
+      .segmented,
+      .row-actions,
+      .rect-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .segmented button {
+        min-height: 32px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--body);
+        background: var(--surface);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .segmented button.is-active {
+        border-color: rgba(165, 0, 52, 0.28);
+        color: var(--red);
+        background: var(--soft-red);
+      }
+
+      .rect-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+      }
+
+      .item-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .item-editor {
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .item-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .item-header strong {
+        font-size: 12px;
+        font-weight: 850;
+      }
+
+      .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .empty {
+        padding: 14px;
+        border: 1px dashed #c7cbd5;
+        border-radius: 8px;
+        color: var(--muted);
+        background: #fff;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .hidden-file {
+        position: fixed;
+        left: -9999px;
+        top: -9999px;
+      }
+
+      @media (max-width: 1180px) {
+        .workspace {
+          grid-template-columns: 250px minmax(420px, 1fr);
+        }
+
+        .inspector {
+          grid-column: 1 / -1;
+          min-height: auto;
+          border-left: 0;
+          border-top: 1px solid var(--line);
+        }
+      }
+
+      @media (max-width: 760px) {
+        .topbar {
+          grid-template-columns: 1fr;
+        }
+
+        .toolbar,
+        .stage-tools {
+          justify-content: flex-start;
+        }
+
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar,
+        .inspector {
+          min-height: auto;
+          border-right: 0;
+          border-left: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .slide-list {
+          grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        }
+
+        .main {
+          padding: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <strong>Vibe Vote Arena Deck Editor</strong>
+          <span>Remotion 소개 덱의 텍스트, 장면 순서, 영역 위치를 빠르게 조정합니다.</span>
+        </div>
+        <div class="status" id="saveStatus">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="statusText">불러오는 중</span>
+        </div>
+        <div class="toolbar" aria-label="저장 도구">
+          <button class="button" id="importButton" type="button">JSON 불러오기</button>
+          <button class="button" id="downloadButton" type="button">JSON 내보내기</button>
+          <button class="button" id="resetButton" type="button">초안 초기화</button>
+          <button class="button primary" id="saveButton" type="button">지금 저장</button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar">
+          <div class="panel-title">
+            <h2>Slides</h2>
+            <button class="button icon" id="addSlideButton" type="button" title="슬라이드 추가">+</button>
+          </div>
+          <div class="slide-list" id="slideList"></div>
+        </aside>
+
+        <main class="main">
+          <div class="stage-head">
+            <div>
+              <h1 id="currentTitle">-</h1>
+              <p id="currentMeta">16:9 preview · 1920 x 1080 coordinate system</p>
+            </div>
+            <div class="stage-tools" aria-label="슬라이드 조작">
+              <button class="button icon" id="moveUpButton" type="button" title="앞으로 이동">↑</button>
+              <button class="button icon" id="moveDownButton" type="button" title="뒤로 이동">↓</button>
+              <button class="button" id="duplicateButton" type="button">복제</button>
+              <button class="button" id="deleteButton" type="button">삭제</button>
+            </div>
+          </div>
+          <section class="stage-frame" aria-label="슬라이드 미리보기">
+            <div class="canvas" id="previewCanvas"></div>
+          </section>
+        </main>
+
+        <aside class="inspector">
+          <div class="panel-title">
+            <h2>Inspector</h2>
+          </div>
+
+          <section class="form-section" aria-label="슬라이드 정보">
+            <div class="field">
+              <label for="layoutInput">레이아웃</label>
+              <select id="layoutInput">
+                <option value="hero">hero</option>
+                <option value="cards">cards</option>
+                <option value="flow">flow</option>
+                <option value="architecture">architecture</option>
+                <option value="hosting">hosting</option>
+                <option value="table">table</option>
+                <option value="closing">closing</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="kickerInput">Kicker</label>
+              <input id="kickerInput" type="text" />
+            </div>
+            <div class="field">
+              <label for="titleInput">제목</label>
+              <textarea id="titleInput"></textarea>
+            </div>
+            <div class="field">
+              <label for="subtitleInput">부제</label>
+              <textarea id="subtitleInput"></textarea>
+            </div>
+            <div class="field">
+              <label for="noteInput">Note</label>
+              <input id="noteInput" type="text" />
+            </div>
+          </section>
+
+          <section class="form-section" aria-label="영역 위치">
+            <div class="panel-title">
+              <h3>영역 위치</h3>
+            </div>
+            <div class="segmented" id="regionPicker"></div>
+            <div class="rect-grid">
+              <div class="field">
+                <label for="rectX">X</label>
+                <input id="rectX" type="number" min="0" max="1920" step="1" />
+              </div>
+              <div class="field">
+                <label for="rectY">Y</label>
+                <input id="rectY" type="number" min="0" max="1080" step="1" />
+              </div>
+              <div class="field">
+                <label for="rectW">W</label>
+                <input id="rectW" type="number" min="120" max="1920" step="1" />
+              </div>
+              <div class="field">
+                <label for="rectH">H</label>
+                <input id="rectH" type="number" min="46" max="1080" step="1" />
+              </div>
+            </div>
+          </section>
+
+          <section class="form-section" aria-label="콘텐츠 편집">
+            <div class="panel-title">
+              <h3>콘텐츠</h3>
+              <button class="button" id="addItemButton" type="button">항목 추가</button>
+            </div>
+            <div class="item-list" id="itemEditor"></div>
+          </section>
+        </aside>
+      </div>
+    </div>
+
+    <input class="hidden-file" id="importFile" type="file" accept="application/json,.json" />
+
+    <script>
+      const STORAGE_KEY = "vibe-vote-arena-deck-editor-draft";
+      const WIDTH = 1920;
+      const HEIGHT = 1080;
+      const layouts = ["hero", "cards", "flow", "architecture", "hosting", "table", "closing"];
+      const tones = ["red", "blue", "green", "violet", "amber"];
+      const defaultRects = {
+        title: { x: 92, y: 94, w: 1540, h: 150 },
+        subtitle: { x: 92, y: 250, w: 1360, h: 90 },
+        content: { x: 92, y: 386, w: 1736, h: 560 },
+        heroContent: { x: 110, y: 496, w: 1180, h: 480 },
+      };
+      const closingContentRect = { x: 92, y: 150, w: 1736, h: 790 };
+      const fallbackConfig = {
+        version: 1,
+        slides: [
+          {
+            kicker: "Project Introduction",
+            title: "Vibe Vote Arena",
+            subtitle: "로컬 서버를 실행하면 기존 Remotion 덱을 불러와 실시간으로 저장할 수 있습니다.",
+            layout: "hero",
+            note: "Start editor-server.mjs",
+            canvas: { heroContent: { ...defaultRects.heroContent } },
+          },
+        ],
+      };
+
+      const state = {
+        config: fallbackConfig,
+        selectedSlide: 0,
+        selectedRegion: "content",
+        serverMode: false,
+        saving: false,
+        dirty: false,
+        saveTimer: 0,
+        drag: null,
+      };
+
+      const elements = {
+        saveStatus: document.getElementById("saveStatus"),
+        statusText: document.getElementById("statusText"),
+        slideList: document.getElementById("slideList"),
+        previewCanvas: document.getElementById("previewCanvas"),
+        currentTitle: document.getElementById("currentTitle"),
+        currentMeta: document.getElementById("currentMeta"),
+        layoutInput: document.getElementById("layoutInput"),
+        kickerInput: document.getElementById("kickerInput"),
+        titleInput: document.getElementById("titleInput"),
+        subtitleInput: document.getElementById("subtitleInput"),
+        noteInput: document.getElementById("noteInput"),
+        regionPicker: document.getElementById("regionPicker"),
+        rectX: document.getElementById("rectX"),
+        rectY: document.getElementById("rectY"),
+        rectW: document.getElementById("rectW"),
+        rectH: document.getElementById("rectH"),
+        itemEditor: document.getElementById("itemEditor"),
+        addItemButton: document.getElementById("addItemButton"),
+        importButton: document.getElementById("importButton"),
+        importFile: document.getElementById("importFile"),
+        downloadButton: document.getElementById("downloadButton"),
+        resetButton: document.getElementById("resetButton"),
+        saveButton: document.getElementById("saveButton"),
+        addSlideButton: document.getElementById("addSlideButton"),
+        duplicateButton: document.getElementById("duplicateButton"),
+        deleteButton: document.getElementById("deleteButton"),
+        moveUpButton: document.getElementById("moveUpButton"),
+        moveDownButton: document.getElementById("moveDownButton"),
+      };
+
+      const clone = (value) => JSON.parse(JSON.stringify(value));
+      const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+      const activeSlide = () => state.config.slides[state.selectedSlide];
+
+      const escapeHtml = (value = "") =>
+        String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+
+      const colorForTone = (tone) =>
+        ({
+          red: "var(--red)",
+          blue: "var(--blue)",
+          green: "var(--green)",
+          violet: "var(--violet)",
+          amber: "var(--amber)",
+        })[tone] || "var(--red)";
+
+      const availableRegions = (slide = activeSlide()) => {
+        if (slide.layout === "hero") {
+          return ["heroContent"];
+        }
+        if (slide.layout === "closing") {
+          return ["content"];
+        }
+        return ["title", "subtitle", "content"];
+      };
+
+      const defaultRectFor = (slide, region) => {
+        if (slide.layout === "closing" && region === "content") {
+          return { ...closingContentRect };
+        }
+        return { ...(defaultRects[region] || defaultRects.content) };
+      };
+
+      const ensureCanvas = (slide = activeSlide()) => {
+        slide.canvas ||= {};
+        for (const region of availableRegions(slide)) {
+          slide.canvas[region] ||= defaultRectFor(slide, region);
+        }
+        return slide.canvas;
+      };
+
+      const getRect = (slide, region) => {
+        ensureCanvas(slide);
+        return slide.canvas[region];
+      };
+
+      const rectStyle = (rect) =>
+        [
+          `left:${(rect.x / WIDTH) * 100}%`,
+          `top:${(rect.y / HEIGHT) * 100}%`,
+          `width:${(rect.w / WIDTH) * 100}%`,
+          `min-height:${(rect.h / HEIGHT) * 100}%`,
+        ].join(";");
+
+      const setStatus = (message, live = state.serverMode) => {
+        elements.statusText.textContent = message;
+        elements.saveStatus.classList.toggle("is-live", live);
+      };
+
+      const normalizeSelection = () => {
+        state.selectedSlide = clamp(state.selectedSlide, 0, state.config.slides.length - 1);
+        const regions = availableRegions();
+        if (!regions.includes(state.selectedRegion)) {
+          state.selectedRegion = regions[0];
+        }
+        ensureCanvas();
+      };
+
+      const scheduleSave = () => {
+        state.dirty = true;
+        if (state.serverMode) {
+          setStatus("변경됨 · 곧 저장", true);
+          clearTimeout(state.saveTimer);
+          state.saveTimer = window.setTimeout(saveNow, 450);
+        } else {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state.config));
+          setStatus("로컬 초안 저장됨", false);
+        }
+      };
+
+      const saveNow = async () => {
+        clearTimeout(state.saveTimer);
+        state.saveTimer = 0;
+
+        if (!state.serverMode) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state.config));
+          state.dirty = false;
+          setStatus("로컬 초안 저장됨", false);
+          return;
+        }
+
+        state.saving = true;
+        setStatus("저장 중", true);
+
+        try {
+          const response = await fetch("/api/deck-config", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(state.config),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const result = await response.json();
+          state.dirty = false;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state.config));
+          setStatus(`저장됨 · ${new Date(result.savedAt).toLocaleTimeString()}`, true);
+        } catch (error) {
+          console.error(error);
+          setStatus("저장 실패 · 로컬 초안 유지", false);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state.config));
+        } finally {
+          state.saving = false;
+        }
+      };
+
+      const render = () => {
+        normalizeSelection();
+        renderSlideList();
+        renderInspector();
+        renderPreview();
+      };
+
+      const renderSlideList = () => {
+        elements.slideList.innerHTML = state.config.slides
+          .map(
+            (slide, index) => `
+              <button class="slide-button ${index === state.selectedSlide ? "is-active" : ""}" data-slide="${index}" type="button">
+                <small>${String(index + 1).padStart(2, "0")} · ${escapeHtml(slide.layout)}</small>
+                <span>${escapeHtml(slide.title || "Untitled")}</span>
+              </button>
+            `,
+          )
+          .join("");
+
+        elements.slideList.querySelectorAll("[data-slide]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.selectedSlide = Number(button.dataset.slide);
+            state.selectedRegion = availableRegions()[0];
+            render();
+          });
+        });
+      };
+
+      const renderInspector = () => {
+        const slide = activeSlide();
+        ensureCanvas(slide);
+        elements.currentTitle.textContent = slide.title || "Untitled";
+        elements.currentMeta.textContent = `${slide.kicker || "-"} · ${slide.layout} · ${state.selectedSlide + 1}/${state.config.slides.length}`;
+
+        elements.layoutInput.value = slide.layout;
+        elements.kickerInput.value = slide.kicker || "";
+        elements.titleInput.value = slide.title || "";
+        elements.subtitleInput.value = slide.subtitle || "";
+        elements.noteInput.value = slide.note || "";
+
+        elements.regionPicker.innerHTML = availableRegions(slide)
+          .map(
+            (region) => `
+              <button class="${region === state.selectedRegion ? "is-active" : ""}" data-region="${region}" type="button">
+                ${region}
+              </button>
+            `,
+          )
+          .join("");
+        elements.regionPicker.querySelectorAll("[data-region]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.selectedRegion = button.dataset.region;
+            render();
+          });
+        });
+
+        const rect = getRect(slide, state.selectedRegion);
+        elements.rectX.value = Math.round(rect.x);
+        elements.rectY.value = Math.round(rect.y);
+        elements.rectW.value = Math.round(rect.w);
+        elements.rectH.value = Math.round(rect.h);
+
+        renderItemEditor(slide);
+      };
+
+      const renderPreview = () => {
+        const slide = activeSlide();
+        ensureCanvas(slide);
+        elements.previewCanvas.className = `canvas ${slide.layout === "hero" ? "hero" : ""}`;
+
+        if (slide.layout === "hero") {
+          elements.previewCanvas.innerHTML = `
+            <img class="hero-img" alt="" src="remotion-deck/public/arena-hero.webp" />
+            <div class="hero-shade"></div>
+            ${regionMarkup("heroContent", renderHeroContent(slide))}
+          `;
+        } else {
+          elements.previewCanvas.innerHTML = `
+            ${regionMarkup("title", renderTitleContent(slide), slide.layout === "closing")}
+            ${regionMarkup("subtitle", renderSubtitleContent(slide), slide.layout === "closing")}
+            ${regionMarkup("content", renderLayoutContent(slide))}
+          `;
+        }
+
+        elements.previewCanvas.querySelectorAll(".region").forEach((region) => {
+          region.addEventListener("pointerdown", beginDrag);
+        });
+        elements.previewCanvas.querySelectorAll(".resize-handle").forEach((handle) => {
+          handle.addEventListener("pointerdown", beginResize);
+        });
+      };
+
+      const regionMarkup = (region, inner, hidden = false) => {
+        if (hidden) {
+          return "";
+        }
+
+        const slide = activeSlide();
+        const rect = getRect(slide, region);
+        return `
+          <div class="region ${region === state.selectedRegion ? "is-selected" : ""}" data-region="${region}" style="${rectStyle(rect)}">
+            <span class="region-label">${region}</span>
+            ${inner}
+            <span class="resize-handle" data-region="${region}"></span>
+          </div>
+        `;
+      };
+
+      const renderTitleContent = (slide) => `
+        <div class="kicker-line"></div>
+        <p class="kicker">${escapeHtml(slide.kicker)}</p>
+        <h2 class="slide-title">${escapeHtml(slide.title)}</h2>
+      `;
+
+      const renderSubtitleContent = (slide) => `
+        <p class="slide-subtitle">${escapeHtml(slide.subtitle)}</p>
+      `;
+
+      const renderHeroContent = (slide) => `
+        <div class="kicker-line"></div>
+        <p class="kicker">${escapeHtml(slide.kicker)}</p>
+        <h1 class="hero-title">${escapeHtml(slide.title)}</h1>
+        <p class="hero-subtitle">${escapeHtml(slide.subtitle)}</p>
+        <div class="hero-pills">
+          <span>Audience Vote</span>
+          <span>Admin Console</span>
+          <span>Cloudflare Worker</span>
+        </div>
+        <p class="hero-note">${escapeHtml(slide.note || "")}</p>
+      `;
+
+      const renderLayoutContent = (slide) => {
+        if (slide.layout === "cards") {
+          return `
+            <div class="content-grid cards-grid">
+              ${(slide.cards || []).map(cardMarkup).join("")}
+            </div>
+          `;
+        }
+
+        if (slide.layout === "flow") {
+          return `
+            <div class="content-grid flow-grid">
+              ${(slide.flow || []).map(flowMarkup).join("")}
+            </div>
+          `;
+        }
+
+        if (slide.layout === "architecture") {
+          return `
+            <div class="content-grid arch-grid">
+              ${(slide.rows || []).map((row) =>
+                cardMarkup({
+                  label: row.key,
+                  title: row.value,
+                  body: row.note,
+                  tone: "red",
+                }),
+              ).join("")}
+            </div>
+          `;
+        }
+
+        if (slide.layout === "hosting") {
+          return `
+            <div class="content-grid hosting-grid">
+              <pre class="preview-code">${escapeHtml((slide.code || []).join("\n"))}</pre>
+              <div class="content-grid">${(slide.cards || []).map(cardMarkup).join("")}</div>
+            </div>
+          `;
+        }
+
+        if (slide.layout === "table") {
+          return `
+            <div class="content-grid table-grid">
+              ${(slide.rows || []).map(rowMarkup).join("")}
+            </div>
+          `;
+        }
+
+        if (slide.layout === "closing") {
+          return `
+            <div class="closing-preview">
+              <div class="closing-copy">
+                <small>Ready for run-of-show</small>
+                <strong>${escapeHtml(slide.title)}</strong>
+                <p>${escapeHtml(slide.subtitle)}</p>
+                <small>${escapeHtml(slide.note || "")}</small>
+              </div>
+              <div class="trophy-placeholder">★</div>
+            </div>
+          `;
+        }
+
+        return `<div class="empty">이 레이아웃에 표시할 콘텐츠가 없습니다.</div>`;
+      };
+
+      const cardMarkup = (card) => `
+        <article class="preview-card" style="border-top-color:${colorForTone(card.tone)}">
+          <small style="color:${colorForTone(card.tone)}">${escapeHtml(card.label)}</small>
+          <strong>${escapeHtml(card.title)}</strong>
+          <p>${escapeHtml(card.body)}</p>
+        </article>
+      `;
+
+      const flowMarkup = (step, index) => `
+        <article class="preview-flow">
+          <b>${index + 1}</b>
+          <div>
+            <strong>${escapeHtml(step.title)}</strong>
+            <p>${escapeHtml(step.body)}</p>
+          </div>
+        </article>
+      `;
+
+      const rowMarkup = (row) => `
+        <article class="preview-row">
+          <small>${escapeHtml(row.key)}</small>
+          <strong>${escapeHtml(row.value)}</strong>
+          <p>${escapeHtml(row.note)}</p>
+        </article>
+      `;
+
+      const beginDrag = (event) => {
+        if (event.target.classList.contains("resize-handle")) {
+          return;
+        }
+
+        const region = event.currentTarget.dataset.region;
+        const slide = activeSlide();
+        const rect = getRect(slide, region);
+        const canvasRect = elements.previewCanvas.getBoundingClientRect();
+        const scale = canvasRect.width / WIDTH;
+
+        state.selectedRegion = region;
+        state.drag = {
+          mode: "move",
+          region,
+          offsetX: (event.clientX - canvasRect.left) / scale - rect.x,
+          offsetY: (event.clientY - canvasRect.top) / scale - rect.y,
+        };
+        event.preventDefault();
+        render();
+      };
+
+      const beginResize = (event) => {
+        const region = event.currentTarget.dataset.region;
+        state.selectedRegion = region;
+        state.drag = { mode: "resize", region };
+        event.stopPropagation();
+        event.preventDefault();
+        render();
+      };
+
+      const updateDrag = (event) => {
+        if (!state.drag) {
+          return;
+        }
+
+        const slide = activeSlide();
+        const rect = getRect(slide, state.drag.region);
+        const canvasRect = elements.previewCanvas.getBoundingClientRect();
+        const scale = canvasRect.width / WIDTH;
+        const pointerX = (event.clientX - canvasRect.left) / scale;
+        const pointerY = (event.clientY - canvasRect.top) / scale;
+
+        if (state.drag.mode === "move") {
+          rect.x = Math.round(clamp(pointerX - state.drag.offsetX, 0, WIDTH - rect.w));
+          rect.y = Math.round(clamp(pointerY - state.drag.offsetY, 0, HEIGHT - rect.h));
+        } else {
+          rect.w = Math.round(clamp(pointerX - rect.x, 120, WIDTH - rect.x));
+          rect.h = Math.round(clamp(pointerY - rect.y, 46, HEIGHT - rect.y));
+        }
+
+        renderPreview();
+        renderRectInputs();
+        scheduleSave();
+      };
+
+      const endDrag = () => {
+        state.drag = null;
+      };
+
+      const renderRectInputs = () => {
+        const rect = getRect(activeSlide(), state.selectedRegion);
+        elements.rectX.value = Math.round(rect.x);
+        elements.rectY.value = Math.round(rect.y);
+        elements.rectW.value = Math.round(rect.w);
+        elements.rectH.value = Math.round(rect.h);
+      };
+
+      const updateSlideField = (key, value) => {
+        activeSlide()[key] = value;
+        render();
+        scheduleSave();
+      };
+
+      const updateLayout = (layout) => {
+        const slide = activeSlide();
+        slide.layout = layout;
+        slide.canvas = {};
+        ensureCanvas(slide);
+
+        if (layout === "cards") {
+          slide.cards ||= [newCard()];
+        }
+        if (layout === "flow") {
+          slide.flow ||= [newFlowStep()];
+        }
+        if (layout === "architecture" || layout === "table") {
+          slide.rows ||= [newRow()];
+        }
+        if (layout === "hosting") {
+          slide.code ||= ["npm run realtime", "  -> node server.mjs"];
+          slide.cards ||= [newCard()];
+        }
+
+        state.selectedRegion = availableRegions(slide)[0];
+        render();
+        scheduleSave();
+      };
+
+      const newCard = () => ({
+        label: "Label",
+        title: "새 카드",
+        body: "설명을 입력합니다.",
+        tone: "red",
+      });
+      const newFlowStep = () => ({ title: "새 단계", body: "단계 설명을 입력합니다." });
+      const newRow = () => ({ key: "Key", value: "Value", note: "세부 설명을 입력합니다." });
+      const newSlide = () => ({
+        kicker: "New Slide",
+        title: "새 슬라이드",
+        subtitle: "슬라이드 설명을 입력합니다.",
+        layout: "cards",
+        cards: [newCard(), { ...newCard(), tone: "blue" }],
+        canvas: {
+          title: { ...defaultRects.title },
+          subtitle: { ...defaultRects.subtitle },
+          content: { ...defaultRects.content },
+        },
+      });
+
+      const renderItemEditor = (slide) => {
+        if (slide.layout === "cards" || slide.layout === "hosting") {
+          elements.itemEditor.innerHTML = renderCardsEditor(slide);
+          wireCardsEditor(slide);
+          elements.addItemButton.disabled = false;
+          return;
+        }
+
+        if (slide.layout === "flow") {
+          elements.itemEditor.innerHTML = renderFlowEditor(slide);
+          wireFlowEditor(slide);
+          elements.addItemButton.disabled = false;
+          return;
+        }
+
+        if (slide.layout === "architecture" || slide.layout === "table") {
+          elements.itemEditor.innerHTML = renderRowsEditor(slide);
+          wireRowsEditor(slide);
+          elements.addItemButton.disabled = false;
+          return;
+        }
+
+        if (slide.layout === "hosting") {
+          elements.addItemButton.disabled = false;
+          return;
+        }
+
+        if (slide.layout === "hero" || slide.layout === "closing") {
+          elements.itemEditor.innerHTML = `<div class="empty">이 장면은 상단 텍스트와 위치만 편집합니다.</div>`;
+          elements.addItemButton.disabled = true;
+          return;
+        }
+
+        elements.itemEditor.innerHTML = `<div class="empty">편집 가능한 콘텐츠가 없습니다.</div>`;
+        elements.addItemButton.disabled = true;
+      };
+
+      const renderCardsEditor = (slide) => `
+        ${(slide.cards || [])
+          .map(
+            (card, index) => `
+              <div class="item-editor" data-item="${index}">
+                <div class="item-header">
+                  <strong>Card ${index + 1}</strong>
+                  <button class="button ghost" data-delete-card="${index}" type="button">삭제</button>
+                </div>
+                <div class="two-col">
+                  <div class="field">
+                    <label>Label</label>
+                    <input data-card-field="label" value="${escapeHtml(card.label)}" />
+                  </div>
+                  <div class="field">
+                    <label>Tone</label>
+                    <select data-card-field="tone">
+                      ${tones.map((tone) => `<option value="${tone}" ${tone === card.tone ? "selected" : ""}>${tone}</option>`).join("")}
+                    </select>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Title</label>
+                  <input data-card-field="title" value="${escapeHtml(card.title)}" />
+                </div>
+                <div class="field">
+                  <label>Body</label>
+                  <textarea data-card-field="body">${escapeHtml(card.body)}</textarea>
+                </div>
+              </div>
+            `,
+          )
+          .join("")}
+        ${
+          slide.layout === "hosting"
+            ? `<div class="field">
+                <label>Code block</label>
+                <textarea id="codeEditor">${escapeHtml((slide.code || []).join("\n"))}</textarea>
+              </div>`
+            : ""
+        }
+      `;
+
+      const wireCardsEditor = (slide) => {
+        elements.itemEditor.querySelectorAll("[data-card-field]").forEach((input) => {
+          input.addEventListener("input", () => {
+            const wrapper = input.closest("[data-item]");
+            slide.cards[Number(wrapper.dataset.item)][input.dataset.cardField] = input.value;
+            renderPreview();
+            scheduleSave();
+          });
+        });
+        elements.itemEditor.querySelectorAll("[data-delete-card]").forEach((button) => {
+          button.addEventListener("click", () => {
+            slide.cards.splice(Number(button.dataset.deleteCard), 1);
+            render();
+            scheduleSave();
+          });
+        });
+        const codeEditor = document.getElementById("codeEditor");
+        if (codeEditor) {
+          codeEditor.addEventListener("input", () => {
+            slide.code = codeEditor.value.split("\n");
+            renderPreview();
+            scheduleSave();
+          });
+        }
+      };
+
+      const renderFlowEditor = (slide) =>
+        (slide.flow || [])
+          .map(
+            (step, index) => `
+              <div class="item-editor" data-item="${index}">
+                <div class="item-header">
+                  <strong>Step ${index + 1}</strong>
+                  <button class="button ghost" data-delete-flow="${index}" type="button">삭제</button>
+                </div>
+                <div class="field">
+                  <label>Title</label>
+                  <input data-flow-field="title" value="${escapeHtml(step.title)}" />
+                </div>
+                <div class="field">
+                  <label>Body</label>
+                  <textarea data-flow-field="body">${escapeHtml(step.body)}</textarea>
+                </div>
+              </div>
+            `,
+          )
+          .join("");
+
+      const wireFlowEditor = (slide) => {
+        elements.itemEditor.querySelectorAll("[data-flow-field]").forEach((input) => {
+          input.addEventListener("input", () => {
+            const wrapper = input.closest("[data-item]");
+            slide.flow[Number(wrapper.dataset.item)][input.dataset.flowField] = input.value;
+            renderPreview();
+            scheduleSave();
+          });
+        });
+        elements.itemEditor.querySelectorAll("[data-delete-flow]").forEach((button) => {
+          button.addEventListener("click", () => {
+            slide.flow.splice(Number(button.dataset.deleteFlow), 1);
+            render();
+            scheduleSave();
+          });
+        });
+      };
+
+      const renderRowsEditor = (slide) =>
+        (slide.rows || [])
+          .map(
+            (row, index) => `
+              <div class="item-editor" data-item="${index}">
+                <div class="item-header">
+                  <strong>Row ${index + 1}</strong>
+                  <button class="button ghost" data-delete-row="${index}" type="button">삭제</button>
+                </div>
+                <div class="two-col">
+                  <div class="field">
+                    <label>Key</label>
+                    <input data-row-field="key" value="${escapeHtml(row.key)}" />
+                  </div>
+                  <div class="field">
+                    <label>Value</label>
+                    <input data-row-field="value" value="${escapeHtml(row.value)}" />
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Note</label>
+                  <textarea data-row-field="note">${escapeHtml(row.note)}</textarea>
+                </div>
+              </div>
+            `,
+          )
+          .join("");
+
+      const wireRowsEditor = (slide) => {
+        elements.itemEditor.querySelectorAll("[data-row-field]").forEach((input) => {
+          input.addEventListener("input", () => {
+            const wrapper = input.closest("[data-item]");
+            slide.rows[Number(wrapper.dataset.item)][input.dataset.rowField] = input.value;
+            renderPreview();
+            scheduleSave();
+          });
+        });
+        elements.itemEditor.querySelectorAll("[data-delete-row]").forEach((button) => {
+          button.addEventListener("click", () => {
+            slide.rows.splice(Number(button.dataset.deleteRow), 1);
+            render();
+            scheduleSave();
+          });
+        });
+      };
+
+      const addItem = () => {
+        const slide = activeSlide();
+        if (slide.layout === "cards" || slide.layout === "hosting") {
+          slide.cards ||= [];
+          slide.cards.push({ ...newCard(), tone: tones[slide.cards.length % tones.length] });
+        } else if (slide.layout === "flow") {
+          slide.flow ||= [];
+          slide.flow.push(newFlowStep());
+        } else if (slide.layout === "architecture" || slide.layout === "table") {
+          slide.rows ||= [];
+          slide.rows.push(newRow());
+        }
+        render();
+        scheduleSave();
+      };
+
+      const updateRectFromInputs = () => {
+        const rect = getRect(activeSlide(), state.selectedRegion);
+        rect.x = clamp(Number(elements.rectX.value || 0), 0, WIDTH - 120);
+        rect.y = clamp(Number(elements.rectY.value || 0), 0, HEIGHT - 46);
+        rect.w = clamp(Number(elements.rectW.value || 120), 120, WIDTH - rect.x);
+        rect.h = clamp(Number(elements.rectH.value || 46), 46, HEIGHT - rect.y);
+        renderPreview();
+        scheduleSave();
+      };
+
+      const downloadJson = () => {
+        const blob = new Blob([`${JSON.stringify(state.config, null, 2)}\n`], {
+          type: "application/json",
+        });
+        const anchor = document.createElement("a");
+        anchor.href = URL.createObjectURL(blob);
+        anchor.download = "deck.config.json";
+        anchor.click();
+        URL.revokeObjectURL(anchor.href);
+      };
+
+      const importJson = async (file) => {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        if (!Array.isArray(parsed.slides)) {
+          throw new Error("slides 배열이 필요합니다.");
+        }
+        state.config = parsed;
+        state.selectedSlide = 0;
+        state.selectedRegion = availableRegions()[0];
+        render();
+        scheduleSave();
+      };
+
+      const loadConfig = async () => {
+        const localDraft = localStorage.getItem(STORAGE_KEY);
+
+        try {
+          const response = await fetch("/api/deck-config", { cache: "no-store" });
+          if (response.ok) {
+            state.config = await response.json();
+            state.serverMode = true;
+            setStatus("서버 연결됨 · 자동 저장", true);
+            render();
+            return;
+          }
+        } catch {
+          state.serverMode = false;
+        }
+
+        try {
+          const response = await fetch("remotion-deck/deck.config.json", {
+            cache: "no-store",
+          });
+          if (response.ok) {
+            state.config = await response.json();
+            state.serverMode = false;
+            setStatus("읽기 전용 · 서버 없음", false);
+            render();
+            return;
+          }
+        } catch {
+          state.serverMode = false;
+        }
+
+        if (localDraft) {
+          state.config = JSON.parse(localDraft);
+          setStatus("로컬 초안", false);
+        } else {
+          state.config = clone(fallbackConfig);
+          setStatus("샘플 초안", false);
+        }
+        render();
+      };
+
+      elements.layoutInput.addEventListener("change", () => updateLayout(elements.layoutInput.value));
+      elements.kickerInput.addEventListener("input", () => updateSlideField("kicker", elements.kickerInput.value));
+      elements.titleInput.addEventListener("input", () => updateSlideField("title", elements.titleInput.value));
+      elements.subtitleInput.addEventListener("input", () => updateSlideField("subtitle", elements.subtitleInput.value));
+      elements.noteInput.addEventListener("input", () => updateSlideField("note", elements.noteInput.value));
+      [elements.rectX, elements.rectY, elements.rectW, elements.rectH].forEach((input) => {
+        input.addEventListener("input", updateRectFromInputs);
+      });
+      elements.addItemButton.addEventListener("click", addItem);
+      elements.saveButton.addEventListener("click", saveNow);
+      elements.downloadButton.addEventListener("click", downloadJson);
+      elements.importButton.addEventListener("click", () => elements.importFile.click());
+      elements.importFile.addEventListener("change", async () => {
+        const [file] = elements.importFile.files;
+        if (!file) {
+          return;
+        }
+        try {
+          await importJson(file);
+        } catch (error) {
+          alert(error instanceof Error ? error.message : "JSON을 불러오지 못했습니다.");
+        } finally {
+          elements.importFile.value = "";
+        }
+      });
+      elements.resetButton.addEventListener("click", () => {
+        localStorage.removeItem(STORAGE_KEY);
+        loadConfig();
+      });
+      elements.addSlideButton.addEventListener("click", () => {
+        state.config.slides.splice(state.selectedSlide + 1, 0, newSlide());
+        state.selectedSlide += 1;
+        state.selectedRegion = "title";
+        render();
+        scheduleSave();
+      });
+      elements.duplicateButton.addEventListener("click", () => {
+        state.config.slides.splice(state.selectedSlide + 1, 0, clone(activeSlide()));
+        state.selectedSlide += 1;
+        render();
+        scheduleSave();
+      });
+      elements.deleteButton.addEventListener("click", () => {
+        if (state.config.slides.length <= 1) {
+          return;
+        }
+        state.config.slides.splice(state.selectedSlide, 1);
+        state.selectedSlide = clamp(state.selectedSlide, 0, state.config.slides.length - 1);
+        render();
+        scheduleSave();
+      });
+      elements.moveUpButton.addEventListener("click", () => {
+        if (state.selectedSlide === 0) {
+          return;
+        }
+        const [slide] = state.config.slides.splice(state.selectedSlide, 1);
+        state.config.slides.splice(state.selectedSlide - 1, 0, slide);
+        state.selectedSlide -= 1;
+        render();
+        scheduleSave();
+      });
+      elements.moveDownButton.addEventListener("click", () => {
+        if (state.selectedSlide >= state.config.slides.length - 1) {
+          return;
+        }
+        const [slide] = state.config.slides.splice(state.selectedSlide, 1);
+        state.config.slides.splice(state.selectedSlide + 1, 0, slide);
+        state.selectedSlide += 1;
+        render();
+        scheduleSave();
+      });
+
+      window.addEventListener("pointermove", updateDrag);
+      window.addEventListener("pointerup", endDrag);
+      window.addEventListener("resize", renderPreview);
+
+      loadConfig();
+    </script>
+  </body>
+</html>
+

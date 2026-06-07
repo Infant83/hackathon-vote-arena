@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -49,6 +49,7 @@ const quizCountdownMs = 3600
 const quizSettlementMs = 3000
 const quizClientSubmitSkewLimitMs = quizSettlementMs
 const maxStoredQuizAnswers = 1000
+const maxJsonBodyBytes = 2_000_000
 const imageShapes = new Set(['circle', 'rounded', 'square', 'wide'])
 const imageFrames = new Set(['soft', 'line', 'glow', 'clean'])
 const imageFits = new Set(['cover', 'contain'])
@@ -56,11 +57,40 @@ const participantCookieName = 'vibe-vote-participant'
 const participantCookieMaxAge = 60 * 60 * 24 * 14
 const adminCookieName = 'vibe-vote-admin'
 const adminCookieMaxAge = 60 * 60 * 8
+const commonSecurityHeaders = {
+  'Content-Security-Policy': [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "img-src 'self' data: https:",
+    "connect-src 'self'",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; '),
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+}
+const publicMutationCooldownMs = new Map([
+  ['/api/vote', 100],
+  ['/api/cheer', 1000],
+  ['/api/question', 1000],
+  ['/api/question/update', 600],
+  ['/api/question/delete', 600],
+  ['/api/quiz/answer', 250],
+  ['/api/register', 800],
+])
+const maxRateLimitEntries = 5000
+const publicMutationRateLimits = new Map()
 const wallSessionValues = ['overview', 'raffle', 'showup', 'qna', 'quiz']
 const defaultWallEnabledPanels = wallSessionValues
 const defaultConfigFileName = 'teams.json'
 const eventConfigEnvNames = ['EVENT_CONFIG_FILE', 'VIBE_EVENT_CONFIG', 'TEAMS_CONFIG_FILE']
 const teamsConfigPath = resolveEventConfigPath()
+const eventConfigsDir = path.join(__dirname, 'event-configs')
 const teamLogoDir = path.join(__dirname, 'public', 'team-logos')
 const defaultCopy = {
   appTitle: 'Vibe Vote Arena',
@@ -410,6 +440,7 @@ let copy = appConfig.copy
 let quizBank = appConfig.quizBank
 let configRevision = 1
 let configUpdatedAt = Date.now()
+let eventProfile = appConfig.eventProfile
 let validTeamIds = new Set(teams.map((team) => team.id))
 const participants = new Map()
 const cheers = []
@@ -492,6 +523,9 @@ function loadConfig() {
 
     return {
       teams,
+      eventProfile: normalizeEventProfile(Array.isArray(parsed) ? undefined : parsed?.event, {
+        settingsFile: getConfigPathLabel(),
+      }),
       copy: normalizeCopy(Array.isArray(parsed) ? {} : parsed?.copy),
       quizBank: normalizeQuizBank(Array.isArray(parsed) ? undefined : parsed?.quizzes),
       settings: normalizeRuntimeSettings(Array.isArray(parsed) ? undefined : parsed?.settings),
@@ -500,11 +534,60 @@ function loadConfig() {
     console.warn(`${getConfigPathLabel()}을 읽지 못해 기본 팀 정보를 사용합니다: ${error.message}`)
     return {
       teams: defaultTeams.map((team, index) => normalizeTeam(team, team, index)),
+      eventProfile: normalizeEventProfile(undefined, {
+        label: 'Vibe Vote Arena',
+        settingsFile: getConfigPathLabel(),
+      }),
       copy: defaultCopy,
       quizBank: defaultQuizBank.map((quiz, index) => normalizeQuizConfig(quiz, quiz, index)),
       settings: normalizeRuntimeSettings(),
     }
   }
+}
+
+function normalizeEventProfile(input, fallback = {}) {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
+  const id = sanitizeSlug(source.id) || sanitizeSlug(source.eventId) || sanitizeSlug(fallback.id)
+  const label = sanitizeText(source.label || source.name || fallback.label, 80)
+  const workerName = sanitizeSlug(source.workerName || fallback.workerName)
+  const roomName = sanitizeRoomName(source.roomName || fallback.roomName)
+  const settingsFile = sanitizeRelativeSettingsPath(source.settingsFile || fallback.settingsFile)
+  const description = sanitizeText(source.description || fallback.description, 160)
+
+  return {
+    ...(id ? { id } : {}),
+    ...(label ? { label } : {}),
+    ...(workerName ? { workerName } : {}),
+    ...(roomName ? { roomName } : {}),
+    ...(settingsFile ? { settingsFile } : {}),
+    ...(description ? { description } : {}),
+  }
+}
+
+function getRuntimeEventProfile() {
+  const settingsRoomName = eventProfile.roomName || ''
+  const activeRoomName = sanitizeRoomName(process.env.ARENA_ROOM_NAME) || 'local-node'
+
+  return {
+    ...eventProfile,
+    runtime: 'node',
+    configFile: getConfigPathLabel(),
+    roomName: activeRoomName,
+    ...(settingsRoomName ? { settingsRoomName } : {}),
+  }
+}
+
+function sanitizeRoomName(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_.:-]/g, '')
+    .slice(0, 96)
+}
+
+function sanitizeRelativeSettingsPath(value) {
+  const normalized = String(value || '').replace(/\\/g, '/').trim()
+  if (!normalized || normalized.startsWith('/') || normalized.includes('..') || /^[a-z]+:/i.test(normalized)) return ''
+  return normalized.slice(0, 160)
 }
 
 function normalizeRuntimeSettings(input) {
@@ -673,7 +756,7 @@ function isRemoteLogoUrl(value) {
 
   try {
     const url = new URL(value)
-    return url.protocol === 'https:' || url.protocol === 'http:'
+    return url.protocol === 'https:'
   } catch {
     return false
   }
@@ -693,6 +776,15 @@ async function applyTeamConfig(body) {
   await saveLogoAssets(body?.logos)
   teams = nextTeams
   copy = normalizeCopy({ ...copy, ...(body?.copy || {}) })
+  if (body?.event && typeof body.event === 'object' && !Array.isArray(body.event)) {
+    eventProfile = normalizeEventProfile(body.event, eventProfile)
+  }
+  if (body?.settings && typeof body.settings === 'object' && !Array.isArray(body.settings)) {
+    settings = getRuntimeSettings({ ...settings, ...body.settings })
+    normalizeAllParticipantAllocations()
+    closed = false
+    closesAt = calculateClosesAt(settings)
+  }
   if (Array.isArray(body?.quizzes) || Array.isArray(body?.quizBank)) {
     quizBank = normalizeQuizBank(body?.quizzes || body?.quizBank, quizBank)
   }
@@ -802,6 +894,7 @@ function cleanupInvalidTeamReferences() {
 
 async function persistTeamConfig() {
   const payload = {
+    event: eventProfile,
     copy,
     settings: getRuntimeSettings(),
     quizzes: quizBank.map((quiz) => ({
@@ -991,6 +1084,7 @@ function getState(options = {}) {
     testMode,
     settings: getRuntimeSettings(),
     copy,
+    eventProfile: getRuntimeEventProfile(),
     configRevision,
     configUpdatedAt,
   }
@@ -1000,30 +1094,31 @@ function getState(options = {}) {
 }
 
 function shapeStateForRole(state, options = {}) {
-  if (options.role !== 'vote') return state
+  const scopedState = options.role === 'admin' ? state : redactSensitiveStateForPublicRole(state)
+  if (options.role !== 'vote') return scopedState
 
   const participantId = String(options.participantId || '')
   const ownParticipants = participantId
-    ? state.participants.filter((person) => person.id === participantId || getParticipantDeviceIds(person).includes(participantId))
+    ? scopedState.participants.filter((person) => person.id === participantId || getParticipantDeviceIds(person).includes(participantId))
     : []
   const ownParticipantIds = new Set(ownParticipants.map((person) => person.id))
   const ownAwardHistory = ownParticipantIds.size
-    ? state.awardHistory.filter((record) => ownParticipantIds.has(record.participantId))
+    ? scopedState.awardHistory.filter((record) => ownParticipantIds.has(record.participantId))
     : []
   const ownQuizAnswers = ownParticipantIds.size
-    ? state.quiz.answers.filter((answer) => ownParticipantIds.has(answer.participantId))
+    ? scopedState.quiz.answers.filter((answer) => ownParticipantIds.has(answer.participantId))
     : []
-  const visibleOrOwnCheers = state.cheers.filter((message) => {
+  const visibleOrOwnCheers = scopedState.cheers.filter((message) => {
     if (!message.hidden) return true
     return ownParticipantIds.has(message.participantId)
   })
-  const visibleOrOwnQuestions = (state.questions || []).filter((question) => {
+  const visibleOrOwnQuestions = (scopedState.questions || []).filter((question) => {
     if (!question.hidden) return true
     return ownParticipantIds.has(question.participantId)
   })
 
   return {
-    ...state,
+    ...scopedState,
     participants: ownParticipants,
     cheers: visibleOrOwnCheers,
     questions: visibleOrOwnQuestions,
@@ -1034,6 +1129,19 @@ function shapeStateForRole(state, options = {}) {
       answers: ownQuizAnswers,
     },
   }
+}
+
+function redactSensitiveStateForPublicRole(state) {
+  return {
+    ...state,
+    teams: state.teams.map(redactTeamEditKey),
+  }
+}
+
+function redactTeamEditKey(team) {
+  const publicTeam = { ...team }
+  delete publicTeam.editKey
+  return publicTeam
 }
 
 function slimStateMedia(state) {
@@ -2063,6 +2171,7 @@ function isAdminProtectedPath(pathname) {
     '/api/participant/delete',
     '/api/settings',
     '/api/team-config',
+    '/api/team-self-config',
     '/api/raffle',
     '/api/raffle/stage',
     '/api/raffle/reset',
@@ -2071,7 +2180,7 @@ function isAdminProtectedPath(pathname) {
 }
 
 function isProtectedRealtimeRequest(url) {
-  const role = url.searchParams.get('role')
+  const role = getEventRole(url)
   return role === 'admin' || role === 'wall'
 }
 
@@ -2091,6 +2200,71 @@ function safeEquals(left, right) {
   const leftBuffer = Buffer.from(String(left))
   const rightBuffer = Buffer.from(String(right))
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer)
+}
+
+function requiresAdminRequestIntegrityCheck(pathname, method) {
+  if (method === 'POST' && isAdminProtectedPath(pathname)) return true
+  return method === 'GET' && pathname === '/api/team-config/apply'
+}
+
+function isSameOriginAdminRequest(request) {
+  const expectedOrigin = getRequestOrigin(request)
+  if (!expectedOrigin) return false
+
+  const origin = String(request.headers.origin || '').trim()
+  if (origin) return origin === expectedOrigin
+
+  const referer = String(request.headers.referer || '').trim()
+  if (!referer) return false
+
+  try {
+    return new URL(referer).origin === expectedOrigin
+  } catch {
+    return false
+  }
+}
+
+function getRequestOrigin(request) {
+  const host = String(request.headers.host || '').trim()
+  if (!host) return ''
+  const forwardedProto = String(request.headers['x-forwarded-proto'] || '').split(',')[0].trim()
+  const protocol = forwardedProto || (request.socket?.encrypted ? 'https' : 'http')
+  return `${protocol}://${host}`
+}
+
+function consumePublicMutationRateLimit(request, pathname, body) {
+  const cooldownMs = publicMutationCooldownMs.get(pathname) || 0
+  if (!cooldownMs) return 0
+
+  const now = Date.now()
+  const requestKey = getPublicMutationRateLimitKey(request, pathname, body)
+  const previousAt = publicMutationRateLimits.get(requestKey) || 0
+  const elapsed = now - previousAt
+  if (elapsed < cooldownMs) return cooldownMs - elapsed
+
+  publicMutationRateLimits.set(requestKey, now)
+  pruneRateLimitMap(publicMutationRateLimits, now)
+  return 0
+}
+
+function getPublicMutationRateLimitKey(request, pathname, body) {
+  const deviceId = sanitizeIdentifier(getRequestDeviceId(request, body), 96)
+  const remoteAddress = sanitizeIdentifier(request.socket?.remoteAddress || '', 96)
+  return `${pathname}:${deviceId || remoteAddress || 'unknown'}`
+}
+
+function pruneRateLimitMap(rateLimits, now = Date.now()) {
+  if (rateLimits.size <= maxRateLimitEntries) return
+
+  for (const [key, timestamp] of rateLimits.entries()) {
+    if (now - timestamp > 60_000) rateLimits.delete(key)
+    if (rateLimits.size <= maxRateLimitEntries) return
+  }
+
+  for (const key of rateLimits.keys()) {
+    rateLimits.delete(key)
+    if (rateLimits.size <= maxRateLimitEntries) return
+  }
 }
 
 function isCurrentSession(body) {
@@ -2257,25 +2431,45 @@ function seedTestData() {
 }
 
 function sendJson(response, statusCode, payload, extraHeaders = {}) {
-  response.writeHead(statusCode, {
+  response.writeHead(statusCode, withSecurityHeaders({
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     ...extraHeaders,
-  })
+  }))
   response.end(JSON.stringify(payload))
 }
 
+function withSecurityHeaders(headers = {}) {
+  return {
+    ...commonSecurityHeaders,
+    ...headers,
+  }
+}
+
+class RequestBodyTooLargeError extends Error {}
+
 async function readJson(request) {
   let body = ''
+  let bytes = 0
 
   for await (const chunk of request) {
-    body += chunk
-    if (body.length > 8_000_000) {
-      throw new Error('request body too large')
+    bytes += Buffer.byteLength(chunk)
+    if (bytes > maxJsonBodyBytes) {
+      throw new RequestBodyTooLargeError('request body too large')
     }
+    body += chunk
   }
 
   return body ? JSON.parse(body) : {}
+}
+
+function sendJsonReadError(response, error) {
+  if (error instanceof RequestBodyTooLargeError) {
+    sendJson(response, 413, { error: error.message })
+    return
+  }
+
+  sendJson(response, 400, { error: 'invalid json body' })
 }
 
 function decodeTeamConfigPayload(value) {
@@ -2403,6 +2597,7 @@ function getArchiveExport() {
     awardHistory,
     voteEvents,
     settings: getRuntimeSettings(),
+    eventProfile: getRuntimeEventProfile(),
     configRevision,
     configUpdatedAt,
   }
@@ -2431,13 +2626,19 @@ function getOpsAudit() {
     getConfigPathLabel() === defaultConfigFileName
       ? '기본 teams.json으로 실행 중입니다.'
       : `행사 설정 파일을 사용 중입니다: ${getConfigPathLabel()}`,
-    '이번 행사는 event-configs/2026_ax_group_q2_meeting.json 사용을 권장합니다.',
+    '동시 운영/분기 운영에서는 EVENT_CONFIG_FILE로 행사별 settings JSON을 명시하세요.',
+  )
+  addCheck(
+    'arena-room-name',
+    getRuntimeEventProfile().roomName === 'local-node' ? 'warn' : 'pass',
+    `현재 운영 DB room: ${getRuntimeEventProfile().roomName}`,
+    'Cloudflare 운영에서는 ARENA_ROOM_NAME을 행사별 slug로 분리합니다. 로컬 Node는 local-node로 표시됩니다.',
   )
   addCheck(
     'wall-panels',
-    runtimeSettings.wallEnabledPanels.length <= 2 && runtimeSettings.wallEnabledPanels.includes('qna') ? 'pass' : 'warn',
+    runtimeSettings.wallEnabledPanels.length ? (runtimeSettings.wallEnabledPanels.length > 4 ? 'warn' : 'pass') : 'fail',
     `현재 wall 표시 세션: ${runtimeSettings.wallEnabledPanels.join(', ')}`,
-    '이번 AX 모임은 Q&A와 퀴즈만 열어두면 불필요한 화면/상태 노출을 줄일 수 있습니다.',
+    '행사 조합에 필요한 세션만 열어두면 송출 화면과 상태 전송을 단순하게 유지할 수 있습니다.',
   )
   addCheck(
     'admin-full-payload',
@@ -2487,6 +2688,7 @@ function getOpsAudit() {
     generatedAt: Date.now(),
     runtime: 'node',
     configFile: getConfigPathLabel(),
+    eventProfile: getRuntimeEventProfile(),
     appTitle: copy.appTitle,
     sessionId,
     settings: runtimeSettings,
@@ -2539,9 +2741,93 @@ function formatBytes(bytes) {
   return `${bytes} B`
 }
 
+function getSettingsPresetManifest() {
+  return {
+    presets: getEventConfigPresets(),
+  }
+}
+
+function getEventConfigPresets() {
+  try {
+    return readdirSync(eventConfigsDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.json'))
+      .map((entry) => getEventConfigPresetSummary(entry.name))
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+function getEventConfigPresetSummary(fileName) {
+  const filePath = getSafeEventConfigPresetPath(fileName)
+  if (!filePath) return null
+
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf8'))
+    const profile = normalizeEventProfile(parsed?.event, {
+      label: getSettingsPresetLabel(parsed, fileName),
+      settingsFile: `event-configs/${fileName}`,
+    })
+    const label = profile.label || getSettingsPresetLabel(parsed, fileName)
+    const teamsCount = Array.isArray(parsed?.teams) ? parsed.teams.length : 0
+    const quizzesCount = Array.isArray(parsed?.quizzes) ? parsed.quizzes.length : 0
+    const description = profile.description
+      ? `${profile.description} · ${teamsCount}팀 · ${quizzesCount}개 퀴즈`
+      : `event-configs/${fileName} · ${teamsCount}팀 · ${quizzesCount}개 퀴즈`
+
+    return {
+      id: `event-config:${path.basename(fileName, '.json')}`,
+      label,
+      description,
+      source: 'event-configs',
+      file: fileName,
+      loadUrl: `/api/settings-presets/event-configs/${encodeURIComponent(fileName)}`,
+      ...(profile.id ? { eventId: profile.id } : {}),
+      ...(profile.workerName ? { workerName: profile.workerName } : {}),
+      ...(profile.roomName ? { roomName: profile.roomName } : {}),
+      ...(profile.settingsFile ? { settingsFile: profile.settingsFile } : {}),
+    }
+  } catch {
+    return null
+  }
+}
+
+function getSettingsPresetLabel(config, fileName) {
+  const eventLabel = String(config?.event?.label || config?.event?.name || '').trim()
+  if (eventLabel) return eventLabel
+
+  const appTitle = String(config?.copy?.appTitle || '').trim()
+  if (appTitle) return appTitle
+
+  return path
+    .basename(fileName, '.json')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || fileName
+}
+
+function readEventConfigPreset(fileName) {
+  const filePath = getSafeEventConfigPresetPath(fileName)
+  if (!filePath) return null
+
+  return JSON.parse(readFileSync(filePath, 'utf8'))
+}
+
+function getSafeEventConfigPresetPath(fileName) {
+  const normalizedName = String(fileName || '').replace(/\\/g, '/').trim()
+  if (!normalizedName || normalizedName.includes('/') || normalizedName.includes('..') || !normalizedName.toLowerCase().endsWith('.json')) {
+    return ''
+  }
+
+  const resolved = path.resolve(eventConfigsDir, normalizedName)
+  const eventConfigsRoot = path.resolve(eventConfigsDir)
+  if (resolved !== path.join(eventConfigsRoot, normalizedName)) return ''
+  return resolved
+}
+
 function getEventRole(url) {
   const role = url.searchParams.get('role')
-  return role === 'vote' || role === 'wall' || role === 'admin' ? role : 'admin'
+  return role === 'vote' || role === 'wall' || role === 'admin' ? role : 'vote'
 }
 
 async function handleApi(request, response, url) {
@@ -2561,7 +2847,13 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === 'POST' && url.pathname === '/api/admin/login') {
-    const body = await readJson(request)
+    let body
+    try {
+      body = await readJson(request)
+    } catch (error) {
+      sendJsonReadError(response, error)
+      return
+    }
     const passcode = String(body.passcode || '').trim()
 
     if (!adminPasscode && isAdminPasscodeRequired(request)) {
@@ -2636,18 +2928,49 @@ async function handleApi(request, response, url) {
     return
   }
 
+  if (request.method === 'GET' && url.pathname === '/api/settings-presets') {
+    if (!isAdminAuthenticated(request)) {
+      sendJson(response, 401, { error: 'admin authentication required' })
+      return
+    }
+
+    sendJson(response, 200, getSettingsPresetManifest())
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname.startsWith('/api/settings-presets/event-configs/')) {
+    if (!isAdminAuthenticated(request)) {
+      sendJson(response, 401, { error: 'admin authentication required' })
+      return
+    }
+
+    try {
+      const fileName = decodeURIComponent(url.pathname.slice('/api/settings-presets/event-configs/'.length))
+      const preset = readEventConfigPreset(fileName)
+      if (!preset) {
+        sendJson(response, 404, { error: 'settings preset not found' })
+        return
+      }
+
+      sendJson(response, 200, preset)
+    } catch (error) {
+      sendJson(response, 400, { error: error.message || 'invalid settings preset' })
+    }
+    return
+  }
+
   if (request.method === 'GET' && url.pathname === '/events') {
     if (isProtectedRealtimeRequest(url) && !isAdminAuthenticated(request)) {
       sendJson(response, 401, { error: 'admin authentication required' })
       return
     }
 
-    response.writeHead(200, {
+    response.writeHead(200, withSecurityHeaders({
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
-    })
+    }))
     const role = getEventRole(url)
     const participantId = getRequestParticipantCookie(request)
     const slimMedia = url.searchParams.get('media') === 'slim'
@@ -2660,6 +2983,10 @@ async function handleApi(request, response, url) {
   if (request.method === 'GET' && url.pathname === '/api/team-config/apply') {
     if (!isAdminAuthenticated(request)) {
       sendJson(response, 401, { error: 'admin authentication required' })
+      return
+    }
+    if (!isSameOriginAdminRequest(request)) {
+      sendJson(response, 403, { error: 'same-origin admin request required' })
       return
     }
 
@@ -2678,12 +3005,34 @@ async function handleApi(request, response, url) {
     return
   }
 
-  if (isAdminProtectedPath(url.pathname) && !isAdminAuthenticated(request)) {
+  const adminProtectedPath = isAdminProtectedPath(url.pathname)
+  if (adminProtectedPath && !isAdminAuthenticated(request)) {
     sendJson(response, 401, { error: 'admin authentication required' })
     return
   }
+  if (requiresAdminRequestIntegrityCheck(url.pathname, request.method) && !isSameOriginAdminRequest(request)) {
+    sendJson(response, 403, { error: 'same-origin admin request required' })
+    return
+  }
 
-  const body = await readJson(request)
+  let body
+  try {
+    body = await readJson(request)
+  } catch (error) {
+    sendJsonReadError(response, error)
+    return
+  }
+
+  const retryAfterMs = consumePublicMutationRateLimit(request, url.pathname, body)
+  if (retryAfterMs > 0) {
+    sendJson(
+      response,
+      429,
+      { error: 'too many requests', retryAfterMs },
+      { 'Retry-After': String(Math.max(1, Math.ceil(retryAfterMs / 1000))) },
+    )
+    return
+  }
 
   if (url.pathname === '/api/vote') {
     if (closed) {
@@ -3254,7 +3603,7 @@ async function serveStatic(request, response, url) {
     return
   }
 
-  const requestedPath = pathname
+  const requestedPath = isHelpGuidePath(pathname) ? '/help.html' : pathname
   const hasExtension = path.extname(requestedPath).length > 0
   const candidate = hasExtension ? requestedPath : '/index.html'
   const filePath = path.normalize(path.join(distDir, candidate))
@@ -3270,10 +3619,10 @@ async function serveStatic(request, response, url) {
     if (!fileStat.isFile()) throw new Error('not a file')
 
     const content = await readFile(filePath)
-    response.writeHead(200, {
+    response.writeHead(200, withSecurityHeaders({
       'Content-Type': getContentType(filePath),
       'Cache-Control': hasExtension ? 'public, max-age=3600' : 'no-store',
-    })
+    }))
     response.end(content)
   } catch {
     response.writeHead(404)
@@ -3282,7 +3631,7 @@ async function serveStatic(request, response, url) {
 }
 
 function shouldServeAssetPath(pathname) {
-  return isKnownAppPath(pathname) || path.extname(pathname).length > 0
+  return isKnownAppPath(pathname) || isHelpGuidePath(pathname) || path.extname(pathname).length > 0
 }
 
 function isKnownAppPath(pathname) {
@@ -3299,6 +3648,11 @@ function isKnownAppPath(pathname) {
   }
 
   return normalizedPath.startsWith('/team/')
+}
+
+function isHelpGuidePath(pathname) {
+  const normalizedPath = pathname.replace(/\/+$/, '') || '/'
+  return normalizedPath === '/help' || normalizedPath === '/help/index.html'
 }
 
 function getContentType(filePath) {

@@ -261,6 +261,18 @@ type CheerHistoryResponse = {
 type ThemeMode = 'light' | 'stage'
 type TimerMode = 'duration' | 'targetTime'
 
+type EventProfile = {
+  id?: string
+  label?: string
+  workerName?: string
+  roomName?: string
+  settingsRoomName?: string
+  settingsFile?: string
+  description?: string
+  runtime?: string
+  configFile?: string
+}
+
 type EventState = {
   teams: Team[]
   participants: Participant[]
@@ -283,6 +295,7 @@ type EventState = {
   sessionId: number
   configRevision: number
   configUpdatedAt: number
+  eventProfile?: EventProfile
   settings: {
     showScoresToAudience: boolean
     starBudget: number
@@ -521,6 +534,7 @@ type AdminSessionState = {
 }
 type AppMode = 'admin' | 'vote' | 'wall' | 'team' | 'message' | 'quiz' | 'not-found'
 type AdminPanel = 'arena' | 'participants' | 'messages' | 'raffle' | 'teams' | 'quiz' | 'export'
+type ConfigSectionId = 'copy' | 'teams' | 'brand' | 'raffle' | 'quiz'
 type WallPanel = 'overview' | 'cheer' | 'raffle' | 'quiz' | 'qna'
 type WallSession = 'overview' | 'raffle' | 'showup' | 'qna' | 'quiz'
 type OptimisticQuestionReadState = Map<number, { revision: number; read: boolean }>
@@ -924,6 +938,7 @@ const logoKinds: LogoKind[] = ['orbit', 'beam', 'grid', 'wave', 'core']
 const QNA_WORD_CLOUD_WIDTH = 860
 const QNA_WORD_CLOUD_HEIGHT = 230
 const QNA_WORD_CLOUD_MAX_TERMS = 46
+const QNA_WORD_CLOUD_D3_MIN_TERMS = 18
 const qnaWordCloudRotateOptions = [0, 0, 0, 0, -5, 5, -8, 8, -11, 11] as const
 const qnaWordCloudColors = ['#d8bfd0', '#bdd8ef', '#cfc7ea', '#afd8d2', '#d7bfd8', '#bfcce8']
 let d3QnaCloudLoader: Promise<D3QnaCloudFactory> | null = null
@@ -1441,8 +1456,8 @@ const fallbackCopy: EventCopy = {
   audienceHeroTitle: '별 {starBudget}개를 원하는 팀에 나눠 담으세요.',
   audienceHeroSubtitle:
     '한 팀에는 최대 {maxStarsPerTeam}개까지, 마감 전까지 다시 조정할 수 있습니다. 별과 함께 응원 메시지를 남기면 경품 추첨에 자동응모됩니다.',
-  adminHeroTitle: '관리자 모드에서 실시간 별 현황을 공개합니다.',
-  adminHeroSubtitle: '모바일 사용자가 보낸 별과 응원 메시지가 이 화면에 즉시 반영됩니다.',
+  adminHeroTitle: '운영 콘솔에서 행사 진행 상태를 관리합니다.',
+  adminHeroSubtitle: 'DB room, 세션, 콘텐츠, 백업, 초기화 범위를 확인한 뒤 필요한 관리 작업만 실행합니다.',
   checkInEyeline: 'Check In',
   checkInTitle: '먼저 이름과 ID를 등록하세요.',
   teamVoteEyeline: 'Team Vote',
@@ -1810,6 +1825,12 @@ const fallbackState: EventState = {
   sessionId: 0,
   configRevision: 1,
   configUpdatedAt: Date.now(),
+  eventProfile: {
+    id: 'local-fallback',
+    label: 'Vibe Vote Arena',
+    roomName: 'local-fallback',
+    runtime: 'browser-fallback',
+  },
   settings: {
     showScoresToAudience: true,
     starBudget: DEFAULT_STAR_BUDGET,
@@ -1838,7 +1859,7 @@ const messageTimeFormatter = new Intl.DateTimeFormat('ko-KR', {
 function App() {
   const mode = getAppMode()
   const [participantId, setParticipantId] = useState(getOrCreateParticipantId)
-  const protectedDisplayMode = mode === 'admin' || mode === 'wall'
+  const protectedDisplayMode = mode === 'admin' || mode === 'wall' || mode === 'team'
   const adminSession = useAdminSession(protectedDisplayMode)
   const allowProtectedRealtime = !protectedDisplayMode || adminSession.authenticated
   const eventStateEnabled = mode !== 'not-found' && (!protectedDisplayMode || adminSession.authenticated)
@@ -1900,6 +1921,13 @@ function App() {
     setDepartment(nextDepartment)
     storeValue(departmentKey, nextDepartment)
   }
+  const publicParticipantSessionActive = Boolean(
+    name.trim() ||
+      group.trim() ||
+      department.trim() ||
+      getStoredValue(registeredKey) ||
+      getStoredValue(registeredSessionKey),
+  )
 
   const switchVoteParticipant = () => {
     clearStoredValue(storageKey)
@@ -1982,7 +2010,7 @@ function App() {
           return null
         }}
         adminSession={protectedDisplayMode ? adminSession : undefined}
-        onVoteLogout={mode === 'vote' || mode === 'message' || mode === 'quiz' ? switchVoteParticipant : undefined}
+        onVoteLogout={(mode === 'vote' || mode === 'message' || mode === 'quiz') && publicParticipantSessionActive ? switchVoteParticipant : undefined}
       />
       {mode === 'admin' ? (
         <AdminView state={state} connection={connection} post={post} />
@@ -2217,19 +2245,19 @@ function syncAdminPanelRoute(panel: AdminPanel | null) {
 }
 
 function getDocumentTitle(mode: AppMode, wallPanel: WallPanel) {
-  if (mode === 'wall') return `vibe-compete/wall${wallPanel === 'overview' ? '' : `/${wallPanel}`}`
+  if (mode === 'wall') return `vibe-arena/wall${wallPanel === 'overview' ? '' : `/${wallPanel}`}`
   if (mode === 'admin') {
     const panel = getInitialAdminPanel()
-    return `vibe-compete/admin${panel ? `/${panel}` : ''}`
+    return `vibe-arena/admin${panel ? `/${panel}` : ''}`
   }
   if (mode === 'team') {
     const teamId = getTeamEditRouteId()
-    return `vibe-compete/team${teamId ? `/${teamId}` : ''}`
+    return `vibe-arena/team${teamId ? `/${teamId}` : ''}`
   }
-  if (mode === 'message') return 'vibe-compete/message'
-  if (mode === 'quiz') return 'vibe-compete/quiz'
-  if (mode === 'not-found') return 'vibe-compete/not-found'
-  return 'vibe-compete/vote'
+  if (mode === 'message') return 'vibe-arena/message'
+  if (mode === 'quiz') return 'vibe-arena/quiz'
+  if (mode === 'not-found') return 'vibe-arena/not-found'
+  return 'vibe-arena/vote'
 }
 
 function getWallShowupButtonLabel(copy: EventCopy) {
@@ -2363,7 +2391,7 @@ function Header({
           <>
             <a className={`role-nav-link ${adminOverviewActive ? 'active' : ''}`} href="/admin" onClick={(event) => navigateAdminAfterRaffle(event, '/admin')}>
               <RadioTower size={15} />
-              실시간 현황
+              운영 대시보드
             </a>
             <a className={`role-nav-link ${adminPanel === 'teams' ? 'active' : ''}`} href="/admin?panel=teams" onClick={(event) => navigateAdminAfterRaffle(event, '/admin?panel=teams')}>
               <Settings2 size={15} />
@@ -2425,6 +2453,10 @@ function Header({
             <a className="role-nav-link" href="/message" target="_blank" rel="noreferrer">
               <CircleHelp size={15} />
               QnA 화면 미리보기
+            </a>
+            <a className="role-nav-link" href="/help" target="_blank" rel="noreferrer">
+              <CircleHelp size={15} />
+              운영 가이드
             </a>
             {adminSession ? (
               <>
@@ -2579,9 +2611,9 @@ function Header({
           <span>{connectionLabel}</span>
         </div>
         {(mode === 'vote' || isMessageLikeMode) && onVoteLogout ? (
-          <button type="button" className="session-logout-button" onClick={onVoteLogout}>
+          <button type="button" className="session-logout-button" onClick={onVoteLogout} title="현재 참여 정보를 지우고 다시 입장">
             <LogOut size={15} />
-            Logout
+            다시 입장
           </button>
         ) : null}
       </div>
@@ -4357,13 +4389,22 @@ function AdminView({
   const [draftDurationMinutes, setDraftDurationMinutes] = useState(String(durationMinutes))
   const [draftTargetTime, setDraftTargetTime] = useState(() => targetTime || formatKstTime(Date.now() + durationMinutes * 60 * 1000))
   const totalRegistered = state.participants.length
-  const totalDynamicVoters = state.participants.filter((person) => sumStars(person.allocations) > 0).length
-  const totalDynamicStars = state.participants.reduce((sum, person) => sum + sumStars(person.allocations), 0)
   const totalEligibleParticipants = state.participants.filter((person) => {
     const spent = sumStars(person.allocations)
     if (spent <= 0) return false
     return state.cheers.some((message) => message.participantId === person.id && !message.hidden)
   }).length
+  const totalQuestions = state.questionTotalCount ?? state.questions.length
+  const visibleQuestions = state.visibleQuestionTotalCount ?? state.questions.filter((question) => !question.hidden).length
+  const hiddenQuestions = Math.max(0, totalQuestions - visibleQuestions)
+  const unreadQuestions = state.questions.filter((question) => !question.hidden && !question.read).length
+  const visibleCheers = state.visibleCheerTotalCount ?? state.cheers.filter((message) => !message.hidden).length
+  const totalCheers = state.cheerTotalCount ?? state.cheers.length
+  const hiddenCheers = Math.max(0, totalCheers - visibleCheers)
+  const quizAnswerCount = state.quiz.answers.length
+  const activeWallSessionCount = wallEnabledPanels.length
+  const connectionLabel = connection === 'live' ? 'Live' : connection === 'connecting' ? '연결 중' : '오프라인'
+  const eventRoomName = state.eventProfile?.roomName || state.eventProfile?.settingsRoomName || 'default'
 
   const openAdminPanel = (panel: AdminPanel | null) => {
     setActivePanel(panel)
@@ -4372,7 +4413,7 @@ function AdminView({
 
   useEffect(() => {
     syncAdminPanelRoute(visiblePanel)
-    document.title = visiblePanel ? `vibe-compete/admin/${visiblePanel}` : 'vibe-compete/admin'
+    document.title = visiblePanel ? `vibe-arena/admin/${visiblePanel}` : 'vibe-arena/admin'
   }, [visiblePanel])
 
   const openQuizPanel = () => {
@@ -4567,24 +4608,166 @@ function AdminView({
             <strong>{totalRegistered}</strong>
           </div>
           <div>
+            <CircleHelp size={18} />
+            <span>Q&A 질문</span>
+            <strong>{totalQuestions}</strong>
+          </div>
+          <div>
             <Check size={18} />
-            <span>응모 완료</span>
-            <strong>{totalEligibleParticipants}</strong>
+            <span>퀴즈 답변</span>
+            <strong>{quizAnswerCount}</strong>
           </div>
           <div>
-            <Users size={18} />
-            <span>별 사용</span>
-            <strong>{totalDynamicVoters}</strong>
-          </div>
-          <div>
-            <Star size={18} />
-            <span>실시간 별</span>
-            <strong>{totalDynamicStars}</strong>
+            <LockKeyhole size={18} />
+            <span>운영 상태</span>
+            <strong>{state.closed ? '마감' : '진행'}</strong>
           </div>
           <button type="button" onClick={closeVote}>
             {state.closed ? '투표 재개' : '투표 마감'}
           </button>
         </div>
+      </section>
+
+      <EventOpsPolicyNotice state={state} />
+
+      <section className="admin-ops-grid" aria-label="관리 작업">
+        <section className="admin-ops-card admin-ops-card-primary">
+          <div className="admin-ops-card-head">
+            <div>
+              <p className="section-kicker">Management Desk</p>
+              <h2>필수 관리 작업</h2>
+            </div>
+            <span className={`admin-ops-status ${connection}`}>{connectionLabel}</span>
+          </div>
+          <div className="admin-ops-action-list">
+            <button type="button" onClick={() => openAdminPanel('teams')}>
+              <Settings2 size={16} />
+              운영 콘텐츠
+            </button>
+            <button type="button" onClick={openQuizPanel}>
+              <CircleHelp size={16} />
+              퀴즈 운영
+            </button>
+            <button type="button" onClick={openRafflePanel}>
+              <Ticket size={16} />
+              행운권 추첨
+            </button>
+            <button type="button" onClick={() => openAdminPanel('export')}>
+              <FileSpreadsheet size={16} />
+              결과 내보내기
+            </button>
+            <a href="/help" target="_blank" rel="noreferrer">
+              <CircleHelp size={16} />
+              운영 가이드
+            </a>
+          </div>
+        </section>
+
+        <section className="admin-ops-card">
+          <div className="admin-ops-card-head">
+            <div>
+              <p className="section-kicker">Wall Control</p>
+              <h2>송출 세션</h2>
+            </div>
+            <strong>{activeWallSessionCount}/{wallSessionOptions.length}</strong>
+          </div>
+          <div className="admin-session-list">
+            {wallSessionOptions.map((option) => (
+              <span key={option.value} className={wallEnabledPanels.includes(option.value) ? 'enabled' : ''}>
+                {option.label}
+              </span>
+            ))}
+          </div>
+          <div className="admin-ops-link-row">
+            <a href="/wall" target="_blank" rel="noreferrer">
+              <RadioTower size={15} />
+              Wall 열기
+            </a>
+            <a href="/message" target="_blank" rel="noreferrer">
+              <MessageCircle size={15} />
+              Q&A 참여 화면
+            </a>
+          </div>
+        </section>
+
+        <section className="admin-ops-card">
+          <div className="admin-ops-card-head">
+            <div>
+              <p className="section-kicker">Data Desk</p>
+              <h2>관리 대상</h2>
+            </div>
+            <strong>{eventRoomName}</strong>
+          </div>
+          <div className="admin-ops-data-grid">
+            <button type="button" onClick={() => openAdminPanel('participants')}>
+              <Users size={15} />
+              <span>참여자</span>
+              <strong>{totalRegistered}</strong>
+            </button>
+            <button type="button" onClick={() => openAdminPanel('messages')}>
+              <MessageCircle size={15} />
+              <span>응원 숨김</span>
+              <strong>{hiddenCheers}</strong>
+            </button>
+            <button type="button" onClick={() => openAdminPanel('messages')}>
+              <CircleHelp size={15} />
+              <span>Q&A 미확인</span>
+              <strong>{unreadQuestions}</strong>
+            </button>
+            <button type="button" onClick={() => openAdminPanel('raffle')}>
+              <Gift size={15} />
+              <span>응모 완료</span>
+              <strong>{totalEligibleParticipants}</strong>
+            </button>
+          </div>
+          <p className="admin-ops-muted">
+            숨김 Q&A {hiddenQuestions}건. 메시지 본문과 별 순위는 기본 관리자 화면에 노출하지 않고, 상세 관리와 wall에서만 확인합니다.
+          </p>
+        </section>
+
+        <section className="admin-ops-card admin-ops-danger-card">
+          <div className="admin-ops-card-head">
+            <div>
+              <p className="section-kicker">Backup & Reset</p>
+              <h2>백업과 초기화</h2>
+            </div>
+            <Download size={18} />
+          </div>
+          <div className="admin-ops-link-row">
+            <button type="button" onClick={() => void downloadArchiveJson()}>
+              <Download size={15} />
+              JSON 백업
+            </button>
+            <button type="button" onClick={() => exportResultsWorkbook(state)}>
+              <FileSpreadsheet size={15} />
+              XLSX 저장
+            </button>
+            <button type="button" onClick={() => downloadCurrentSettingsJson(state)}>
+              <Save size={15} />
+              settings 저장
+            </button>
+          </div>
+          <div className="admin-reset-grid">
+            <button type="button" onClick={resetVotesOnly}>
+              투표만 Reset
+            </button>
+            <button type="button" onClick={resetRaffleHistory}>
+              행운권 이력
+            </button>
+            <button type="button" onClick={resetQuizHistory}>
+              퀴즈 이력
+            </button>
+            <button type="button" onClick={resetQnaQuestions} disabled={totalQuestions <= 0}>
+              Q&A 질문
+            </button>
+            <button type="button" onClick={seedTestData}>
+              테스트 데이터
+            </button>
+            <button type="button" className="danger" onClick={resetAll}>
+              전체 Reset
+            </button>
+          </div>
+        </section>
       </section>
 
       <section className="admin-control-panel" aria-label="운영 설정">
@@ -4804,81 +4987,12 @@ function AdminView({
             <Clock3 size={16} />
             설정 적용
           </button>
-          <button type="button" className="secondary-control" onClick={resetVotesOnly}>
-            투표만 Reset
-          </button>
-          <button type="button" className="secondary-control" onClick={resetRaffleHistory}>
-            행운권 이력 Reset
-          </button>
-          <button type="button" className="secondary-control" onClick={resetQuizHistory}>
-            퀴즈 이력 Reset
-          </button>
-          <button type="button" className="secondary-control danger-control" onClick={resetQnaQuestions} disabled={!state.questions.length}>
-            Q&A 질문 Reset
-          </button>
-          <button type="button" className="secondary-control danger-control" onClick={resetAll}>
-            전체 Reset
-          </button>
-          <button type="button" className="secondary-control" onClick={seedTestData}>
-            테스트 데이터
-          </button>
         </form>
         <p className="control-note">
           현재 중복 응모 방지는 별명과 내부 관리 ID 기준으로 판단합니다. Q&A 화면에서는 별명만 입력받고, 운영 식별자는 브라우저별 익명 ID로 자동 관리합니다.
         </p>
       </section>
 
-      <section className="admin-grid">
-        <section className="arena-panel" aria-label="실시간 투표 현황">
-          <div className="section-heading">
-            <div>
-              <p className="section-kicker">Live Arena Wall</p>
-              <h2>실시간 별 현황</h2>
-            </div>
-            <div className="arena-heading-actions">
-              <button type="button" className="panel-open-button" onClick={() => openAdminPanel('arena')}>
-                <Maximize2 size={14} />
-                전체화면
-              </button>
-              <div className={`connection ${connection}`}>
-                <span className="live-dot" />
-                <span>{connection === 'live' ? 'Live' : connection === 'connecting' ? '연결 중' : '오프라인'}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="arena-stage">
-            <FloatingStars />
-            <div className="ranking-list">
-              {state.teams.map((team) => {
-                const recentEvent = state.voteEvents.find((event) => event.teamId === team.id)
-                return <TeamRow key={team.id} team={team} recentEvent={recentEvent} starBudget={starBudget} maxStarsPerTeam={maxStarsPerTeam} />
-              })}
-            </div>
-          </div>
-        </section>
-
-        <aside className="admin-side">
-          <CheerWall state={state} onOpen={() => setShowCheerConstellation(true)} />
-          <VoteActivityFeed state={state} />
-          <ParticipantListPanel state={state} onOpen={() => openAdminPanel('participants')} />
-          <CheerModerationPanel state={state} post={post} onOpen={() => openAdminPanel('messages')} />
-          <TeamConfigPanel state={state} onOpen={() => openAdminPanel('teams')} />
-          <QuizAdminPanel state={state} post={post} onOpen={openQuizPanel} />
-          <ResultExportPanel state={state} onOpen={() => openAdminPanel('export')} />
-          <RafflePanel
-            state={state}
-            raffleRule={raffleRule}
-            isDrawing={isDrawing}
-            onRuleChange={changeRaffleRule}
-            onStart={startDrawing}
-            onStop={stopDrawing}
-            onOpen={openRafflePanel}
-            onWinnerCountChange={changeRaffleWinnerCount}
-            onPrizeChange={changeRafflePrize}
-          />
-        </aside>
-      </section>
     </>
   )
 }
@@ -4901,17 +5015,29 @@ function PublicWallView({
   const [selectedTeamId, setSelectedTeamId] = useState<string>('all')
   const [wallSplit, setWallSplit] = useState(70)
   const wallGridRef = useRef<HTMLDivElement | null>(null)
+  const wallResizeFrameRef = useRef<number | null>(null)
+  const pendingWallResizeClientXRef = useRef<number | null>(null)
   const setWallPanel = onWallPanelChange
   const setShowCheerConstellation = onShowCheerConstellationChange
   const starBudget = getStarBudget(state)
   const maxStarsPerTeam = getMaxStarsPerTeam(state)
   const cheerNameMode = getCheerNameMode(state)
-  const selectedTeam = selectedTeamId === 'all' ? null : state.teams.find((team) => team.id === selectedTeamId) ?? null
+  const candidateSelectedTeam = selectedTeamId === 'all' ? null : state.teams.find((team) => team.id === selectedTeamId) ?? null
+  const effectiveSelectedTeamId = selectedTeamId === 'all' || candidateSelectedTeam ? selectedTeamId : 'all'
+  const selectedTeam = effectiveSelectedTeamId === 'all' ? null : candidateSelectedTeam
   const raffleRule = state.raffleStage.rule
   const isDrawing = state.raffleStage.drawing
   const wallStateReady = hasResolvedEventState(state)
   const wallSplitMin = 54
   const wallSplitMax = 82
+
+  useEffect(() => {
+    return () => {
+      if (wallResizeFrameRef.current !== null) {
+        window.cancelAnimationFrame(wallResizeFrameRef.current)
+      }
+    }
+  }, [])
 
   const startDrawing = () => {
     setWallPanel('raffle')
@@ -4968,12 +5094,24 @@ function PublicWallView({
     setWallSplit(clamp(nextSplit, wallSplitMin, wallSplitMax))
   }
 
+  const scheduleWallSplitResize = (clientX: number) => {
+    pendingWallResizeClientXRef.current = clientX
+    if (wallResizeFrameRef.current !== null) return
+
+    wallResizeFrameRef.current = window.requestAnimationFrame(() => {
+      wallResizeFrameRef.current = null
+      const pendingClientX = pendingWallResizeClientXRef.current
+      pendingWallResizeClientXRef.current = null
+      if (pendingClientX !== null) resizeWallSplit(pendingClientX)
+    })
+  }
+
   const handleWallResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault()
     resizeWallSplit(event.clientX)
     document.body.classList.add('is-wall-resizing')
 
-    const handleMove = (moveEvent: PointerEvent) => resizeWallSplit(moveEvent.clientX)
+    const handleMove = (moveEvent: PointerEvent) => scheduleWallSplitResize(moveEvent.clientX)
     const handleUp = () => {
       document.body.classList.remove('is-wall-resizing')
       window.removeEventListener('pointermove', handleMove)
@@ -5081,7 +5219,7 @@ function PublicWallView({
                         showScoreStack={false}
                         showEventLabel={false}
                         showMembersInline
-                        selected={selectedTeamId === team.id}
+                        selected={effectiveSelectedTeamId === team.id}
                         onSelect={() => selectTeamMessages(team.id)}
                       />
                     )
@@ -5109,7 +5247,7 @@ function PublicWallView({
 
             <PublicCheerBoard
               state={state}
-              selectedTeamId={selectedTeamId}
+              selectedTeamId={effectiveSelectedTeamId}
               onSelectAll={() => setSelectedTeamId('all')}
               cheerNameMode={cheerNameMode}
               large={wallPanel === 'cheer'}
@@ -5633,22 +5771,19 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
   const [focusedQuestionId, setFocusedQuestionId] = useState<number | null>(null)
   const [optimisticReadQuestionVersions, setOptimisticReadQuestionVersions] = useState<OptimisticQuestionReadState>(() => new Map())
   const [selectedCloudWord, setSelectedCloudWord] = useState('')
-  const allVisibleQuestions = useMemo(() => {
-    return state.questions
-      .filter((question) => !question.hidden)
-      .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)
-      .slice(0, 90)
-  }, [state.questions])
-  const visibleQuestions = selectedCloudWord
-    ? allVisibleQuestions.filter((question) => questionMatchesQnaCloudWord(question, selectedCloudWord))
-    : allVisibleQuestions
+  const allVisibleQuestions = getStableVisibleQnaQuestions(state.questions, 90)
+  const visibleQuestions = useMemo(() => {
+    return selectedCloudWord
+      ? allVisibleQuestions.filter((question) => questionMatchesQnaCloudWord(question, selectedCloudWord))
+      : allVisibleQuestions
+  }, [allVisibleQuestions, selectedCloudWord])
   const latestQuestionId = visibleQuestions[0]?.id ?? 0
   const visibleQuestionTotal = state.visibleQuestionTotalCount ?? visibleQuestions.length
   const focusedQuestion = focusedQuestionId ? visibleQuestions.find((question) => question.id === focusedQuestionId) || null : null
   const focusedQuestionIsRead = focusedQuestion ? isQnaQuestionRead(focusedQuestion, optimisticReadQuestionVersions) : false
   const qnaWallFontScale = getQnaWallFontScale(state)
-  const wordCloudSignature = allVisibleQuestions.map((question) => `${question.id}:${question.text}`).join('|')
-  const wordCloudSeeds = useMemo(() => buildQnaWordCloudSeeds(allVisibleQuestions), [allVisibleQuestions])
+  const unreadQuestionCount = allVisibleQuestions.filter((question) => !isQnaQuestionRead(question, optimisticReadQuestionVersions)).length
+  const { signature: wordCloudSignature, seeds: wordCloudSeeds } = getStableQnaWordCloudSeeds(allVisibleQuestions)
 
   useEffect(() => {
     stackRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -5713,6 +5848,7 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
         <div className="qna-board-counter" aria-label="공개 질문 수">
           <span>{state.copy.wallMetricQuestions}</span>
           <strong>{selectedCloudWord ? visibleQuestions.length : visibleQuestionTotal}</strong>
+          <em>{unreadQuestionCount > 0 ? `미확인 ${unreadQuestionCount}` : '모두 확인'}</em>
         </div>
       </div>
 
@@ -5837,6 +5973,54 @@ function PublicQnaBoard({ state, post }: { state: EventState; post: PostEventSta
       ) : null}
     </section>
   )
+}
+
+let stableVisibleQnaQuestionSnapshot: { signature: string; questions: QuestionMessage[] } = {
+  signature: '',
+  questions: [],
+}
+let stableQnaWordCloudSeedSnapshot: { signature: string; seeds: QnaWordCloudSeed[] } = {
+  signature: '',
+  seeds: [],
+}
+
+function getStableVisibleQnaQuestions(sourceQuestions: QuestionMessage[], limit: number) {
+  const snapshot = buildVisibleQnaQuestionSnapshot(sourceQuestions, limit)
+  if (stableVisibleQnaQuestionSnapshot.signature !== snapshot.signature) {
+    stableVisibleQnaQuestionSnapshot = snapshot
+  }
+  return stableVisibleQnaQuestionSnapshot.questions
+}
+
+function buildVisibleQnaQuestionSnapshot(sourceQuestions: QuestionMessage[], limit: number) {
+  const questions = sourceQuestions
+    .filter((question) => !question.hidden)
+    .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)
+    .slice(0, limit)
+  const signature = questions.map((question) => {
+    return [
+      question.id,
+      question.createdAt,
+      question.editedAt || 0,
+      question.read ? 1 : 0,
+      question.author,
+      question.text,
+    ].join(':')
+  }).join('|')
+
+  return { questions, signature }
+}
+
+function getStableQnaWordCloudSeeds(questions: QuestionMessage[]) {
+  const signature = questions.map((question) => `${question.id}:${question.text}`).join('|')
+  if (stableQnaWordCloudSeedSnapshot.signature !== signature) {
+    stableQnaWordCloudSeedSnapshot = {
+      signature,
+      seeds: buildQnaWordCloudSeeds(questions),
+    }
+  }
+
+  return stableQnaWordCloudSeedSnapshot
 }
 
 function getQnaQuestionRevision(question: QuestionMessage) {
@@ -6168,6 +6352,11 @@ function useD3QnaWordCloudItems(seeds: QnaWordCloudSeed[], signature: string) {
       return
     }
 
+    if (seeds.length < QNA_WORD_CLOUD_D3_MIN_TERMS) {
+      startTransition(() => setItems(fallbackItems))
+      return
+    }
+
     let cancelled = false
     let layout: D3QnaCloudLayout<D3QnaCloudWord> | null = null
 
@@ -6330,15 +6519,19 @@ function PublicCheerBoard({
 }) {
   const [focusedCheerId, setFocusedCheerId] = useState<number | null>(null)
   const teamMap = useMemo(() => new Map(state.teams.map((team) => [team.id, team])), [state.teams])
-  const visibleCheers = state.cheers.filter((message) => !message.hidden)
+  const visibleCheers = useMemo(() => state.cheers.filter((message) => !message.hidden), [state.cheers])
   const visibleCheerTotal = state.visibleCheerTotalCount ?? visibleCheers.length
-  const selectedCheers = visibleCheers
-    .filter((message) => selectedTeamId === 'all' || message.teamId === selectedTeamId)
-    .slice(0, large ? 80 : 36)
+  const selectedCheers = useMemo(() => {
+    return visibleCheers
+      .filter((message) => selectedTeamId === 'all' || message.teamId === selectedTeamId)
+      .slice(0, large ? 80 : 36)
+  }, [large, selectedTeamId, visibleCheers])
   const selectedTeam = selectedTeamId === 'all' ? null : teamMap.get(selectedTeamId)
-  const focusedCheer = focusedCheerId
-    ? selectedCheers.find((message) => message.id === focusedCheerId) || visibleCheers.find((message) => message.id === focusedCheerId) || null
-    : null
+  const focusedCheer = useMemo(() => {
+    return focusedCheerId
+      ? selectedCheers.find((message) => message.id === focusedCheerId) || visibleCheers.find((message) => message.id === focusedCheerId) || null
+      : null
+  }, [focusedCheerId, selectedCheers, visibleCheers])
   const toggleCheerMessage = (messageId: number) => {
     setFocusedCheerId((current) => (current === messageId ? null : messageId))
   }
@@ -6607,129 +6800,6 @@ function TeamRow({
   )
 }
 
-function CheerWall({ state, onOpen }: { state: EventState; onOpen: () => void }) {
-  const teamMap = new Map(state.teams.map((team) => [team.id, team]))
-  const visibleCheers = state.cheers.filter((message) => !message.hidden)
-
-  return (
-    <section className="message-wall" aria-label="응원 메시지">
-      <button type="button" className="message-wall-open" onClick={onOpen}>
-        <div className="section-heading compact">
-          <div>
-            <p className="section-kicker">Cheer Bubble</p>
-            <h2>응원 메시지</h2>
-          </div>
-          <span>Showup</span>
-        </div>
-        <div className="bubble-stream">
-          {visibleCheers.map((message) => {
-            const team = teamMap.get(message.teamId) ?? state.teams[0]
-            return (
-              <div className="bubble" key={message.id} style={{ '--team-color': team.color } as CSSProperties}>
-                <strong>{team.name}</strong>
-                <span>{message.text}</span>
-                <small>{message.author}</small>
-              </div>
-            )
-          })}
-        </div>
-      </button>
-    </section>
-  )
-}
-
-function VoteActivityFeed({ state }: { state: EventState }) {
-  const teamMap = new Map(state.teams.map((team) => [team.id, team]))
-
-  return (
-    <section className="vote-feed-panel" aria-label="실시간 별 움직임">
-      <div className="section-heading compact">
-        <div>
-          <p className="section-kicker">Star Motion</p>
-          <h2>별 움직임</h2>
-        </div>
-        <Star size={20} />
-      </div>
-
-      <div className="vote-event-list" aria-live="polite">
-        {state.voteEvents.length ? (
-          state.voteEvents.slice(0, 18).map((event) => {
-            const team = teamMap.get(event.teamId) ?? state.teams[0]
-
-            return (
-              <div
-                className={`vote-event-row ${event.delta > 0 ? 'gain' : 'loss'}`}
-                key={event.id}
-                style={{ '--team-color': team.color } as CSSProperties}
-              >
-                <strong>{event.delta > 0 ? `+${event.delta}★` : `${event.delta}★`}</strong>
-                <span>{team.name}</span>
-                <small>{event.author}</small>
-              </div>
-            )
-          })
-        ) : (
-          <p className="empty-state compact">아직 별 이동이 없습니다.</p>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function ParticipantListPanel({ state, onOpen }: { state: EventState; onOpen: () => void }) {
-  const participants = useMemo(() => getParticipantSummaries(state), [state])
-  const activeCount = participants.filter((person) => person.spent > 0 || person.cheers.total > 0).length
-
-  return (
-    <section className="participant-panel" aria-label="실참여자 리스트">
-      <div className="section-heading compact">
-        <div>
-          <p className="section-kicker">Live Participants</p>
-          <h2>실참여자 리스트</h2>
-        </div>
-        <div className="participant-counts">
-          <span>{participants.length} 등록</span>
-          <span>{activeCount} 참여</span>
-          <button type="button" onClick={onOpen}>
-            <Maximize2 size={13} />
-            전체
-          </button>
-        </div>
-      </div>
-
-      <div className="participant-list">
-        {participants.length ? (
-          participants.map((person) => (
-            <article className={`participant-row ${person.statusClass}`} key={person.id}>
-              <div className="participant-identity">
-                <strong>{person.name}</strong>
-                <span>{getParticipantManagementLabel(person)}</span>
-              </div>
-              <div className="participant-metrics" aria-label={`${person.name} 참여 현황`}>
-                <span>
-                  <Star size={13} />
-                  {person.spent}
-                </span>
-                <span>
-                  <Megaphone size={13} />
-                  {person.cheers.visible}/{person.cheers.total}
-                </span>
-              </div>
-              <p>{person.allocationSummary}</p>
-              <div className="participant-foot">
-                <small>최근 {formatMessageTime(person.updatedAt)} · {getParticipantManagementLabel(person)}</small>
-                <em>{person.status}</em>
-              </div>
-            </article>
-          ))
-        ) : (
-          <p className="empty-state compact">아직 등록된 참여자가 없습니다.</p>
-        )}
-      </div>
-    </section>
-  )
-}
-
 function ParticipantDetailPanel({
   state,
   post,
@@ -6863,74 +6933,6 @@ function ParticipantDetailPanel({
       )}
       </div>
     </div>
-  )
-}
-
-function CheerModerationPanel({
-  state,
-  post,
-  onOpen,
-}: {
-  state: EventState
-  post: PostEventState
-  onOpen: () => void
-}) {
-  const teamMap = new Map(state.teams.map((team) => [team.id, team]))
-  const visibleCount = state.cheers.filter((message) => !message.hidden).length
-  const hiddenCount = state.cheers.length - visibleCount
-
-  const toggleMessage = (message: CheerMessage) => {
-    post('/api/cheer/moderate', {
-      messageId: message.id,
-      hidden: !message.hidden,
-    })
-  }
-
-  return (
-    <section className="moderation-panel" aria-label="응원 메시지 관리">
-      <div className="section-heading compact">
-        <div>
-          <p className="section-kicker">Message Control</p>
-          <h2>메시지 관리</h2>
-        </div>
-        <div className="moderation-counts">
-          <span>{visibleCount} 공개</span>
-          <span>{hiddenCount} 숨김</span>
-          <button type="button" onClick={onOpen}>
-            <Maximize2 size={13} />
-            관리
-          </button>
-        </div>
-      </div>
-
-      <div className="moderation-list">
-        {state.cheers.length ? (
-          state.cheers.map((message) => {
-            const team = teamMap.get(message.teamId) ?? state.teams[0]
-
-            return (
-              <div
-                className={`moderation-item ${message.hidden ? 'hidden' : ''}`}
-                key={message.id}
-                style={{ '--team-color': team.color } as CSSProperties}
-              >
-                <div>
-                  <strong>{message.author}</strong>
-                  <span>{team.name}</span>
-                </div>
-                <p>{message.text}</p>
-                <button type="button" onClick={() => toggleMessage(message)}>
-                  {message.hidden ? <Eye size={15} /> : <EyeOff size={15} />}
-                  {message.hidden ? '공개' : '숨김'}
-                </button>
-              </div>
-            )
-          })
-        ) : (
-          <p className="empty-state">아직 관리할 응원 메시지가 없습니다.</p>
-        )}
-      </div>
-    </section>
   )
 }
 
@@ -7093,92 +7095,60 @@ function MessageManagerDetail({
   )
 }
 
-function TeamConfigPanel({ state, onOpen }: { state: EventState; onOpen: () => void }) {
-  return (
-    <section className="team-config-panel" aria-label="운영 콘텐츠 관리">
-      <div className="section-heading compact">
-        <div>
-          <p className="section-kicker">{state.copy.contentPanelEyeline}</p>
-          <h2>{state.copy.contentPanelTitle}</h2>
-        </div>
-        <button type="button" className="panel-open-button" onClick={onOpen}>
-          <Settings2 size={14} />
-          관리
-        </button>
-      </div>
-      <div className="config-summary">
-        <strong>{state.teams.length}개 팀</strong>
-        <span>{state.copy.contentPanelSummary}</span>
-      </div>
-    </section>
-  )
-}
-
-function ResultExportPanel({ state, onOpen }: { state: EventState; onOpen?: () => void }) {
-  const totalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
-
-  return (
-    <section className="result-export-panel" aria-label="결과 내보내기">
-      <div className="section-heading compact">
-        <div>
-          <p className="section-kicker">Export</p>
-          <h2>결과 내보내기</h2>
-        </div>
-        <div className="result-export-actions">
-          {onOpen ? (
-            <button type="button" className="panel-open-button" onClick={onOpen}>
-              <Maximize2 size={14} />
-              열기
-            </button>
-          ) : null}
-          <button type="button" className="panel-open-button" onClick={() => exportResultsWorkbook(state)}>
-            <FileSpreadsheet size={14} />
-            XLSX
-          </button>
-        </div>
-      </div>
-      <div className="config-summary">
-        <strong>{totalStars}개 별</strong>
-        <span>팀별 결과, 참여자, 응원 메시지, 추첨 결과를 엑셀 파일로 저장합니다.</span>
-      </div>
-    </section>
-  )
-}
-
 function ResultExportDetailPanel({ state }: { state: EventState }) {
+  const [archiveStatus, setArchiveStatus] = useState('')
   const participants = useMemo(() => getParticipantSummaries(state), [state])
   const totalStars = state.teams.reduce((sum, team) => sum + team.totalStars, 0)
   const visibleCheers = state.cheers.filter((message) => !message.hidden).length
   const hiddenCheers = state.cheers.length - visibleCheers
+  const roomName = state.eventProfile?.roomName || state.eventProfile?.settingsRoomName || 'local-node'
+  const eventLabel = state.eventProfile?.label || state.copy.appTitle
 
   return (
     <div className="result-export-detail">
       <div className="export-summary-grid" aria-label="내보내기 요약">
         <div>
-          <span>팀</span>
-          <strong>{state.teams.length}</strong>
+          <span>행사</span>
+          <strong>{eventLabel}</strong>
         </div>
         <div>
-          <span>참여자</span>
-          <strong>{participants.length}</strong>
+          <span>DB room</span>
+          <strong>{roomName}</strong>
         </div>
         <div>
-          <span>누적 별</span>
-          <strong>{totalStars}</strong>
+          <span>참여자 / 팀</span>
+          <strong>{participants.length} / {state.teams.length}</strong>
         </div>
         <div>
-          <span>응원 메시지</span>
-          <strong>{visibleCheers}/{state.cheers.length}</strong>
+          <span>별 / 메시지</span>
+          <strong>{totalStars} / {visibleCheers}</strong>
         </div>
       </div>
-      <button type="button" className="export-primary-button" onClick={() => exportResultsWorkbook(state)}>
-        <FileSpreadsheet size={18} />
-        엑셀 파일로 저장
-      </button>
+      <div className="export-action-row">
+        <button type="button" className="export-primary-button" onClick={() => exportResultsWorkbook(state)}>
+          <FileSpreadsheet size={18} />
+          XLSX 결과 저장
+        </button>
+        <button type="button" className="export-secondary-button" onClick={() => void downloadArchiveJson(setArchiveStatus)}>
+          <Download size={18} />
+          원본 JSON 백업
+        </button>
+        <button type="button" className="export-secondary-button" onClick={() => downloadCurrentSettingsJson(state)}>
+          <Save size={18} />
+          settings 저장
+        </button>
+      </div>
       <p className="config-help">
-        행사 요약, 팀별 결과, 참여자, 응원 메시지, 추첨 결과, 퀴즈 답변이 한 파일에 들어갑니다.
-        숨김 메시지는 별도 상태로 표시되며 삭제된 참여자는 내보내기 대상에서 제외됩니다.
+        XLSX는 행사 요약, 팀별 결과, 참여자, 응원 메시지, 추첨 결과, 퀴즈 답변을 표로 정리합니다.
+        원본 JSON은 현재 DB room의 참가자, 별 이벤트, 응원 메시지, Q&A, 퀴즈 답변, 당첨 이력을 그대로 보관합니다.
+        settings는 다음 행사에서 다시 불러와 수정할 운영 설정입니다.
       </p>
+      <div className="export-archive-note" aria-label="보존 기준">
+        <strong>행사 종료 보존 기준</strong>
+        <span>원본 JSON + XLSX + settings 파일을 같은 폴더에 보관하세요.</span>
+        <span>Reset은 현재 DB room만 초기화하므로, 종료 전 JSON 백업을 먼저 받는 것이 안전합니다.</span>
+      </div>
+      {archiveStatus ? <p className="config-status">{archiveStatus}</p> : null}
       <div className="export-preview-list" aria-label="내보내기 미리보기">
         {participants.slice(0, 12).map((person) => (
           <span key={person.id}>
@@ -7194,6 +7164,268 @@ function ResultExportDetailPanel({ state }: { state: EventState }) {
   )
 }
 
+function EventOpsPolicyNotice({ state }: { state: EventState }) {
+  const profile = state.eventProfile
+  const eventLabel = profile?.label || state.copy.appTitle
+  const runtimeLabel = profile?.runtime === 'cloudflare-workers' ? 'Cloudflare Worker' : profile?.runtime === 'node' ? '로컬 Node 서버' : '연결 확인 중'
+  const currentRoomName = profile?.roomName || '확인 전'
+  const settingsRoomName = profile?.settingsRoomName || profile?.roomName || '지정 없음'
+  const workerName = profile?.workerName || '배포 설정 확인'
+  const settingsFile = profile?.settingsFile || profile?.configFile || 'settings.json'
+
+  return (
+    <section className="ops-policy-panel" aria-label="행사 운영 규칙">
+      <div className="ops-policy-head">
+        <div>
+          <p className="section-kicker">Ops Guard</p>
+          <h2>행사 운영 규칙</h2>
+        </div>
+        <div className="ops-policy-current" aria-label="현재 운영 대상">
+          <span>{runtimeLabel}</span>
+          <strong>{currentRoomName}</strong>
+        </div>
+      </div>
+      <div className="ops-policy-grid">
+        <div>
+          <span>행사 기준</span>
+          <strong>{eventLabel}</strong>
+          <em>Worker {workerName} · 설정 {settingsFile}</em>
+        </div>
+        <div>
+          <span>DB room</span>
+          <strong>{currentRoomName}</strong>
+          <em>Reset은 이 room의 운영 데이터에만 적용됩니다.</em>
+        </div>
+        <div>
+          <span>Preset</span>
+          <strong>{settingsRoomName}</strong>
+          <em>불러오기는 DB를 바꾸지 않고 현재 room에 설정만 적용합니다.</em>
+        </div>
+        <div>
+          <span>행사 종료</span>
+          <strong>export + settings</strong>
+          <em>/api/export JSON, XLSX, settings.json을 함께 보관합니다.</em>
+        </div>
+        <div>
+          <span>관리자 비밀번호</span>
+          <strong>ADMIN_PASSCODE</strong>
+          <em>로컬은 환경변수, Cloudflare는 secret으로 설정합니다. 변경 후 기존 관리자 쿠키는 다시 로그인해야 합니다.</em>
+        </div>
+        <div>
+          <span>동시 운영</span>
+          <strong>worker + room 분리</strong>
+          <em>aa/bb Worker가 서로 다른 ARENA_ROOM_NAME을 쓰면 DB가 섞이지 않습니다.</em>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+type CopyGroupDefinition = (typeof copyGroups)[number]
+
+const copyPreviewTokenValues = {
+  starBudget: 10,
+  maxStarsPerTeam: 5,
+}
+
+function CopyGroupPreview({ group, copy }: { group: CopyGroupDefinition; copy: EventCopy }) {
+  const text = (key: keyof EventCopy, fallback = '비어 있음') => getCopyPreviewNode(copy, key, fallback)
+
+  return (
+    <aside className="copy-live-preview" aria-label={`${group.title} 화면 미리보기`}>
+      <div className="copy-preview-toolbar">
+        <span>{group.eyeline}</span>
+        <strong>{group.title} 프리뷰</strong>
+      </div>
+
+      {group.id === 'global' ? (
+        <div className="copy-preview-screen">
+          <div className="copy-preview-appbar">
+            <CopyPreviewLogo copy={copy} />
+            <div>
+              <span>{text('audienceEyeline', 'Audience')}</span>
+              <strong>{text('appTitle', 'Vibe Vote Arena')}</strong>
+            </div>
+          </div>
+          <div className="copy-preview-pill-row">
+            <span className="copy-preview-pill">/vote · {text('audienceEyeline')}</span>
+            <span className="copy-preview-pill">/admin · {text('adminEyeline')}</span>
+            <span className="copy-preview-pill">/wall · {text('wallEyeline')}</span>
+          </div>
+        </div>
+      ) : null}
+
+      {group.id === 'vote' ? (
+        <div className="copy-preview-screen is-phone">
+          <div className="copy-preview-appbar">
+            <CopyPreviewLogo copy={copy} />
+            <div>
+              <span>{text('audienceEyeline')}</span>
+              <strong>{text('appTitle', 'Vibe Vote Arena')}</strong>
+            </div>
+          </div>
+          <div className="copy-preview-hero">
+            <h4>{text('audienceHeroTitle')}</h4>
+            <p>{text('audienceHeroSubtitle')}</p>
+          </div>
+          <div className="copy-preview-card">
+            <p>{text('checkInEyeline')}</p>
+            <strong>{text('checkInTitle')}</strong>
+            <small>{text('registrationReady')}</small>
+          </div>
+          <div className="copy-preview-card">
+            <p>{text('teamVoteEyeline')}</p>
+            <strong>{text('teamVoteTitle')}</strong>
+            <span className="copy-preview-action"><Star size={14} /> {text('cheerButtonLabel')}</span>
+            <small>{text('raffleGuide')}</small>
+          </div>
+        </div>
+      ) : null}
+
+      {group.id === 'admin' ? (
+        <div className="copy-preview-screen is-console">
+          <div className="copy-preview-appbar">
+            <Settings2 size={18} />
+            <div>
+              <span>{text('adminEyeline')}</span>
+              <strong>{text('appTitle', 'Vibe Vote Arena')}</strong>
+            </div>
+          </div>
+          <div className="copy-preview-hero">
+            <h4>{text('adminHeroTitle')}</h4>
+            <p>{text('adminHeroSubtitle')}</p>
+          </div>
+          <div className="copy-preview-card">
+            <p>{text('contentPanelEyeline')}</p>
+            <strong>{text('contentPanelTitle')}</strong>
+            <small>{text('contentPanelSummary')}</small>
+          </div>
+        </div>
+      ) : null}
+
+      {group.id === 'wall' ? (
+        <div className="copy-preview-screen is-wall">
+          <div className="copy-preview-appbar">
+            <RadioTower size={18} />
+            <div>
+              <span>{text('wallEyeline')}</span>
+              <strong>{text('appTitle', 'Vibe Vote Arena')}</strong>
+            </div>
+          </div>
+          <div className="copy-preview-pill-row">
+            <span className="copy-preview-pill">{text('wallOverviewLabel')}</span>
+            <span className="copy-preview-pill">{text('wallQnaLabel')}</span>
+            <span className="copy-preview-pill">{text('wallQuizLabel')}</span>
+          </div>
+          <div className="copy-preview-metrics">
+            <span><Star size={13} /> {text('wallMetricStars')}</span>
+            <span><MessageCircle size={13} /> {text('wallMetricCheers')}</span>
+            <span><CircleHelp size={13} /> {text('wallMetricQuestions')}</span>
+          </div>
+          <div className="copy-preview-card compact">
+            <p>{text('wallArenaEyeline')}</p>
+            <strong>{text('wallArenaTitle')}</strong>
+          </div>
+          <div className="copy-preview-card compact">
+            <p>{text('wallQnaEyeline')}</p>
+            <strong>{text('wallQnaTitle')}</strong>
+            <small>{text('wallQnaEmpty')}</small>
+          </div>
+        </div>
+      ) : null}
+
+      {group.id === 'qna' ? (
+        <div className="copy-preview-screen is-phone">
+          <div className="copy-preview-appbar">
+            <MessageCircle size={18} />
+            <div>
+              <span>{text('qnaRoomEyeline')}</span>
+              <strong>{text('qnaRoomTitle')}</strong>
+            </div>
+          </div>
+          <div className="copy-preview-hero">
+            <h4>{text('qnaRoomTarget')}</h4>
+            <p>{text('qnaRoomSummary')}</p>
+          </div>
+          <div className="copy-preview-card">
+            <p>{text('qnaLoginTitle')}</p>
+            <small>{text('qnaLoginReady')}</small>
+            <span className="copy-preview-action"><LogIn size={14} /> {text('qnaLoginButtonLabel')}</span>
+          </div>
+          <div className="copy-preview-card">
+            <p>{text('qnaPromptEyeline')}</p>
+            <strong>{text('qnaPromptTitle')}</strong>
+            <small>{text('qnaPromptSummary')}</small>
+            <span className="copy-preview-input">{text('qnaInputPlaceholder')}</span>
+            <span className="copy-preview-action"><Send size={14} /> {text('qnaSendLabel')}</span>
+          </div>
+        </div>
+      ) : null}
+
+      {group.id === 'showup' ? (
+        <div className="copy-preview-screen is-stage">
+          <div className="copy-preview-appbar">
+            <Sparkles size={18} />
+            <div>
+              <span>{text('showupEyeline')}</span>
+              <strong>{text('showupTitle')}</strong>
+            </div>
+          </div>
+          <span className="copy-preview-action"><RefreshCcw size={14} /> {text('showupShuffleLabel')}</span>
+          <div className="copy-preview-card compact">
+            <p>{text('wallRaffleEyeline')}</p>
+            <strong>{text('wallRaffleTitle')}</strong>
+          </div>
+          <div className="copy-preview-card">
+            <p>{text('rafflePanelEyeline')}</p>
+            <strong>{text('rafflePanelTitle')}</strong>
+            <div className="copy-preview-pill-row">
+              <span className="copy-preview-pill">{text('raffleRuleLabelAll')}</span>
+              <span className="copy-preview-pill">{text('raffleRuleLabelBig')}</span>
+            </div>
+            <span className="copy-preview-action"><Ticket size={14} /> {text('raffleStartButtonLabel')}</span>
+          </div>
+        </div>
+      ) : null}
+
+      {group.id === 'quiz' ? (
+        <div className="copy-preview-screen is-stage">
+          <div className="copy-preview-appbar">
+            <CircleHelp size={18} />
+            <div>
+              <span>{text('wallQuizEyeline')}</span>
+              <strong>{text('wallQuizTitle')}</strong>
+            </div>
+          </div>
+          <div className="copy-preview-card">
+            <p>{text('quizStandbyHeadline')}</p>
+            <strong>{text('quizStandbySubhead')}</strong>
+            <small>{text('quizStandbyHint')}</small>
+          </div>
+          <div className="copy-preview-card compact">
+            <p>{text('quizCurrentQuestionLabel')}</p>
+            <strong>{text('quizPendingQuestion')}</strong>
+            <small>{text('quizAnswerEmpty')}</small>
+          </div>
+        </div>
+      ) : null}
+
+      <small className="copy-preview-note">입력 중인 draft 기준 · 저장 전 확인용</small>
+    </aside>
+  )
+}
+
+function CopyPreviewLogo({ copy }: { copy: EventCopy }) {
+  const firstLetter = Array.from((copy.appTitle || 'Vibe').trim())[0] || 'V'
+
+  return <span className="copy-preview-logo">{firstLetter}</span>
+}
+
+function getCopyPreviewNode(copy: EventCopy, key: keyof EventCopy, fallback: string): ReactNode {
+  const value = formatCopy(String(copy[key] ?? ''), copyPreviewTokenValues).trim()
+  return value || <span className="copy-preview-empty-text">{fallback}</span>
+}
+
 function TeamConfigDetail({
   state,
   post,
@@ -7206,19 +7438,93 @@ function TeamConfigDetail({
   const [draftQuizzes, setDraftQuizzes] = useState(() => createQuizDrafts(state.quizBank))
   const [statusText, setStatusText] = useState('')
   const [savingConfig, setSavingConfig] = useState(false)
+  const [settingsPresets, setSettingsPresets] = useState<SettingsPreset[]>([])
+  const [localSettingsSnapshots, setLocalSettingsSnapshots] = useState<LocalSettingsSnapshot[]>(() => readLocalSettingsSnapshots())
+  const [settingsSnapshotName, setSettingsSnapshotName] = useState('')
+  const [selectedPresetId, setSelectedPresetId] = useState('')
+  const [activeConfigSection, setActiveConfigSection] = useState<ConfigSectionId>('copy')
+  const [activeCopyGroupId, setActiveCopyGroupId] = useState(copyGroups[0]?.id || '')
+  const [selectedTeamEditorIndex, setSelectedTeamEditorIndex] = useState(0)
+  const [selectedQuizIndex, setSelectedQuizIndex] = useState(0)
   const teamEditorRefs = useRef<Record<number, HTMLElement | null>>({})
   const saveTarget = getConfigSaveTarget()
-  const configSections = [
-    { id: 'brand-prizes', label: '브랜드/상품 이미지', meta: '상단 로고' },
-    { id: 'raffle', label: '행운권 관련', meta: '상품·룰 문구' },
-    { id: 'copy', label: '화면 문구 관리', meta: 'vote/admin/wall' },
-    { id: 'teams', label: '팀별 정보', meta: `${draftTeams.length}팀` },
-    { id: 'quiz', label: '퀴즈', meta: `${draftQuizzes.length}개` },
+  const availableSettingsPresets = useMemo(
+    () => uniqueSettingsPresets([...localSettingsSnapshots.map(localSettingsSnapshotToPreset), ...settingsPresets]),
+    [localSettingsSnapshots, settingsPresets],
+  )
+  const effectiveSelectedPresetId = selectedPresetId || availableSettingsPresets[0]?.id || ''
+  const selectedSettingsPreset = availableSettingsPresets.find((entry) => entry.id === effectiveSelectedPresetId)
+  const selectedLocalSettingsSnapshot = selectedSettingsPreset?.localSnapshotId
+    ? localSettingsSnapshots.find((snapshot) => snapshot.id === selectedSettingsPreset.localSnapshotId)
+    : undefined
+  const selectedPresetRoomMismatch = isSettingsPresetRoomMismatch(selectedSettingsPreset, state.eventProfile)
+  const currentRoomName = state.eventProfile?.roomName || ''
+  const currentSettingsRoomName = state.eventProfile?.settingsRoomName || ''
+  const selectedTeamIndex = clamp(selectedTeamEditorIndex, 0, Math.max(0, draftTeams.length - 1))
+  const selectedQuizSafeIndex = clamp(selectedQuizIndex, 0, Math.max(0, draftQuizzes.length - 1))
+  const activeCopyGroup = copyGroups.find((group) => group.id === activeCopyGroupId) || copyGroups[0]
+  const selectedTeamDraft = draftTeams[selectedTeamIndex] || draftTeams[0]
+  const selectedSavedTeam = selectedTeamDraft
+    ? state.teams.find((team) => team.id === selectedTeamDraft.id) || state.teams[selectedTeamIndex]
+    : undefined
+  const selectedSavedTeamDraft = selectedSavedTeam ? createTeamDraft(selectedSavedTeam, getConfigOrder(selectedSavedTeam)) : undefined
+  const selectedTeamPhotoChanged = Boolean(
+    selectedTeamDraft &&
+      selectedSavedTeamDraft &&
+      !isSameTeamPhotoTuning(pickTeamPhotoTuning(selectedTeamDraft), pickTeamPhotoTuning(selectedSavedTeamDraft)),
+  )
+  const selectedQuizDraft = draftQuizzes[selectedQuizSafeIndex] || draftQuizzes[0]
+  const configSections: Array<{ id: ConfigSectionId; label: string; meta: string }> = [
+    { id: 'copy', label: '화면 문구', meta: activeCopyGroup?.title || 'vote/admin/wall' },
+    { id: 'teams', label: '팀별 정보', meta: selectedTeamDraft ? selectedTeamDraft.name || `Team ${selectedTeamIndex + 1}` : `${draftTeams.length}팀` },
+    { id: 'brand', label: '브랜드', meta: '상단 로고' },
+    { id: 'raffle', label: '행운권', meta: '상품·룰 문구' },
+    { id: 'quiz', label: '퀴즈', meta: selectedQuizDraft ? `${selectedQuizSafeIndex + 1}/${draftQuizzes.length}` : `${draftQuizzes.length}개` },
   ]
 
-  const scrollConfigSection = (id: string) => {
-    document.getElementById(`config-section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const activeConfigMeta = configSections.find((section) => section.id === activeConfigSection) || configSections[0]
+  const openConfigSection = (id: ConfigSectionId) => {
+    setActiveConfigSection(id)
   }
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadPresetManifest() {
+      const presets: SettingsPreset[] = []
+
+      try {
+        const response = await fetch('/api/settings-presets', { credentials: 'same-origin', cache: 'no-store' })
+        if (response.ok) {
+          presets.push(...normalizeSettingsPresetManifest((await response.json()) as SettingsPresetManifest))
+        }
+      } catch {
+        // The static preset manifest below still works without the API.
+      }
+
+      try {
+        const response = await fetch('/prev_settings/settings_manifest.json', { credentials: 'same-origin', cache: 'no-store' })
+        if (response.ok) {
+          presets.push(...normalizeSettingsPresetManifest((await response.json()) as SettingsPresetManifest))
+        }
+      } catch {
+        // Missing public presets should not block event-config presets.
+      }
+
+      if (cancelled) return
+
+      const uniquePresets = uniqueSettingsPresets(presets)
+      const firstLocalPresetId = readLocalSettingsSnapshots()[0]?.id
+      setSettingsPresets(uniquePresets)
+      setSelectedPresetId((current) => current || (firstLocalPresetId ? `local:${firstLocalPresetId}` : uniquePresets[0]?.id || ''))
+    }
+
+    void loadPresetManifest()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const updateCopy = (key: keyof EventCopy, value: string) => {
     setDraftCopy((current) => ({ ...current, [key]: value }))
@@ -7247,16 +7553,37 @@ function TeamConfigDetail({
     })
   }
 
-  const updateTeam = (index: number, field: string, value: string) => {
+  const updateTeamFields = (index: number, fields: Partial<TeamConfigDraft>) => {
     preserveTeamEditorPosition(index, () => {
       setDraftTeams((current) =>
-        current.map((team, teamIndex) => (teamIndex === index ? { ...team, [field]: value } : team)),
+        current.map((team, teamIndex) => (teamIndex === index ? { ...team, ...fields } : team)),
       )
     })
   }
 
+  const updateTeam = (index: number, field: string, value: string) => {
+    updateTeamFields(index, { [field]: value } as Partial<TeamConfigDraft>)
+  }
+
   const updateTeamLogo = (index: number, value: string) => {
     updateTeam(index, 'logoFile', normalizeLogoSourceValue(value))
+  }
+
+  const resetTeamPhotoTuning = (index: number) => {
+    updateTeamFields(index, defaultTeamPhotoTuning)
+    setStatusText(`${draftTeams[index]?.name || `Team ${index + 1}`} 사진 표시값을 운영 기본값으로 맞췄습니다.`)
+  }
+
+  const revertTeamPhotoTuning = (index: number) => {
+    const draft = draftTeams[index]
+    const savedTeam = draft ? state.teams.find((team) => team.id === draft.id) || state.teams[index] : undefined
+    if (!savedTeam) {
+      resetTeamPhotoTuning(index)
+      return
+    }
+
+    updateTeamFields(index, pickTeamPhotoTuning(createTeamDraft(savedTeam, getConfigOrder(savedTeam))))
+    setStatusText(`${draft?.name || `Team ${index + 1}`} 사진 표시값을 저장된 상태로 되돌렸습니다.`)
   }
 
   const uploadTeamLogo = async (index: number, file: File | undefined) => {
@@ -7316,6 +7643,66 @@ function TeamConfigDetail({
     setStatusText(`${removedTitle}을(를) 목록에서 제거했습니다. 저장 및 반영을 눌러 적용하세요.`)
   }
 
+  const addQuiz = () => {
+    const nextIndex = draftQuizzes.length
+    setDraftQuizzes((current) => [...current, createBlankQuizDraft(current.length)])
+    setSelectedQuizIndex(nextIndex)
+    setActiveConfigSection('quiz')
+    setStatusText(`퀴즈 ${nextIndex + 1}번 초안을 추가했습니다. 저장 및 반영을 눌러 적용하세요.`)
+  }
+
+  const buildDraftSettingsPayload = (): TeamInfoUpload => {
+    const event = getSettingsEventProfileForSave(state.eventProfile)
+    return {
+      ...(event ? { event } : {}),
+      copy: normalizeCopyForSave(draftCopy),
+      settings: state.settings,
+      teams: draftTeams.map((team, index) => teamDraftToConfig(team, index)),
+      quizzes: draftQuizzes.map((quiz, index) => quizDraftToConfig(quiz, index)),
+    }
+  }
+
+  const saveNamedSettingsSnapshot = () => {
+    const label = (settingsSnapshotName.trim() || getDefaultSettingsSnapshotName(state.eventProfile)).slice(0, 80)
+    const payload = buildDraftSettingsPayload()
+    const event = payload.event || {}
+    const snapshot: LocalSettingsSnapshot = {
+      id: createLocalSettingsSnapshotId(label),
+      label,
+      eventId: String(event.id || '').trim() || undefined,
+      roomName: String(event.roomName || state.eventProfile?.roomName || '').trim() || undefined,
+      settingsFile: String(event.settingsFile || '').trim() || undefined,
+      description: `${draftTeams.length}팀 · 퀴즈 ${draftQuizzes.length}개 · ${formatSettingsSnapshotTime(Date.now())}`,
+      createdAt: Date.now(),
+      payload,
+    }
+
+    try {
+      const nextSnapshots = normalizeLocalSettingsSnapshots([snapshot, ...localSettingsSnapshots])
+      writeLocalSettingsSnapshots(nextSnapshots)
+      setLocalSettingsSnapshots(nextSnapshots)
+      setSelectedPresetId(`local:${snapshot.id}`)
+      setSettingsSnapshotName('')
+      setStatusText(`${label} 설정을 이 브라우저 보관함에 저장했습니다. 다음 운영 때 드롭다운에서 바로 불러올 수 있습니다.`)
+    } catch {
+      setStatusText('브라우저 보관함 용량이 부족해 이름으로 저장하지 못했습니다. settings.json 저장으로 파일 백업을 먼저 남겨주세요.')
+    }
+  }
+
+  const deleteNamedSettingsSnapshot = () => {
+    if (!selectedLocalSettingsSnapshot) return
+    const nextSnapshots = localSettingsSnapshots.filter((snapshot) => snapshot.id !== selectedLocalSettingsSnapshot.id)
+    try {
+      writeLocalSettingsSnapshots(nextSnapshots)
+      setLocalSettingsSnapshots(nextSnapshots)
+      const nextSelectedPreset = uniqueSettingsPresets([...nextSnapshots.map(localSettingsSnapshotToPreset), ...settingsPresets])[0]
+      setSelectedPresetId(nextSelectedPreset?.id || '')
+      setStatusText(`${selectedLocalSettingsSnapshot.label} 보관 설정을 삭제했습니다.`)
+    } catch {
+      setStatusText('보관 설정을 삭제하지 못했습니다. 브라우저 저장소 상태를 확인해주세요.')
+    }
+  }
+
   const saveConfig = async () => {
     if (savingConfig) return
 
@@ -7323,11 +7710,7 @@ function TeamConfigDetail({
     setStatusText(`${saveTarget.label}에 저장하고 열린 화면에 반영하는 중입니다...`)
 
     try {
-      const payload = compactTeamInfoUploadForSave({
-        copy: normalizeCopyForSave(draftCopy),
-        teams: draftTeams.map((team, index) => teamDraftToConfig(team, index)),
-        quizzes: draftQuizzes.map((quiz, index) => quizDraftToConfig(quiz, index)),
-      }, state)
+      const payload = compactTeamInfoUploadForSave(buildDraftSettingsPayload(), state)
       const response = await saveTeamConfigPayload(post, payload)
 
       if (response) {
@@ -7374,12 +7757,62 @@ function TeamConfigDetail({
     }
   }
 
+  const loadPresetConfig = async () => {
+    const preset = selectedSettingsPreset
+    if (!preset || savingConfig) return
+    if (isSettingsPresetRoomMismatch(preset, state.eventProfile)) {
+      const currentRoom = state.eventProfile?.roomName || '확인되지 않음'
+      const presetRoom = preset.roomName || '지정 없음'
+      const confirmed = window.confirm(
+        `선택한 프리셋의 권장 DB room은 "${presetRoom}"이고 현재 실행 중인 DB room은 "${currentRoom}"입니다.\n\n불러오기를 계속하면 DB를 바꾸지 않고 현재 room에 설정만 적용합니다. 계속할까요?`,
+      )
+      if (!confirmed) {
+        setStatusText('프리셋 불러오기를 취소했습니다. 현재 DB room은 변경되지 않았습니다.')
+        return
+      }
+    }
+
+    try {
+      setSavingConfig(true)
+      setStatusText(`${preset.label} 설정을 ${saveTarget.label}에 적용하는 중입니다...`)
+
+      let parsed: TeamInfoUpload
+      if (preset.localSnapshotId) {
+        const snapshot = localSettingsSnapshots.find((entry) => entry.id === preset.localSnapshotId)
+        if (!snapshot) throw new Error('브라우저 보관함에서 설정을 찾지 못했습니다.')
+        parsed = normalizeTeamInfoUpload(snapshot.payload as unknown as Record<string, unknown>)
+      } else {
+        const presetUrl = getSettingsPresetLoadUrl(preset)
+        if (!presetUrl) throw new Error('불러올 설정 파일 경로가 올바르지 않습니다.')
+
+        const response = await fetch(presetUrl, { credentials: 'same-origin', cache: 'no-store' })
+        if (!response.ok) throw new Error(`설정 파일을 불러오지 못했습니다. (${response.status})`)
+
+        parsed = normalizeTeamInfoUpload((await response.json()) as Record<string, unknown>)
+      }
+      const nextState = await saveTeamConfigPayload(post, compactTeamInfoUploadForSave(parsed, state))
+
+      if (nextState) {
+        setDraftCopy({ ...fallbackCopy, ...nextState.copy })
+        setDraftTeams(createTeamDrafts(nextState.teams))
+        setDraftQuizzes(createQuizDrafts(nextState.quizBank))
+        setStatusText(`${preset.label} 설정을 적용했습니다. ${getConfigSavedStatus(nextState)}`)
+      } else {
+        setStatusText(getConfigSaveFailureMessage(new Error('no response'), saveTarget))
+      }
+    } catch (error) {
+      setStatusText(error instanceof SyntaxError ? '설정 JSON 파일을 읽지 못했습니다.' : getConfigSaveFailureMessage(error, saveTarget))
+    } finally {
+      setSavingConfig(false)
+    }
+  }
+
   return (
     <div className="team-config-detail">
       <div className="config-toolbar">
         <label className={`file-import-button ${savingConfig ? 'is-disabled' : ''}`} aria-disabled={savingConfig}>
           <Upload size={16} />
-          team_infos.zip / JSON 업로드
+          settings.json / ZIP 업로드
           <input
             type="file"
             accept=".zip,.json,application/json,application/zip"
@@ -7390,9 +7823,9 @@ function TeamConfigDetail({
             }}
           />
         </label>
-        <button type="button" onClick={() => downloadTeamInfoJson({ copy: draftCopy, teams: draftTeams, quizzes: draftQuizzes })}>
+        <button type="button" onClick={() => downloadTeamInfoJson({ eventProfile: state.eventProfile, copy: draftCopy, settings: state.settings, teams: draftTeams, quizzes: draftQuizzes })}>
           <Download size={16} />
-          로컬 JSON 저장
+          settings.json 저장
         </button>
         <button type="button" className="primary-action" onClick={saveConfig} disabled={savingConfig}>
           <Save size={16} />
@@ -7400,27 +7833,111 @@ function TeamConfigDetail({
         </button>
       </div>
 
+      <div className="settings-preset-loader">
+        <div className="named-settings-saver">
+          <label>
+            <span>새 보관 이름</span>
+            <input
+              type="text"
+              value={settingsSnapshotName}
+              placeholder={getDefaultSettingsSnapshotName(state.eventProfile)}
+              disabled={savingConfig}
+              maxLength={80}
+              onChange={(event) => setSettingsSnapshotName(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                event.preventDefault()
+                saveNamedSettingsSnapshot()
+              }}
+            />
+          </label>
+          <button type="button" onClick={saveNamedSettingsSnapshot} disabled={savingConfig}>
+            <Save size={16} />
+            이름으로 보관
+          </button>
+          <span>현재 편집 draft를 이 브라우저에 저장합니다. 다른 PC로 옮길 때는 settings.json 저장을 함께 사용합니다.</span>
+        </div>
+
+        {availableSettingsPresets.length ? (
+          <div className="preset-load-row">
+            <label>
+              <span>저장된 설정</span>
+              <select value={effectiveSelectedPresetId} onChange={(event) => setSelectedPresetId(event.currentTarget.value)} disabled={savingConfig}>
+                {availableSettingsPresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" onClick={loadPresetConfig} disabled={savingConfig || !effectiveSelectedPresetId}>
+              <Upload size={16} />
+              불러오기
+            </button>
+            {selectedLocalSettingsSnapshot ? (
+              <button type="button" className="subtle-danger-action" onClick={deleteNamedSettingsSnapshot} disabled={savingConfig}>
+                <Trash2 size={16} />
+                보관 삭제
+              </button>
+            ) : null}
+            <div className={`settings-preset-meta ${selectedPresetRoomMismatch ? 'has-warning' : ''}`}>
+              <span>현재 DB room: <strong>{currentRoomName || '확인 전'}</strong></span>
+              {currentSettingsRoomName && currentSettingsRoomName !== currentRoomName ? (
+                <span>현재 설정 권장 room: <strong>{currentSettingsRoomName}</strong></span>
+              ) : null}
+              <span>프리셋 room: <strong>{selectedSettingsPreset?.roomName || '지정 없음'}</strong></span>
+              {selectedSettingsPreset?.source === 'browser-snapshot' ? <span>출처: 이 브라우저 보관함</span> : null}
+              {selectedSettingsPreset?.settingsFile ? <span>파일: {selectedSettingsPreset.settingsFile}</span> : null}
+              {selectedSettingsPreset?.description ? <span>{selectedSettingsPreset.description}</span> : null}
+              {selectedPresetRoomMismatch ? <strong>room이 다릅니다. 불러오면 DB를 바꾸지 않고 현재 room에 설정만 적용됩니다.</strong> : null}
+            </div>
+          </div>
+        ) : (
+          <div className="settings-preset-meta">
+            <span>아직 불러올 설정이 없습니다. 이름으로 보관하거나 settings.json을 업로드해 운영 초안을 만들 수 있습니다.</span>
+          </div>
+        )}
+      </div>
+
       <div className="config-save-mode" data-mode={saveTarget.kind}>
         <strong>현재 저장 대상: {saveTarget.label}</strong>
         <span>{saveTarget.description}</span>
       </div>
       <p className="config-help">
-        ZIP 구조는 <code>team_infos/team_info.json</code>과 <code>team_infos/logos/T1-logo.png</code> 형식을 권장합니다.
-        로고는 png, jpg, webp, svg, ico를 받을 수 있습니다. 사내망에서 outbound 요청이 막히면 먼저 <strong>로컬 JSON 저장</strong>으로 백업한 뒤,
+        ZIP 구조는 <code>settings/settings.json</code>과 <code>settings/logos/T1-logo.png</code> 형식을 권장합니다.
+        기존 <code>team_infos/team_info.json</code> 구조도 계속 받을 수 있습니다.
+        <code>settings.json</code>에는 화면 문구, 운영 설정, 팀 정보, 퀴즈 목록이 함께 저장됩니다.
+        로고는 png, jpg, webp, svg, ico를 받을 수 있습니다. 사내망에서 outbound 요청이 막히면 먼저 <strong>settings.json 저장</strong>으로 백업한 뒤,
         인터넷 연결이 가능한 관리자 PC에서 다시 업로드하세요.
       </p>
       {statusText ? <p className={`config-status ${savingConfig ? 'is-pending' : ''}`}>{statusText}</p> : null}
 
-      <nav className="config-section-nav" aria-label="운영 콘텐츠 섹션 이동">
+      <div className="config-workbench-head">
+        <div>
+          <p className="section-kicker">Content Workbench</p>
+          <h3>{activeConfigMeta.label}</h3>
+          <span>{activeConfigMeta.meta}</span>
+        </div>
+      </div>
+
+      <div className="config-workbench">
+      <nav className="config-section-nav" aria-label="운영 콘텐츠 섹션 선택">
         {configSections.map((section) => (
-          <button type="button" key={section.id} onClick={() => scrollConfigSection(section.id)}>
+          <button
+            type="button"
+            key={section.id}
+            className={activeConfigSection === section.id ? 'active' : ''}
+            onClick={() => openConfigSection(section.id)}
+          >
             <strong>{section.label}</strong>
             <span>{section.meta}</span>
           </button>
         ))}
       </nav>
 
-      <section id="config-section-brand-prizes" className="visual-config-grid config-scroll-section" aria-label="브랜드와 상품 이미지 관리">
+      <div className="config-workspace">
+      {activeConfigSection === 'brand' ? (
+      <section id="config-section-brand" className="visual-config-grid config-scroll-section" aria-label="브랜드 이미지 관리">
         <div className="section-heading compact">
           <div>
             <p className="section-kicker">Visual Assets</p>
@@ -7498,7 +8015,20 @@ function TeamConfigDetail({
               updateCopy(keyByField[field], value)
             }}
           />
-          <div id="config-section-raffle" className="raffle-config-stack config-scroll-section">
+        </div>
+      </section>
+      ) : null}
+
+      {activeConfigSection === 'raffle' ? (
+      <section id="config-section-raffle" className="visual-config-grid config-scroll-section" aria-label="행운권 상품과 문구 관리">
+        <div className="section-heading compact">
+          <div>
+            <p className="section-kicker">Lucky Draw Assets</p>
+            <h2>행운권 상품과 룰</h2>
+          </div>
+        </div>
+        <div className="visual-config-list">
+          <div className="raffle-config-stack">
             {rafflePrizeImageFields.map((field) => (
               <ImageSourceField
                 key={field.key}
@@ -7554,7 +8084,9 @@ function TeamConfigDetail({
           </div>
         </div>
       </section>
+      ) : null}
 
+      {activeConfigSection === 'copy' ? (
       <section id="config-section-copy" className="copy-config-grid config-scroll-section" aria-label="화면 문구 관리">
         <div className="section-heading compact">
           <div>
@@ -7562,28 +8094,46 @@ function TeamConfigDetail({
             <h2>화면별 문구 관리</h2>
           </div>
         </div>
-        {copyGroups.map((group) => (
-          <article className="copy-config-group" key={group.id}>
+        <div className="module-picker copy-module-picker" aria-label="문구 그룹 선택">
+          {copyGroups.map((group) => (
+            <button
+              type="button"
+              key={group.id}
+              className={activeCopyGroup?.id === group.id ? 'active' : ''}
+              onClick={() => setActiveCopyGroupId(group.id)}
+            >
+              <strong>{group.title}</strong>
+              <span>{group.eyeline}</span>
+            </button>
+          ))}
+        </div>
+        {activeCopyGroup ? (
+          <article className="copy-config-group" key={activeCopyGroup.id}>
             <div className="copy-group-heading">
-              <p className="section-kicker">{group.eyeline}</p>
-              <h3>{group.title}</h3>
-              <span>{group.description}</span>
+              <p className="section-kicker">{activeCopyGroup.eyeline}</p>
+              <h3>{activeCopyGroup.title}</h3>
+              <span>{activeCopyGroup.description}</span>
             </div>
-            <div className="copy-field-grid">
-              {group.keys.map((key) => (
-                <label key={key}>
-                  <span>
-                    <strong>{copyLabels[key]}</strong>
-                    {copyHelp[key] ? <em>{copyHelp[key]}</em> : null}
-                  </span>
-                  <textarea value={draftCopy[key]} onChange={(event) => updateCopy(key, event.target.value)} />
-                </label>
-              ))}
+            <div className="copy-group-body">
+              <div className="copy-field-grid">
+                {activeCopyGroup.keys.map((key) => (
+                  <label key={key}>
+                    <span>
+                      <strong>{copyLabels[key]}</strong>
+                      {copyHelp[key] ? <em>{copyHelp[key]}</em> : null}
+                    </span>
+                    <textarea value={draftCopy[key]} onChange={(event) => updateCopy(key, event.target.value)} />
+                  </label>
+                ))}
+              </div>
+              <CopyGroupPreview group={activeCopyGroup} copy={draftCopy} />
             </div>
           </article>
-        ))}
+        ) : null}
       </section>
+      ) : null}
 
+      {activeConfigSection === 'teams' ? (
       <section id="config-section-teams" className="team-editor-list config-scroll-section" aria-label="팀별 정보 편집">
         <div className="section-heading compact">
           <div>
@@ -7591,25 +8141,42 @@ function TeamConfigDetail({
             <h2>팀별 정보</h2>
           </div>
         </div>
-        {draftTeams.map((team, index) => (
+        <div className="module-picker team-module-picker" aria-label="편집할 팀 선택">
+          {draftTeams.map((team, index) => (
+            <button
+              type="button"
+              key={`team-picker-${team.sortOrder}-${index}`}
+              className={selectedTeamIndex === index ? 'active' : ''}
+              onClick={() => setSelectedTeamEditorIndex(index)}
+            >
+              <LogoMark team={teamEditorPreview(team)} />
+              <span>
+                <strong>{team.name || `Team ${index + 1}`}</strong>
+                <em>{team.title || '프로젝트명 미정'}</em>
+              </span>
+            </button>
+          ))}
+        </div>
+        {selectedTeamDraft ? (
           <article
-            className="team-editor-card"
-            key={`team-editor-${team.sortOrder}-${index}`}
+            className="team-editor-card focused"
+            key={`team-editor-${selectedTeamDraft.sortOrder}-${selectedTeamIndex}`}
             ref={(node) => {
-              teamEditorRefs.current[index] = node
+              teamEditorRefs.current[selectedTeamIndex] = node
             }}
           >
             <div className="team-editor-head">
-              <LogoMark team={teamEditorPreview(team)} />
+              <LogoMark team={teamEditorPreview(selectedTeamDraft)} />
               <div>
-                <strong>{team.name || `Team ${index + 1}`}</strong>
-                <span>{team.title || '프로젝트명 미정'}</span>
+                <strong>{selectedTeamDraft.name || `Team ${selectedTeamIndex + 1}`}</strong>
+                <span>{selectedTeamDraft.title || '프로젝트명 미정'}</span>
               </div>
               <a
                 className="team-self-link"
-                href={getTeamEditPath(team.id || `team-${index + 1}`, team.code, team.editKey)}
+                href={getTeamEditPath(selectedTeamDraft.id || `team-${selectedTeamIndex + 1}`, selectedTeamDraft.code, selectedTeamDraft.editKey)}
                 target="_blank"
                 rel="noreferrer"
+                title="관리자 인증을 통과한 브라우저에서만 저장할 수 있는 팀 편집 링크입니다."
               >
                 <Link2 size={14} />
                 팀 편집 링크
@@ -7620,44 +8187,47 @@ function TeamConfigDetail({
               <label>
                 <span>내부 ID</span>
                 <input
-                  value={team.id}
-                  onChange={(event) => updateTeam(index, 'id', event.target.value)}
+                  value={selectedTeamDraft.id}
+                  onChange={(event) => updateTeam(selectedTeamIndex, 'id', event.target.value)}
                   title="투표/응원 기록 연결에 쓰이는 내부 ID입니다. 행사 시작 전 수정만 권장합니다."
                 />
               </label>
               <label>
                 <span>팀 편집 키</span>
-                <input value={team.editKey} onChange={(event) => updateTeam(index, 'editKey', event.target.value)} />
+                <input value={selectedTeamDraft.editKey} onChange={(event) => updateTeam(selectedTeamIndex, 'editKey', event.target.value)} />
               </label>
               <label>
                 <span>코드</span>
-                <input value={team.code} onChange={(event) => updateTeam(index, 'code', event.target.value)} />
+                <input value={selectedTeamDraft.code} onChange={(event) => updateTeam(selectedTeamIndex, 'code', event.target.value)} />
               </label>
               <label>
                 <span>팀명</span>
-                <input value={team.name} onChange={(event) => updateTeam(index, 'name', event.target.value)} />
+                <input value={selectedTeamDraft.name} onChange={(event) => updateTeam(selectedTeamIndex, 'name', event.target.value)} />
               </label>
               <label>
                 <span>프로젝트명</span>
-                <input value={team.title} onChange={(event) => updateTeam(index, 'title', event.target.value)} />
+                <input value={selectedTeamDraft.title} onChange={(event) => updateTeam(selectedTeamIndex, 'title', event.target.value)} />
               </label>
               <label className="wide">
                 <span>팀원</span>
-                <textarea value={team.membersText} onChange={(event) => updateTeam(index, 'membersText', event.target.value)} />
+                <textarea value={selectedTeamDraft.membersText} onChange={(event) => updateTeam(selectedTeamIndex, 'membersText', event.target.value)} />
               </label>
               <LogoSourceField
-                team={team}
-                index={index}
-                onChange={(value) => updateTeamLogo(index, value)}
-                onRawChange={(value) => updateTeam(index, 'logoFile', value)}
-                onUpload={(file) => uploadTeamLogo(index, file)}
-                onClear={() => updateTeam(index, 'logoFile', '')}
-                onTuningChange={(field, value) => updateTeam(index, field, value)}
+                team={selectedTeamDraft}
+                index={selectedTeamIndex}
+                onChange={(value) => updateTeamLogo(selectedTeamIndex, value)}
+                onRawChange={(value) => updateTeam(selectedTeamIndex, 'logoFile', value)}
+                onUpload={(file) => uploadTeamLogo(selectedTeamIndex, file)}
+                onClear={() => updateTeam(selectedTeamIndex, 'logoFile', '')}
+                onTuningChange={(field, value) => updateTeam(selectedTeamIndex, field, value)}
+                onPhotoRevert={() => revertTeamPhotoTuning(selectedTeamIndex)}
+                onPhotoReset={() => resetTeamPhotoTuning(selectedTeamIndex)}
+                photoRevertDisabled={!selectedTeamPhotoChanged}
               />
-              <ColorField value={team.color} onChange={(value) => updateTeam(index, 'color', value)} />
+              <ColorField value={selectedTeamDraft.color} onChange={(value) => updateTeam(selectedTeamIndex, 'color', value)} />
               <label>
                 <span>기본 로고</span>
-                <select value={team.logo} onChange={(event) => updateTeam(index, 'logo', event.target.value)}>
+                <select value={selectedTeamDraft.logo} onChange={(event) => updateTeam(selectedTeamIndex, 'logo', event.target.value)}>
                   {logoKinds.map((logo) => (
                     <option key={logo} value={logo}>{logo}</option>
                   ))}
@@ -7665,17 +8235,21 @@ function TeamConfigDetail({
               </label>
               <label>
                 <span>테스트 기본 별</span>
-                <input value={team.baseStars} onChange={(event) => updateTeam(index, 'baseStars', event.target.value)} />
+                <input value={selectedTeamDraft.baseStars} onChange={(event) => updateTeam(selectedTeamIndex, 'baseStars', event.target.value)} />
               </label>
               <label>
                 <span>테스트 기본 투표자</span>
-                <input value={team.baseVoters} onChange={(event) => updateTeam(index, 'baseVoters', event.target.value)} />
+                <input value={selectedTeamDraft.baseVoters} onChange={(event) => updateTeam(selectedTeamIndex, 'baseVoters', event.target.value)} />
               </label>
             </div>
           </article>
-        ))}
+        ) : (
+          <p className="empty-state">편집할 팀이 없습니다. 설정 파일에서 팀 정보를 먼저 불러오세요.</p>
+        )}
       </section>
+      ) : null}
 
+      {activeConfigSection === 'quiz' ? (
       <section id="config-section-quiz" className="quiz-editor-list config-scroll-section" aria-label="퀴즈 정보 편집">
         <div className="section-heading compact">
           <div>
@@ -7751,18 +8325,16 @@ function TeamConfigDetail({
           <button
             type="button"
             className="add-quiz-button"
-            onClick={() =>
-              setDraftQuizzes((current) => [
-                ...current,
-                createBlankQuizDraft(current.length),
-              ])
-            }
+            onClick={addQuiz}
           >
             <Sparkles size={16} />
             퀴즈 추가
           </button>
         ) : null}
       </section>
+      ) : null}
+      </div>
+      </div>
     </div>
   )
 }
@@ -7927,6 +8499,9 @@ function LogoSourceField({
   onUpload,
   onClear,
   onTuningChange,
+  onPhotoRevert,
+  onPhotoReset,
+  photoRevertDisabled = true,
 }: {
   team: TeamConfigDraft
   index: number
@@ -7935,6 +8510,9 @@ function LogoSourceField({
   onUpload: (file: File | undefined) => void
   onClear: () => void
   onTuningChange: (field: string, value: string) => void
+  onPhotoRevert?: () => void
+  onPhotoReset?: () => void
+  photoRevertDisabled?: boolean
 }) {
   const preview = teamEditorPreview(team)
 
@@ -8037,6 +8615,9 @@ function LogoSourceField({
           photoFocusY: team.photoFocusY,
         }}
         onChange={(field, value) => onTuningChange(field, value)}
+        onRevert={onPhotoRevert}
+        onReset={onPhotoReset}
+        revertDisabled={photoRevertDisabled}
       />
     </div>
   )
@@ -8050,14 +8631,31 @@ function TeamWallPhotoPreview({ team, title, membersText }: { team: TeamVisual; 
     .slice(0, 3)
 
   return (
-    <div className="wall-photo-live-preview" style={getTeamPhotoStyle(team)}>
-      <span>Wall 하단 카드 표시</span>
-      <div className="selected-team-preview wall-live-selected-team">
-        <TeamPhotoPreview team={team} />
-        <div className="selected-team-copy">
-          <strong>{team.name}</strong>
-          <p>{title || '프로젝트명 미정'}</p>
-          {members.length ? <span>{formatTeamMemberDetails(members)}</span> : null}
+    <div className="wall-photo-live-preview">
+      <div className="wall-photo-live-preview-head">
+        <span>실제 /wall 선택 팀 카드 기준</span>
+        <strong>{getTeamPhotoFrameLabel(team)}</strong>
+      </div>
+      <div className="public-cheer-board has-team-preview wall-photo-preview-board" style={{ '--team-color': team.color, ...getTeamPhotoStyle(team) } as CSSProperties}>
+        <div className="section-heading compact" aria-hidden="true">
+          <div>
+            <p className="section-kicker">Cheer Board</p>
+            <h2>{team.name} 응원 메시지</h2>
+          </div>
+        </div>
+        <div className="wall-photo-preview-stream" aria-hidden="true">
+          <span>메시지 영역</span>
+        </div>
+        <div
+          className="selected-team-preview wall-live-selected-team"
+          style={{ '--team-color': team.color, ...getTeamPhotoStyle(team) } as CSSProperties}
+        >
+          <TeamPhotoPreview team={team} />
+          <div className="selected-team-copy">
+            <strong>{team.name}</strong>
+            <p>{title || '프로젝트명 미정'}</p>
+            {members.length ? <span>{formatTeamMemberDetails(members)}</span> : null}
+          </div>
         </div>
       </div>
     </div>
@@ -8077,6 +8675,13 @@ type TeamPhotoEditDrag = {
   renderedWidth: number
   renderedHeight: number
 }
+
+const teamPhotoFramePresets = [
+  { id: 'stage-wide', label: '송출 기본', width: 560, height: 300, radius: 18, shape: 'wide', fit: 'cover' },
+  { id: 'wide-169', label: '16:9', width: 640, height: 360, radius: 18, shape: 'wide', fit: 'cover' },
+  { id: 'poster-43', label: '4:3', width: 520, height: 390, radius: 18, shape: 'wide', fit: 'cover' },
+  { id: 'contain', label: '전체보기', width: 560, height: 320, radius: 18, shape: 'wide', fit: 'contain' },
+] as const
 
 function TeamPhotoFrameEditor({
   team,
@@ -8233,9 +8838,15 @@ function TeamPhotoFrameEditor({
 function TeamPhotoTuningControls({
   values,
   onChange,
+  onRevert,
+  onReset,
+  revertDisabled = true,
 }: {
   values: Pick<TeamConfigDraft, 'photoFit' | 'photoShape' | 'photoFrame' | 'photoWidth' | 'photoHeight' | 'photoRadius' | 'photoZoom' | 'photoFocusX' | 'photoFocusY'>
   onChange: (field: string, value: string) => void
+  onRevert?: () => void
+  onReset?: () => void
+  revertDisabled?: boolean
 }) {
   const shape = normalizeImageShape(values.photoShape, 'wide')
   const frame = normalizeImageFrame(values.photoFrame, 'line')
@@ -8245,6 +8856,18 @@ function TeamPhotoTuningControls({
   const zoom = String(getZoomValue(values.photoZoom, 1))
   const focusX = String(getPercentValue(values.photoFocusX, 50))
   const focusY = String(getPercentValue(values.photoFocusY, 50))
+  const applyPreset = (preset: (typeof teamPhotoFramePresets)[number]) => {
+    onChange('photoShape', preset.shape)
+    onChange('photoFit', preset.fit)
+    onChange('photoWidth', String(preset.width))
+    onChange('photoHeight', String(preset.height))
+    onChange('photoRadius', String(preset.radius))
+  }
+  const resetPhotoCrop = () => {
+    onChange('photoZoom', '1')
+    onChange('photoFocusX', '50')
+    onChange('photoFocusY', '50')
+  }
 
   return (
     <div className="photo-tuning-controls">
@@ -8252,6 +8875,33 @@ function TeamPhotoTuningControls({
         <strong>와이드 팀 사진 표시 방식</strong>
         <span>응원 메시지 하단 팀 정보 카드처럼 넓게 보이는 사진의 프레임, 높이, 맞춤, 확대, 초점을 따로 조정합니다.</span>
       </div>
+      <div className="photo-preset-row" aria-label="팀 사진 빠른 프리셋">
+        {teamPhotoFramePresets.map((preset) => (
+          <button type="button" key={preset.id} onClick={() => applyPreset(preset)}>
+            <Maximize2 size={13} />
+            {preset.label}
+          </button>
+        ))}
+        <button type="button" onClick={resetPhotoCrop}>
+          <RefreshCcw size={13} />
+          초점 초기화
+        </button>
+        {onRevert ? (
+          <button type="button" onClick={onRevert} disabled={revertDisabled}>
+            <RefreshCcw size={13} />
+            저장 전 되돌리기
+          </button>
+        ) : null}
+        {onReset ? (
+          <button type="button" className="danger-soft" onClick={onReset}>
+            <X size={13} />
+            표시값 Reset
+          </button>
+        ) : null}
+      </div>
+      <p className="photo-tuning-summary">
+        현재 프레임 {width} x {height}px · 초점 {focusX}%/{focusY}% · 확대 {formatRangeValue(zoom)}x
+      </p>
       <div className="image-tuning-grid">
         <label>
           <span>프레임 모양</span>
@@ -8600,6 +9250,9 @@ function CheerConstellation({
   const [dragPositions, setDragPositions] = useState<Record<string, Point>>({})
   const [draggingKey, setDraggingKey] = useState<string | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
+  const dragPositionsRef = useRef<Record<string, Point>>({})
+  const dragFrameRef = useRef<number | null>(null)
+  const pendingDragPositionRef = useRef<{ key: string; position: Point } | null>(null)
   const dragRef = useRef<{
     key: string
     teamId: string
@@ -8618,11 +9271,18 @@ function CheerConstellation({
   )
 
   useEffect(() => {
+    dragPositionsRef.current = dragPositions
+  }, [dragPositions])
+
+  useEffect(() => {
     const releaseTimers = releaseTimersRef.current
 
     return () => {
       for (const timer of Object.values(releaseTimers)) {
         window.clearTimeout(timer)
+      }
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current)
       }
     }
   }, [])
@@ -8654,6 +9314,14 @@ function CheerConstellation({
     (teamId: string, point: Point, size = 0) => constrainPercentPointToTerritory(teamId, point, territoryCells, teamCenters, size),
     [teamCenters, territoryCells],
   )
+  const visibleCheerCountByTeam = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const message of state.cheers) {
+      if (message.hidden) continue
+      counts.set(message.teamId, (counts.get(message.teamId) || 0) + 1)
+    }
+    return counts
+  }, [state.cheers])
 
   const groupedBubbles = useMemo(() => {
     const groupMap = new Map<
@@ -8718,6 +9386,29 @@ function CheerConstellation({
     }
   }, [])
 
+  const scheduleDragPosition = useCallback((key: string, position: Point) => {
+    pendingDragPositionRef.current = { key, position }
+    if (dragFrameRef.current !== null) return
+
+    dragFrameRef.current = window.requestAnimationFrame(() => {
+      dragFrameRef.current = null
+      const pending = pendingDragPositionRef.current
+      pendingDragPositionRef.current = null
+      if (!pending) return
+
+      setDragPositions((current) => {
+        const currentPosition = current[pending.key]
+        if (currentPosition && currentPosition.x === pending.position.x && currentPosition.y === pending.position.y) {
+          return current
+        }
+
+        const next = { ...current, [pending.key]: pending.position }
+        dragPositionsRef.current = next
+        return next
+      })
+    })
+  }, [])
+
   const startBubbleDrag = useCallback(
     (key: string, teamId: string, size: number, fallbackPosition: Point, event: ReactPointerEvent<HTMLButtonElement>) => {
       if (event.button !== 0) return
@@ -8731,7 +9422,7 @@ function CheerConstellation({
         delete releaseTimersRef.current[key]
       }
 
-      const currentPosition = keepPointInsideTeam(teamId, dragPositions[key] ?? fallbackPosition, size)
+      const currentPosition = keepPointInsideTeam(teamId, dragPositionsRef.current[key] ?? fallbackPosition, size)
       dragRef.current = {
         key,
         teamId,
@@ -8748,7 +9439,7 @@ function CheerConstellation({
       }
       setDraggingKey(key)
     },
-    [dragPositions, getPointerPosition, keepPointInsideTeam],
+    [getPointerPosition, keepPointInsideTeam],
   )
 
   const moveBubbleDrag = useCallback(
@@ -8769,9 +9460,9 @@ function CheerConstellation({
       )
 
       drag.moved = true
-      setDragPositions((current) => ({ ...current, [drag.key]: nextPosition }))
+      scheduleDragPosition(drag.key, nextPosition)
     },
-    [getPointerPosition, keepPointInsideTeam],
+    [getPointerPosition, keepPointInsideTeam, scheduleDragPosition],
   )
 
   const endBubbleDrag = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -8790,6 +9481,7 @@ function CheerConstellation({
         setDragPositions((current) => {
           const next = { ...current }
           delete next[drag.key]
+          dragPositionsRef.current = next
           return next
         })
         delete releaseTimersRef.current[drag.key]
@@ -8850,7 +9542,7 @@ function CheerConstellation({
 
         {state.teams.map((team) => {
           const center = teamCenters.get(team.id) ?? { x: 50, y: 50 }
-          const count = state.cheers.filter((message) => message.teamId === team.id && !message.hidden).length
+          const count = visibleCheerCountByTeam.get(team.id) || 0
           const totalStars = Math.max(0, team.totalStars)
 
           return (
@@ -8989,118 +9681,6 @@ function RaffleDrawConfigControls({
         </select>
       </label>
     </div>
-  )
-}
-
-function RafflePanel({
-  state,
-  raffleRule,
-  isDrawing,
-  onRuleChange,
-  onStart,
-  onStop,
-  onOpen,
-  onWinnerCountChange,
-  onPrizeChange,
-}: {
-  state: EventState
-  raffleRule: RaffleRule
-  isDrawing: boolean
-  onRuleChange: (rule: RaffleRule) => void
-  onStart: () => void
-  onStop: () => void
-  onOpen: () => void
-  onWinnerCountChange: (winnerCount: number) => void
-  onPrizeChange: (selection: RafflePrizeSelection) => void
-}) {
-  const previewCandidates = getRaffleCandidatesForRule(state, raffleRule)
-  const previewNames = previewCandidates.slice(0, 10)
-  const reelNames = previewNames
-  const drawConfig = getRaffleDrawConfig(state, raffleRule)
-
-  return (
-    <section className="raffle-panel" aria-label="행운권 추첨">
-      <div className="section-heading compact">
-        <div>
-          <p className="section-kicker">{state.copy.rafflePanelEyeline}</p>
-          <h2>{state.copy.rafflePanelTitle}</h2>
-        </div>
-        <button type="button" className="panel-open-button" onClick={onOpen}>
-          <Maximize2 size={14} />
-          Showup
-        </button>
-      </div>
-
-      <div className="raffle-controls">
-        <label>
-          <span>추첨 룰</span>
-          <select value={raffleRule} onChange={(event) => onRuleChange(event.target.value as RaffleRule)}>
-            {raffleRuleOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {getRaffleRuleLabel(option.value, state)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <RaffleDrawConfigControls
-          state={state}
-          raffleRule={raffleRule}
-          winnerCount={drawConfig.winnerCount}
-          prizeName={drawConfig.prizeName}
-          prizeImageFile={drawConfig.prizeImageFile}
-          onWinnerCountChange={onWinnerCountChange}
-          onPrizeChange={onPrizeChange}
-        />
-        <div className="raffle-action-row">
-          <button type="button" className={`draw-button start ${isDrawing ? 'drawing' : ''}`} onClick={onStart} disabled={isDrawing}>
-            <Sparkles size={17} />
-            {state.copy.raffleStartButtonLabel}
-          </button>
-          <button type="button" className="draw-button stop" onClick={onStop} disabled={!isDrawing}>
-            <Trophy size={17} />
-            {state.copy.raffleStopButtonLabel}
-          </button>
-        </div>
-      </div>
-
-      <div className={`draw-stage compact ${isDrawing ? 'drawing' : ''}`}>
-        <div>
-          <span>후보</span>
-          <strong>{state.lastRaffle?.candidates ?? getRaffleCandidatesForRule(state, raffleRule).length}명</strong>
-        </div>
-      </div>
-
-      <div className="winner-list" aria-live="polite">
-        {isDrawing ? (
-          <div className="reel drawing-reel">
-            <div className="draw-orbit" aria-hidden="true">
-              {Array.from({ length: 8 }).map((_, index) => (
-                <i key={index} style={{ '--i': index } as CSSProperties}>
-                  ★
-                </i>
-              ))}
-            </div>
-            <div className="name-reel" aria-hidden="true">
-              <div>
-                {[...reelNames, ...reelNames, ...reelNames].map((person, index) => (
-                  <span key={`${person.id}-${index}`}>{person.name}</span>
-                ))}
-              </div>
-            </div>
-            <strong>후보를 섞는 중...</strong>
-          </div>
-        ) : state.lastRaffle?.winners.length ? (
-          state.lastRaffle.winners.map((winner) => (
-            <div className="winner" key={winner.id}>
-              <strong>{winner.name}</strong>
-              <small>{getParticipantManagementLabel({ id: winner.id })}</small>
-            </div>
-          ))
-        ) : (
-          <p className="empty-state">추첨 후보가 준비되면 이곳에 표시됩니다.</p>
-        )}
-      </div>
-    </section>
   )
 }
 
@@ -9914,27 +10494,6 @@ function TeamPhotoPreview({ team }: { team: TeamVisual }) {
   )
 }
 
-function FloatingStars() {
-  return (
-    <div className="floating-stars" aria-hidden="true">
-      {Array.from({ length: 18 }).map((_, index) => (
-        <span
-          key={index}
-          style={
-            {
-              '--x': `${7 + ((index * 17) % 86)}%`,
-              '--delay': `${(index % 9) * -0.8}s`,
-              '--duration': `${7 + (index % 5)}s`,
-            } as CSSProperties
-          }
-        >
-          ★
-        </span>
-      ))}
-    </div>
-  )
-}
-
 function useAdminSession(enabled: boolean): AdminSessionState {
   const [ready, setReady] = useState(false)
   const [required, setRequired] = useState(false)
@@ -10083,8 +10642,10 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [voteRealtime, setVoteRealtime] = useState(false)
   const lastRankStateRef = useRef<EventState | null>(null)
+  const realtimeFrameRef = useRef<number | null>(null)
+  const pendingRealtimeStateRef = useRef<EventState | null>(null)
 
-  const applyState = useCallback((nextState: EventState) => {
+  const applyState = useCallback((nextState: EventState, options: { transition?: boolean } = {}) => {
     const previousState = lastRankStateRef.current
     const previousRanks = previousState ? new Map(previousState.teams.map((team) => [team.id, team.rank])) : null
     const nextCopy = preserveCopyMedia(previousState?.copy, nextState.copy)
@@ -10112,22 +10673,40 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
     }
 
     lastRankStateRef.current = nextWithRankMovement
-    setState(nextWithRankMovement)
-    if (mode === 'vote' && participantId) {
-      const currentParticipant = nextWithRankMovement.participants.find((person) => {
-        return person.id === participantId || getParticipantDeviceIds(person).includes(participantId)
-      })
-      const hasOwnQuestion = Boolean(
-        currentParticipant && nextWithRankMovement.questions.some((question) => question.participantId === currentParticipant.id),
-      )
-      setVoteRealtime(Boolean(
-        currentParticipant?.cheerSubmitted ||
-          currentParticipant?.visibleCheerCount ||
-          currentParticipant?.hiddenCheerCount ||
-          hasOwnQuestion,
-      ))
+
+    const commitState = () => {
+      setState(nextWithRankMovement)
+      if (mode === 'vote' && participantId) {
+        const currentParticipant = nextWithRankMovement.participants.find((person) => {
+          return person.id === participantId || getParticipantDeviceIds(person).includes(participantId)
+        })
+        const hasOwnQuestion = Boolean(
+          currentParticipant && nextWithRankMovement.questions.some((question) => question.participantId === currentParticipant.id),
+        )
+        setVoteRealtime(Boolean(
+          currentParticipant?.cheerSubmitted ||
+            currentParticipant?.visibleCheerCount ||
+            currentParticipant?.hiddenCheerCount ||
+            hasOwnQuestion,
+        ))
+      }
     }
+
+    if (options.transition) startTransition(commitState)
+    else commitState()
   }, [mode, participantId])
+
+  const applyRealtimeState = useCallback((nextState: EventState) => {
+    pendingRealtimeStateRef.current = nextState
+    if (realtimeFrameRef.current !== null) return
+
+    realtimeFrameRef.current = window.requestAnimationFrame(() => {
+      realtimeFrameRef.current = null
+      const pendingState = pendingRealtimeStateRef.current
+      pendingRealtimeStateRef.current = null
+      if (pendingState) applyState(pendingState, { transition: true })
+    })
+  }, [applyState])
 
   useEffect(() => {
     if (!enabled) return
@@ -10138,7 +10717,11 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
     let hasFullMediaState = false
     const realtime = allowProtectedRealtime && (mode === 'admin' || mode === 'wall' || mode === 'vote' || mode === 'message' || mode === 'quiz' || voteRealtime)
     const shouldPoll = !realtime
-    const eventRole = mode === 'message' || mode === 'quiz' || mode === 'not-found' ? 'vote' : mode
+    const eventRole = mode === 'message' || mode === 'quiz' || mode === 'not-found'
+      ? 'vote'
+      : mode === 'team'
+        ? 'admin'
+        : mode
     const roleQuery = `role=${encodeURIComponent(eventRole)}`
 
     const fetchState = async () => {
@@ -10185,7 +10768,7 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
         setConnection('live')
       }
       events.addEventListener('state', (event) => {
-        applyState(JSON.parse((event as MessageEvent).data) as EventState)
+        applyRealtimeState(JSON.parse((event as MessageEvent).data) as EventState)
         setConnection('live')
       })
       events.onerror = () => {
@@ -10220,9 +10803,14 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
       active = false
       events?.close()
       if (pollTimer) window.clearInterval(pollTimer)
+      if (realtimeFrameRef.current !== null) {
+        window.cancelAnimationFrame(realtimeFrameRef.current)
+        realtimeFrameRef.current = null
+      }
+      pendingRealtimeStateRef.current = null
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [allowProtectedRealtime, applyState, enabled, mode, voteRealtime])
+  }, [allowProtectedRealtime, applyRealtimeState, applyState, enabled, mode, voteRealtime])
 
   const post = useCallback(async (path: string, body: unknown, options: PostOptions = {}) => {
     if (!enabled || !allowProtectedRealtime) return null
@@ -10356,6 +10944,41 @@ type TeamConfigDraft = {
   sortOrder: number
 }
 
+type TeamPhotoTuningDraft = Pick<
+  TeamConfigDraft,
+  'photoFit' | 'photoShape' | 'photoFrame' | 'photoWidth' | 'photoHeight' | 'photoRadius' | 'photoZoom' | 'photoFocusX' | 'photoFocusY'
+>
+
+const defaultTeamPhotoTuning: TeamPhotoTuningDraft = {
+  photoFit: 'cover',
+  photoShape: 'wide',
+  photoFrame: 'line',
+  photoWidth: '560',
+  photoHeight: '300',
+  photoRadius: String(DEFAULT_TEAM_PHOTO_RADIUS),
+  photoZoom: '1',
+  photoFocusX: '50',
+  photoFocusY: '50',
+}
+
+function pickTeamPhotoTuning(team: TeamConfigDraft): TeamPhotoTuningDraft {
+  return {
+    photoFit: team.photoFit,
+    photoShape: team.photoShape,
+    photoFrame: team.photoFrame,
+    photoWidth: team.photoWidth,
+    photoHeight: team.photoHeight,
+    photoRadius: team.photoRadius,
+    photoZoom: team.photoZoom,
+    photoFocusX: team.photoFocusX,
+    photoFocusY: team.photoFocusY,
+  }
+}
+
+function isSameTeamPhotoTuning(left: TeamPhotoTuningDraft, right: TeamPhotoTuningDraft) {
+  return Object.keys(defaultTeamPhotoTuning).every((key) => left[key as keyof TeamPhotoTuningDraft] === right[key as keyof TeamPhotoTuningDraft])
+}
+
 type QuizConfigDraft = {
   id: string
   title: string
@@ -10368,7 +10991,9 @@ type QuizConfigDraft = {
 }
 
 type TeamInfoUpload = {
+  event?: Partial<EventProfile>
   copy?: Partial<EventCopy>
+  settings?: Partial<EventState['settings']>
   teams: Array<Record<string, unknown>>
   quizzes?: Array<Record<string, unknown>>
   logos?: Array<{
@@ -10377,7 +11002,186 @@ type TeamInfoUpload = {
   }>
 }
 
+type SettingsPreset = {
+  id: string
+  label: string
+  eventId?: string
+  workerName?: string
+  roomName?: string
+  settingsFile?: string
+  file?: string
+  loadUrl?: string
+  source?: string
+  description?: string
+  localSnapshotId?: string
+  createdAt?: number
+}
+
+type SettingsPresetManifest = {
+  settings?: Array<Partial<SettingsPreset>>
+  presets?: Array<Partial<SettingsPreset>>
+}
+
+type LocalSettingsSnapshot = {
+  id: string
+  label: string
+  eventId?: string
+  roomName?: string
+  settingsFile?: string
+  description?: string
+  createdAt: number
+  payload: TeamInfoUpload
+}
+
 const logoUploadMaxDataUrlLength = 220_000
+const localSettingsSnapshotsStorageKey = 'vibe-arena:named-settings:v1'
+const maxLocalSettingsSnapshots = 16
+
+function readLocalSettingsSnapshots(): LocalSettingsSnapshot[] {
+  if (typeof window === 'undefined') return []
+
+  try {
+    const raw = window.localStorage.getItem(localSettingsSnapshotsStorageKey)
+    if (!raw) return []
+    return normalizeLocalSettingsSnapshots(JSON.parse(raw) as unknown)
+  } catch {
+    return []
+  }
+}
+
+function writeLocalSettingsSnapshots(snapshots: LocalSettingsSnapshot[]) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(localSettingsSnapshotsStorageKey, JSON.stringify(snapshots))
+}
+
+function normalizeLocalSettingsSnapshots(input: unknown): LocalSettingsSnapshot[] {
+  if (!Array.isArray(input)) return []
+
+  return input
+    .map((entry) => normalizeLocalSettingsSnapshot(entry))
+    .filter((entry): entry is LocalSettingsSnapshot => Boolean(entry))
+    .sort((left, right) => right.createdAt - left.createdAt)
+    .slice(0, maxLocalSettingsSnapshots)
+}
+
+function normalizeLocalSettingsSnapshot(input: unknown): LocalSettingsSnapshot | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+
+  const source = input as Record<string, unknown>
+  const payload = source.payload
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined
+  const normalizedPayload = normalizeTeamInfoUpload(payload as Record<string, unknown>)
+
+  return {
+    id: String(source.id || '').trim() || createLocalSettingsSnapshotId(String(source.label || 'settings')),
+    label: String(source.label || '').trim().slice(0, 80) || '이름 없는 설정',
+    eventId: String(source.eventId || '').trim() || undefined,
+    roomName: String(source.roomName || '').trim() || undefined,
+    settingsFile: String(source.settingsFile || '').trim() || undefined,
+    description: String(source.description || '').trim().slice(0, 160) || undefined,
+    createdAt: Math.max(0, Math.floor(Number(source.createdAt) || Date.now())),
+    payload: normalizedPayload,
+  }
+}
+
+function createLocalSettingsSnapshotId(label: string) {
+  const slug = sanitizeClientSlug(label || 'settings') || 'settings'
+  return `${Date.now()}-${slug}`.slice(0, 96)
+}
+
+function localSettingsSnapshotToPreset(snapshot: LocalSettingsSnapshot): SettingsPreset {
+  return {
+    id: `local:${snapshot.id}`,
+    label: snapshot.label,
+    eventId: snapshot.eventId,
+    roomName: snapshot.roomName,
+    settingsFile: snapshot.settingsFile,
+    source: 'browser-snapshot',
+    description: snapshot.description || `이 브라우저 보관함 · ${formatSettingsSnapshotTime(snapshot.createdAt)}`,
+    localSnapshotId: snapshot.id,
+    createdAt: snapshot.createdAt,
+  }
+}
+
+function formatSettingsSnapshotTime(timestamp: number) {
+  return new Date(timestamp).toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
+function getDefaultSettingsSnapshotName(profile: EventProfile | undefined) {
+  const baseName = profile?.label || profile?.roomName || profile?.id || '운영 설정'
+  return `${baseName} ${formatSettingsSnapshotTime(Date.now())}`
+}
+
+function normalizeSettingsPresetManifest(manifest: SettingsPresetManifest): SettingsPreset[] {
+  const source = Array.isArray(manifest.settings) ? manifest.settings : Array.isArray(manifest.presets) ? manifest.presets : []
+  const presets: SettingsPreset[] = []
+
+  source.forEach((entry, index) => {
+    const file = String(entry?.file || '').replace(/\\/g, '/').trim()
+    const loadUrl = normalizeSettingsPresetLoadUrl(entry?.loadUrl)
+    const label = String(entry?.label || '').trim()
+    const id = String(entry?.id || label || `settings-${index + 1}`).trim()
+    if (!id || !label || (!isSafePresetFile(file) && !loadUrl)) return
+
+    presets.push({
+      id,
+      label,
+      eventId: String(entry?.eventId || '').trim() || undefined,
+      workerName: String(entry?.workerName || '').trim() || undefined,
+      roomName: String(entry?.roomName || '').trim() || undefined,
+      settingsFile: String(entry?.settingsFile || '').replace(/\\/g, '/').trim() || undefined,
+      file: isSafePresetFile(file) ? file : undefined,
+      loadUrl: loadUrl || undefined,
+      source: String(entry?.source || '').trim() || undefined,
+      description: String(entry?.description || '').trim() || undefined,
+    })
+  })
+
+  return presets
+}
+
+function uniqueSettingsPresets(presets: SettingsPreset[]) {
+  const seen = new Set<string>()
+  const unique: SettingsPreset[] = []
+
+  for (const preset of presets) {
+    const key = preset.id || preset.loadUrl || preset.file || preset.label
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    unique.push(preset)
+  }
+
+  return unique
+}
+
+function getSettingsPresetLoadUrl(preset: SettingsPreset) {
+  if (preset.loadUrl) return preset.loadUrl
+  return preset.file && isSafePresetFile(preset.file) ? `/prev_settings/${preset.file}` : ''
+}
+
+function isSettingsPresetRoomMismatch(preset: SettingsPreset | undefined, profile: EventProfile | undefined) {
+  if (!preset?.roomName || !profile?.roomName) return false
+  if (profile.runtime !== 'cloudflare-workers') return false
+  return preset.roomName !== profile.roomName
+}
+
+function isSafePresetFile(file: string) {
+  return Boolean(file) && !file.startsWith('/') && !file.includes('..') && !/^[a-z]+:/i.test(file) && file.endsWith('.json')
+}
+
+function normalizeSettingsPresetLoadUrl(value: unknown) {
+  const loadUrl = String(value || '').replace(/\\/g, '/').trim()
+  if (!loadUrl || !loadUrl.startsWith('/') || loadUrl.includes('..') || /^[a-z]+:/i.test(loadUrl)) return ''
+  if (!loadUrl.startsWith('/api/settings-presets/') && !loadUrl.startsWith('/prev_settings/')) return ''
+  return loadUrl
+}
 
 function normalizeLogoSourceValue(value: string) {
   const trimmed = value.trim()
@@ -10674,6 +11478,21 @@ function normalizeCopyForSave(copy: EventCopy): EventCopy {
   return next
 }
 
+function getSettingsEventProfileForSave(profile: EventProfile | undefined): Partial<EventProfile> | undefined {
+  if (!profile) return undefined
+
+  const event: Partial<EventProfile> = {
+    id: profile.id,
+    label: profile.label,
+    workerName: profile.workerName,
+    roomName: profile.settingsRoomName || (profile.runtime === 'cloudflare-workers' ? profile.roomName : undefined),
+    settingsFile: profile.settingsFile,
+    description: profile.description,
+  }
+
+  return Object.values(event).some(Boolean) ? event : undefined
+}
+
 function compactTeamInfoUploadForSave(payload: TeamInfoUpload, reference: EventState): TeamInfoUpload {
   const referenceTeamsById = new Map(reference.teams.map((team) => [team.id, team]))
   const referenceQuizzesById = new Map(reference.quizBank.map((quiz) => [quiz.id, quiz]))
@@ -10805,7 +11624,7 @@ function getConfigSaveFailureMessage(error: unknown, target: ReturnType<typeof g
 
   if (normalized.includes('(403)')) {
     return target.kind === 'cloudflare'
-      ? 'Cloudflare 저장 실패(403): 관리자 인증 문제가 아니라 현재 사내망/보안 프록시가 Cloudflare 저장 요청을 거절한 상태일 수 있습니다. 모바일/외부망에서는 저장이 되면 앱은 정상입니다. 로컬 JSON 저장으로 백업하거나 모바일 핫스팟/외부망에서 다시 저장해주세요.'
+      ? 'Cloudflare 저장 실패(403): 관리자 인증 문제가 아니라 현재 사내망/보안 프록시가 Cloudflare 저장 요청을 거절한 상태일 수 있습니다. 모바일/외부망에서는 저장이 되면 앱은 정상입니다. settings.json 저장으로 백업하거나 모바일 핫스팟/외부망에서 다시 저장해주세요.'
       : '로컬 서버 저장 실패(403): 현재 접속한 로컬 서버가 요청을 거절했습니다. 관리자 인증과 서버 접근 정책을 확인해주세요.'
   }
 
@@ -10816,7 +11635,7 @@ function getConfigSaveFailureMessage(error: unknown, target: ReturnType<typeof g
     normalized.includes('no response')
   ) {
     return target.kind === 'cloudflare'
-      ? 'Cloudflare 저장 실패: 이 브라우저에서 Cloudflare로 나가는 outbound HTTPS 요청이 막혔을 수 있습니다. 로컬 JSON 저장으로 백업한 뒤, 인터넷 연결이 가능한 관리자 PC에서 업로드하면 즉시 반영됩니다.'
+      ? 'Cloudflare 저장 실패: 이 브라우저에서 Cloudflare로 나가는 outbound HTTPS 요청이 막혔을 수 있습니다. settings.json 저장으로 백업한 뒤, 인터넷 연결이 가능한 관리자 PC에서 업로드하면 즉시 반영됩니다.'
       : '로컬 서버 저장 실패: 현재 접속한 로컬 Node 서버와 통신하지 못했습니다. 서버 실행 상태와 접속 주소를 확인해주세요.'
   }
 
@@ -10825,12 +11644,12 @@ function getConfigSaveFailureMessage(error: unknown, target: ReturnType<typeof g
   }
 
   if (normalized.includes('(414)')) {
-    return `${target.label} 저장 실패: 사내망 우회 저장 URL이 너무 깁니다. 사진 파일 크기를 줄이거나 로컬 JSON 저장 후 모바일/외부망에서 업로드해주세요.`
+    return `${target.label} 저장 실패: 사내망 우회 저장 URL이 너무 깁니다. 사진 파일 크기를 줄이거나 settings.json 저장 후 모바일/외부망에서 업로드해주세요.`
   }
 
   if (normalized.includes('(400)')) {
     if (normalized.includes('payload')) {
-      return `${target.label} 저장 실패: 사내망 우회 저장 payload가 중간에서 잘렸거나 해석되지 않았습니다. 이번 버전은 기존 이미지를 반복 전송하지 않도록 줄였으니 새로고침 후 다시 저장해보고, 계속 실패하면 로컬 JSON 저장으로 백업해주세요. (${detail})`
+      return `${target.label} 저장 실패: 사내망 우회 저장 payload가 중간에서 잘렸거나 해석되지 않았습니다. 이번 버전은 기존 이미지를 반복 전송하지 않도록 줄였으니 새로고침 후 다시 저장해보고, 계속 실패하면 settings.json 저장으로 백업해주세요. (${detail})`
     }
     return `${target.label} 저장 실패: 팀 정보 형식이 올바르지 않습니다. 팀 목록과 JSON 구조를 확인해주세요. (${detail})`
   }
@@ -10874,17 +11693,18 @@ async function parseTeamInfoFile(file: File): Promise<TeamInfoUpload> {
   }
 
   if (!lowerName.endsWith('.zip')) {
-    throw new Error('team_info.json 또는 team_infos.zip 파일만 업로드할 수 있습니다.')
+    throw new Error('settings.json 또는 settings.zip 파일만 업로드할 수 있습니다.')
   }
 
   const entries = unzipSync(new Uint8Array(await file.arrayBuffer()))
   const entryNames = Object.keys(entries)
   const jsonEntryName =
-    entryNames.find((name) => name.replace(/\\/g, '/').toLowerCase().endsWith('/team_info.json')) ||
-    entryNames.find((name) => ['team_info.json', 'teams.json'].includes(name.replace(/\\/g, '/').toLowerCase()))
+    entryNames.find((name) => name.replace(/\\/g, '/').toLowerCase().endsWith('/settings.json')) ||
+    entryNames.find((name) => ['settings.json', 'team_info.json', 'teams.json'].includes(name.replace(/\\/g, '/').toLowerCase())) ||
+    entryNames.find((name) => name.replace(/\\/g, '/').toLowerCase().endsWith('/team_info.json'))
 
   if (!jsonEntryName) {
-    throw new Error('ZIP 안에서 team_info.json 파일을 찾지 못했습니다.')
+    throw new Error('ZIP 안에서 settings.json 파일을 찾지 못했습니다.')
   }
 
   const parsed = JSON.parse(strFromU8(entries[jsonEntryName])) as Record<string, unknown>
@@ -10906,7 +11726,7 @@ async function parseTeamInfoFile(file: File): Promise<TeamInfoUpload> {
 function normalizeTeamInfoUpload(input: Record<string, unknown>, logos: TeamInfoUpload['logos'] = []): TeamInfoUpload {
   const sourceTeams = Array.isArray(input) ? input : Array.isArray(input.teams) ? input.teams : []
   if (!sourceTeams.length) {
-    throw new Error('team_info.json 안에 teams 배열이 필요합니다.')
+    throw new Error('settings.json 안에 teams 배열이 필요합니다.')
   }
 
   const teams = sourceTeams.slice(0, 20).map((team, index) => {
@@ -10919,11 +11739,29 @@ function normalizeTeamInfoUpload(input: Record<string, unknown>, logos: TeamInfo
   })
 
   return {
+    event: normalizeImportedEventProfile(input.event),
     copy: typeof input.copy === 'object' && input.copy ? (input.copy as Partial<EventCopy>) : undefined,
+    settings: typeof input.settings === 'object' && input.settings ? (input.settings as Partial<EventState['settings']>) : undefined,
     teams,
     quizzes: Array.isArray(input.quizzes) ? (input.quizzes.slice(0, 15) as Array<Record<string, unknown>>) : undefined,
     logos,
   }
+}
+
+function normalizeImportedEventProfile(input: unknown): Partial<EventProfile> | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+
+  const source = input as Record<string, unknown>
+  const profile: Partial<EventProfile> = {
+    id: String(source.id || source.eventId || '').trim() || undefined,
+    label: String(source.label || source.name || '').trim() || undefined,
+    workerName: String(source.workerName || '').trim() || undefined,
+    roomName: String(source.roomName || '').trim() || undefined,
+    settingsFile: String(source.settingsFile || '').replace(/\\/g, '/').trim() || undefined,
+    description: String(source.description || '').trim() || undefined,
+  }
+
+  return Object.values(profile).some(Boolean) ? profile : undefined
 }
 
 function findImportedLogoFile(team: Record<string, unknown>, index: number, logos: TeamInfoUpload['logos'] = []) {
@@ -10960,17 +11798,80 @@ function bytesToDataUrl(bytes: Uint8Array, mimeType: string) {
   return `data:${mimeType};base64,${btoa(binary)}`
 }
 
-function downloadTeamInfoJson({ copy, teams, quizzes }: { copy: EventCopy; teams: TeamConfigDraft[]; quizzes: QuizConfigDraft[] }) {
+function downloadTeamInfoJson({
+  eventProfile,
+  copy,
+  settings,
+  teams,
+  quizzes,
+  fileName,
+}: {
+  eventProfile?: EventProfile
+  copy: EventCopy
+  settings: EventState['settings']
+  teams: TeamConfigDraft[]
+  quizzes: QuizConfigDraft[]
+  fileName?: string
+}) {
+  const event = getSettingsEventProfileForSave(eventProfile)
   const payload = {
+    ...(event ? { event } : {}),
     copy: normalizeCopyForSave(copy),
+    settings,
     teams: teams.map((team, index) => teamDraftToConfig(team, index)),
     quizzes: quizzes.map((quiz, index) => quizDraftToConfig(quiz, index)),
   }
 
   downloadBlob(
     new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' }),
-    'team_info.json',
+    fileName || getSettingsDownloadFileName(eventProfile),
   )
+}
+
+function downloadCurrentSettingsJson(state: EventState) {
+  downloadTeamInfoJson({
+    eventProfile: state.eventProfile,
+    copy: state.copy,
+    settings: state.settings,
+    teams: createTeamDrafts(state.teams),
+    quizzes: createQuizDrafts(state.quizBank),
+  })
+}
+
+async function downloadArchiveJson(setStatus?: (message: string) => void) {
+  try {
+    setStatus?.('현재 DB room 원본 JSON을 내려받는 중입니다...')
+    const response = await fetch('/api/export', { credentials: 'same-origin', cache: 'no-store' })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const payload = (await response.json()) as { eventProfile?: EventProfile }
+    downloadBlob(
+      new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' }),
+      getArchiveDownloadFileName(payload.eventProfile),
+    )
+    setStatus?.('원본 JSON 백업 파일을 내려받았습니다.')
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error || '')
+    const message = `원본 JSON 백업에 실패했습니다. 관리자 인증과 네트워크를 확인해주세요. ${detail}`
+    if (setStatus) setStatus(message)
+    else window.alert(message)
+  }
+}
+
+function getSettingsDownloadFileName(eventProfile?: EventProfile) {
+  const slug = getEventArchiveSlug(eventProfile)
+  return slug === 'event' ? 'settings.json' : `${slug}.settings.json`
+}
+
+function getArchiveDownloadFileName(eventProfile?: EventProfile) {
+  return `vibe-arena-${getEventArchiveSlug(eventProfile)}-archive-${getArchiveTimestamp()}.json`
+}
+
+function getEventArchiveSlug(eventProfile?: EventProfile) {
+  return sanitizeClientSlug(eventProfile?.roomName || eventProfile?.id || eventProfile?.label || 'event') || 'event'
+}
+
+function getArchiveTimestamp() {
+  return new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')
 }
 
 function exportResultsWorkbook(state: EventState) {
