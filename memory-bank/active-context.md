@@ -1,6 +1,6 @@
 # Active Context
 
-Updated: 2026-06-08
+Updated: 2026-06-09
 
 ## Current Product State
 
@@ -34,6 +34,7 @@ Current Q2 production identity:
 - `event-configs/2026_ax_group_q1_meeting.json`: `meeting26q1`, features `message`, `quiz`
 - `event-configs/2026_ax_group_q2_meeting.json`: `2026-ax-q2-meeting`, features `message`, `quiz`
 - `event-configs/2026_06_airever.json`: `airever`, features `message`, `quiz`, default theme `pastel`, default font `vibe`
+- `event-configs/2026_06_scmax.json`: `scmax`, features `message`, `quiz`, default theme `lg-brutal-pastel`, default font `vibe`
 - `event-configs/2026_ax_special_message_vote_quiz.json`: `special26ax`, features `message`, `vote`, `quiz`
 
 Worker bundled presets must be kept in sync in `worker/index.ts` through imports, `initialConfigByRoomName`, and `bundledEventConfigPresets`.

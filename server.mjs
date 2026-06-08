@@ -87,6 +87,26 @@ const maxRateLimitEntries = 5000
 const publicMutationRateLimits = new Map()
 const wallSessionValues = ['overview', 'raffle', 'showup', 'qna', 'quiz']
 const defaultWallEnabledPanels = wallSessionValues
+const themeModeValues = new Set([
+  'light',
+  'stage',
+  'pastel',
+  'lg-brutal-pastel',
+  'lg-brutal-white',
+  'candy-grid',
+  'mint-paper',
+  'watercolor-mint',
+  'watercolor-coral',
+  'sky-paper',
+  'storybook-meadow',
+  'soft-anime-air',
+  'clean-lab',
+  'slate-ops',
+  'aurora-stage',
+  'midnight-coral',
+  'ocean-stage',
+  'lg-brutal-night',
+])
 const defaultConfigFileName = 'teams.json'
 const eventConfigEnvNames = ['EVENT_CONFIG_FILE', 'VIBE_EVENT_CONFIG', 'TEAMS_CONFIG_FILE']
 const teamsConfigPath = resolveEventConfigPath()
@@ -2239,7 +2259,7 @@ function normalizeCheerNameMode(value, fallback = 'masked') {
 }
 
 function normalizeThemeMode(value, fallback = 'light') {
-  if (value === 'stage' || value === 'light' || value === 'pastel') return value
+  if (themeModeValues.has(value)) return value
   return fallback
 }
 

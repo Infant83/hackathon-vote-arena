@@ -16,6 +16,7 @@
     "ops:audit:ax-q1": "node scripts/ops-audit.mjs --config=event-configs/2026_ax_group_q1_meeting.json",
     "ops:audit:ax-q2": "node scripts/ops-audit.mjs --config=event-configs/2026_ax_group_q2_meeting.json",
     "ops:audit:airever": "node scripts/ops-audit.mjs --config=event-configs/2026_06_airever.json",
+    "ops:audit:scmax": "node scripts/ops-audit.mjs --config=event-configs/2026_06_scmax.json",
     "cf:types": "wrangler types",
     "cf:dev": "npm run build && wrangler dev",
     "cf:deploy:dry-run": "npm run build && wrangler deploy --dry-run",

@@ -2,7 +2,25 @@
 
 이 문서는 `Vibe Vote Arena`의 주요 개발 진행 상황을 시간순으로 정리합니다.
 
+## 2026-06-09
+
+### airever/scmax 동시 운영 반영
+
+- `event-configs/2026_06_scmax.json`을 추가해 `scmax` 행사 preset을 Q&A/퀴즈 중심 운영 포맷으로 준비했습니다.
+- Worker 번들 초기 설정과 관리자 preset manifest에 `scmax` room을 등록했습니다. `scmax.axgroup.workers.dev`는 `ARENA_ROOM_NAME=scmax` Durable Object room을 기준으로 운영합니다.
+- `airever`와 `scmax` 모두 최신 Vibe Arena 로고, favicon, theme pack, `/message` 상단 바 정렬 개선을 적용할 수 있도록 같은 배포 흐름에 올렸습니다.
+- `npm run ops:audit:scmax`를 추가해 `scmax` 설정만 따로 점검할 수 있게 했습니다.
+- 운영 콘텐츠의 이미지 경로 입력에서 `event-brand/scmax_logo.jpg`, `public/event-brand/scmax_logo.jpg` 같은 공개 asset 경로를 `/event-brand/scmax_logo.jpg`로 정리하도록 개선했습니다.
+
 ## 2026-06-08
+
+### Vibe Arena 로고와 테마팩
+
+- `$imagegen`으로 Vibe Arena 플랫폼 로고를 새로 만들고 `public/event-brand/vibe-arena-logo.png`, `public/event-brand/vibe-arena-logo-web.png`에 배치했습니다.
+- 브라우저 favicon과 앱 아이콘을 새 로고 기반 PNG로 교체하고, 문서 title을 `Vibe Arena` 기준으로 정리했습니다.
+- 운영 설정의 화면 테마 선택지를 18개 theme pack으로 확장했습니다. `light`, `pastel`, `stage` 세 표면 CSS를 공유하면서 LG 브루탈 파스텔, 수채화, 운영 콘솔, 송출 스테이지 계열을 선택할 수 있습니다.
+- `/message`와 `/wall`의 Q&A/퀴즈/응원 메시지 색상 토큰을 정리해 파스텔 계열 테마에서도 보낸 질문, 카운터, 읽음/수정 배지가 같은 톤으로 보이도록 조정했습니다.
+- `DESIGN.md`에 theme pack 운영 규칙과 `/vote`, `/message`, `/wall`, `/admin` 동시 audit 기준을 추가했습니다.
 
 ### 다중 행사 운영과 설정 관리
 
@@ -20,7 +38,7 @@
 - `/admin?panel=teams`에 `새 저장 이름`, `내 PC에 보관`, `운영 preset 등록`을 두어 브라우저 전용 초안과 같은 DB room 관리자 공유 preset을 분리했습니다.
 - 운영 preset은 현재 `ARENA_ROOM_NAME` Durable Object storage에 저장되며 다른 관리자 PC의 드롭다운에도 `운영 · ...` 항목으로 표시됩니다.
 - 보관 설정 삭제 버튼과 room mismatch 안내를 함께 두어, 빠른 재사용과 실제 DB 반영 흐름을 분리했습니다.
-- 운영 설정에 화면 테마 드롭다운과 글씨체 드롭다운을 추가해 `기본 밝은 테마`, `AX Lotto 파스텔`, `어두운 송출 테마`와 `Vibe Arena`, `Gowun Dodum`, `시스템 기본` 글씨체를 선택할 수 있게 했습니다.
+- 운영 설정에 화면 테마 드롭다운과 글씨체 드롭다운을 추가해 `기본 밝은 테마`, `브루탈리즘 파스텔 Yellow`, `어두운 송출 테마`와 `Vibe Arena`, `Gowun Dodum`, `시스템 기본` 글씨체를 선택할 수 있게 했습니다.
 - README와 AGENTS에 `ARENA_ROOM_NAME`을 행사 DB room으로 보는 운영 규칙, reset 범위, preset 적용 범위, 행사 종료 백업 순서를 정리했습니다.
 - 관리자 passcode 설정과 변경 방법을 `ADMIN_PASSCODE` 환경변수/Cloudflare secret 기준으로 문서화했습니다.
 

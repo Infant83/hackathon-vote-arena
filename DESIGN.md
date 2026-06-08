@@ -9,6 +9,24 @@ An LG-inspired internal event platform with two coordinated surfaces:
 
 The administrator can switch the global theme from the control desk. The interface should feel polished, useful, and live without becoming noisy. The dark stage style is for auditorium focus and should not reduce mobile voting readability.
 
+## Theme Packs
+
+The app uses three shared surface classes and several selectable theme packs.
+
+- `light`: neutral operation surfaces for normal admin and participant use.
+- `pastel`: bright brutalist/paper/watercolor surfaces for Brutalism Pastel Yellow, LG brutal pastel events, and light Q&A meetings.
+- `stage`: dark auditorium surfaces for wall projection and high-contrast live operation.
+
+Selectable packs include `light`, `stage`, `pastel`, LG brutal pastel/white, candy grid, mint paper, watercolor mint/coral, sky paper, storybook meadow, soft animation air, clean lab, slate ops, aurora stage, midnight coral, ocean stage, and LG brutal night.
+
+Rules:
+
+- A theme pack changes CSS tokens first. Avoid adding a full parallel CSS theme unless a specific surface needs a new layout.
+- `/vote`, `/message`, `/wall`, and `/admin` must be checked together after a theme change.
+- Pastel packs keep dark ink text, paper panels, and small brutalist shadows. Coral and LG Red act as emphasis, not as full backgrounds.
+- Stage packs keep off-white text on translucent dark panels. Cyan, magenta, and coral are accents for live state and action.
+- Browser title, favicon, and app logo should identify the platform as `Vibe Arena`, while event copy can still rename the current meeting.
+
 ## Colors
 
 | Token | Value | Role |

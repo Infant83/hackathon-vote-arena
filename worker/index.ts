@@ -2,6 +2,7 @@ import rawHackathonQ1Config from '../event-configs/2026_ax_hackathon_q1_vote_qui
 import rawAxQ1Config from '../event-configs/2026_ax_group_q1_meeting.json'
 import rawAxQ2Config from '../event-configs/2026_ax_group_q2_meeting.json'
 import rawAireverConfig from '../event-configs/2026_06_airever.json'
+import rawScmaxConfig from '../event-configs/2026_06_scmax.json'
 import rawSpecialConfig from '../event-configs/2026_ax_special_message_vote_quiz.json'
 import rawConfig from '../teams.json'
 import { inflateSync, strFromU8 } from 'fflate'
@@ -67,6 +68,26 @@ const publicMutationCooldownMs = new Map<string, number>([
 const maxRateLimitEntries = 5000
 const wallSessionValues = ['overview', 'raffle', 'showup', 'qna', 'quiz'] as const
 const defaultWallEnabledPanels = [...wallSessionValues]
+const themeModeValues = [
+  'light',
+  'stage',
+  'pastel',
+  'lg-brutal-pastel',
+  'lg-brutal-white',
+  'candy-grid',
+  'mint-paper',
+  'watercolor-mint',
+  'watercolor-coral',
+  'sky-paper',
+  'storybook-meadow',
+  'soft-anime-air',
+  'clean-lab',
+  'slate-ops',
+  'aurora-stage',
+  'midnight-coral',
+  'ocean-stage',
+  'lg-brutal-night',
+] as const
 const snapshotKey = 'event-state-v1'
 const mediaStoragePrefix = 'event-media-v1:'
 const storedMediaTokenPrefix = '__stored_media__:'
@@ -79,6 +100,8 @@ type Env = {
   ARENA_ROOM_NAME?: string
   ADMIN_PASSCODE?: string
 }
+
+type ThemeMode = (typeof themeModeValues)[number]
 
 type EventClientRole = 'admin' | 'wall' | 'vote'
 
@@ -318,7 +341,7 @@ type Settings = {
   quizAnswerLimit: number
   quizInitialConfirmDelaySeconds: number
   cheerNameMode: 'masked' | 'real'
-  themeMode: 'light' | 'stage' | 'pastel'
+  themeMode: ThemeMode
   fontMode: 'vibe' | 'system' | 'soft'
   wallEnabledPanels: Array<(typeof wallSessionValues)[number]>
   qnaWallFontScale: number
@@ -694,6 +717,7 @@ const initialConfigByRoomName = new Map<string, LoadedConfig>([
   ['meeting26q1', loadConfig(rawAxQ1Config)],
   ['2026-ax-q2-meeting', loadConfig(rawAxQ2Config)],
   ['airever', loadConfig(rawAireverConfig)],
+  ['scmax', loadConfig(rawScmaxConfig)],
   ['special26ax', loadConfig(rawSpecialConfig)],
 ])
 const bundledEventConfigPresets = [
@@ -712,6 +736,10 @@ const bundledEventConfigPresets = [
   {
     file: '2026_06_airever.json',
     config: rawAireverConfig,
+  },
+  {
+    file: '2026_06_scmax.json',
+    config: rawScmaxConfig,
   },
   {
     file: '2026_ax_special_message_vote_quiz.json',
@@ -3988,7 +4016,7 @@ function normalizeCheerNameMode(value: unknown, fallback: Settings['cheerNameMod
 }
 
 function normalizeThemeMode(value: unknown, fallback: Settings['themeMode'] = 'light'): Settings['themeMode'] {
-  if (value === 'stage' || value === 'light' || value === 'pastel') return value
+  if ((themeModeValues as readonly string[]).includes(String(value))) return value as Settings['themeMode']
   return fallback
 }
 

@@ -51,6 +51,30 @@ type LogoKind = 'orbit' | 'beam' | 'grid' | 'wave' | 'core'
 type ImageShape = 'circle' | 'rounded' | 'square' | 'wide'
 type ImageFit = 'cover' | 'contain'
 type ImageFrame = 'soft' | 'line' | 'glow' | 'clean'
+type ThemeSurfaceClass = 'light' | 'pastel' | 'stage'
+
+const themePackOptions = [
+  { value: 'light', label: '기본 밝은 테마', group: '기본', surface: 'light' },
+  { value: 'stage', label: '어두운 송출 테마', group: '기본', surface: 'stage' },
+  { value: 'pastel', label: '브루탈리즘 파스텔 Yellow', group: '기본', surface: 'pastel' },
+  { value: 'lg-brutal-pastel', label: 'LG 브루탈 파스텔', group: '브루탈 파스텔', surface: 'pastel' },
+  { value: 'lg-brutal-white', label: 'LG 브루탈 화이트', group: '브루탈 파스텔', surface: 'pastel' },
+  { value: 'candy-grid', label: '캔디 그리드', group: '브루탈 파스텔', surface: 'pastel' },
+  { value: 'mint-paper', label: '민트 페이퍼', group: '브루탈 파스텔', surface: 'pastel' },
+  { value: 'watercolor-mint', label: '수채화 민트', group: '수채화', surface: 'pastel' },
+  { value: 'watercolor-coral', label: '수채화 코랄', group: '수채화', surface: 'pastel' },
+  { value: 'sky-paper', label: '맑은 하늘 종이', group: '수채화', surface: 'pastel' },
+  { value: 'storybook-meadow', label: '스토리북 들판', group: '수채화', surface: 'pastel' },
+  { value: 'soft-anime-air', label: '부드러운 애니메이션 에어', group: '수채화', surface: 'pastel' },
+  { value: 'clean-lab', label: '클린 랩', group: '운영 콘솔', surface: 'light' },
+  { value: 'slate-ops', label: '슬레이트 운영실', group: '운영 콘솔', surface: 'stage' },
+  { value: 'aurora-stage', label: '오로라 스테이지', group: '송출 스테이지', surface: 'stage' },
+  { value: 'midnight-coral', label: '미드나잇 코랄', group: '송출 스테이지', surface: 'stage' },
+  { value: 'ocean-stage', label: '오션 스테이지', group: '송출 스테이지', surface: 'stage' },
+  { value: 'lg-brutal-night', label: 'LG 브루탈 나이트', group: '송출 스테이지', surface: 'stage' },
+] as const satisfies ReadonlyArray<{ value: string; label: string; group: string; surface: ThemeSurfaceClass }>
+
+const themePackGroups = Array.from(new Set(themePackOptions.map((option) => option.group)))
 
 type Team = {
   id: string
@@ -259,7 +283,7 @@ type CheerHistoryResponse = {
   hasMore: boolean
 }
 
-type ThemeMode = 'light' | 'stage' | 'pastel'
+type ThemeMode = (typeof themePackOptions)[number]['value']
 type FontMode = 'vibe' | 'system' | 'soft'
 type TimerMode = 'duration' | 'targetTime'
 
@@ -1440,7 +1464,7 @@ const raffleDismissedKey = 'vibe-vote-raffle-dismissed-at'
 const quizWinnerDismissedKey = 'vibe-vote-quiz-winner-dismissed'
 const themeModeKey = 'vibe-vote-theme-mode'
 const fontModeKey = 'vibe-vote-font-mode'
-const defaultBrandLogoFile = '/event-brand/trophy-static.png'
+const defaultBrandLogoFile = '/event-brand/vibe-arena-logo-web.png'
 const raffleTrophyGifFile = '/event-brand/trophy-spin.gif'
 const cookieMaxAge = 60 * 60 * 24 * 14
 const fallbackCopy: EventCopy = {
@@ -1871,6 +1895,7 @@ function App() {
   const { state, connection, post } = useEventState(mode, participantId, eventStateEnabled, allowProtectedRealtime)
   const themeMode = getThemeMode(state)
   const fontMode = getFontMode(state)
+  const themeClassName = getThemeClassName(themeMode)
   const [name, setName] = useState(() => getStoredValue(nameKey))
   const [group, setGroup] = useState(() => getStoredValue(groupKey))
   const [department, setDepartment] = useState(() => getStoredValue(departmentKey))
@@ -1959,7 +1984,7 @@ function App() {
 
   if (mode === 'not-found') {
     return (
-      <main className={`app-shell theme-${themeMode} message-shell-app`}>
+      <main className={`app-shell ${themeClassName} message-shell-app`}>
         <RouteStatusView
           eyebrow="Route"
           title="알 수 없는 화면입니다."
@@ -1973,14 +1998,14 @@ function App() {
 
   if (protectedDisplayMode && (!adminSession.ready || (adminSession.required && !adminSession.authenticated))) {
     return (
-      <main className={`app-shell theme-${themeMode}`}>
+      <main className={`app-shell ${themeClassName}`}>
         <AdminLoginView session={adminSession} />
       </main>
     )
   }
 
   return (
-    <main className={`app-shell theme-${themeMode} ${mode === 'wall' ? 'wall-shell-app' : ''} ${mode === 'message' || mode === 'quiz' ? 'message-shell-app' : ''}`}>
+    <main className={`app-shell ${themeClassName} ${mode === 'wall' ? 'wall-shell-app' : ''} ${mode === 'message' || mode === 'quiz' ? 'message-shell-app' : ''}`}>
       <Header
         mode={mode}
         connection={connection}
@@ -2269,20 +2294,26 @@ function syncAdminPanelRoute(panel: AdminPanel | null) {
   window.history.replaceState(null, '', nextPath)
 }
 
-function getDocumentTitle(mode: AppMode, wallPanel: WallPanel) {
-  if (mode === 'wall') return `vibe-arena/wall${wallPanel === 'overview' ? '' : `/${wallPanel}`}`
+function getDocumentTitle(mode: AppMode, wallPanel: WallPanel, adminPanel?: AdminPanel | null) {
+  const brand = 'Vibe Arena'
+  if (mode === 'wall') return `${brand} · Wall${wallPanel === 'overview' ? '' : ` · ${getWallPanelTitle(wallPanel)}`}`
   if (mode === 'admin') {
-    const panel = getInitialAdminPanel()
-    return `vibe-arena/admin${panel ? `/${panel}` : ''}`
+    const panel = adminPanel === undefined ? getInitialAdminPanel() : adminPanel
+    return `${brand} · Admin${panel ? ` · ${getAdminPanelTitle(panel)}` : ''}`
   }
   if (mode === 'team') {
     const teamId = getTeamEditRouteId()
-    return `vibe-arena/team${teamId ? `/${teamId}` : ''}`
+    return `${brand} · Team${teamId ? ` · ${teamId}` : ''}`
   }
-  if (mode === 'message') return 'vibe-arena/message'
-  if (mode === 'quiz') return 'vibe-arena/quiz'
-  if (mode === 'not-found') return 'vibe-arena/not-found'
-  return 'vibe-arena/vote'
+  if (mode === 'message') return `${brand} · Message`
+  if (mode === 'quiz') return `${brand} · Quiz`
+  if (mode === 'not-found') return `${brand} · Not Found`
+  return `${brand} · Vote`
+}
+
+function getWallPanelTitle(panel: WallPanel) {
+  const match = wallSessionOptions.find((option) => option.value === panel)
+  return match?.label || panel
 }
 
 function getWallShowupButtonLabel(copy: EventCopy) {
@@ -4454,7 +4485,7 @@ function AdminView({
 
   useEffect(() => {
     syncAdminPanelRoute(visiblePanel)
-    document.title = visiblePanel ? `vibe-arena/admin/${visiblePanel}` : 'vibe-arena/admin'
+    document.title = getDocumentTitle('admin', 'overview', visiblePanel)
   }, [visiblePanel])
 
   const openQuizPanel = () => {
@@ -4975,26 +5006,34 @@ function AdminView({
                 type="number"
                 min={0.85}
                 max={1.55}
-                step={0.05}
+                step={0.01}
                 defaultValue={qnaWallFontScale}
               />
               <em>x</em>
             </div>
             <small className="control-hint">Q&A board의 질문 본문과 작성자 정보 크기를 조정합니다. 기본 1.12x입니다.</small>
           </label>
-          <label>
+          <label className="display-setting-field">
             <span>화면 테마</span>
             <select
               name="themeMode"
               defaultValue={themeMode}
               onChange={(event) => applyDisplayMode(event.currentTarget.value as ThemeMode, fontMode)}
             >
-              <option value="light">기본 밝은 테마</option>
-              <option value="pastel">AX Lotto 파스텔</option>
-              <option value="stage">어두운 송출 테마</option>
+              {themePackGroups.map((group) => (
+                <optgroup key={group} label={group}>
+                  {themePackOptions
+                    .filter((option) => option.group === group)
+                    .map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                </optgroup>
+              ))}
             </select>
           </label>
-          <label>
+          <label className="display-setting-field">
             <span>글씨체</span>
             <select
               name="fontMode"
@@ -8100,7 +8139,7 @@ function TeamConfigDetail({
         <div className="visual-config-list">
           <ImageSourceField
             label="상단 로고"
-            description="/vote, /wall, /admin 좌측 상단 V 로고 자리에 표시됩니다."
+            description="PC 파일은 저장 및 반영 후 현재 room에 저장됩니다. 배포 asset은 /event-brand/scmax_logo.jpg처럼 입력합니다."
             value={draftCopy.appLogoFile}
             previewLabel="로고 미리보기"
             onRawChange={(value) => updateCopy('appLogoFile', value)}
@@ -8678,7 +8717,7 @@ function LogoSourceField({
       <div className="logo-source-row">
         <input
           value={team.logoFile}
-          placeholder="https://... 또는 /team-logos/T1-logo.png"
+          placeholder="https://... 또는 /event-brand/scmax_logo.jpg"
           onChange={(event) => onRawChange(event.target.value)}
           onBlur={(event) => onChange(event.target.value)}
           aria-label={`${team.name || `Team ${index + 1}`} 로고 또는 팀 사진 주소`}
@@ -9179,7 +9218,7 @@ function ImageSourceField({
       <div className="logo-source-row">
         <input
           value={value}
-          placeholder="https://... 또는 Google Drive 공유 링크"
+          placeholder="https://..., event-brand/scmax_logo.jpg, Google Drive 공유 링크"
           onChange={(event) => onRawChange(event.target.value)}
           onBlur={(event) => onChange(event.target.value)}
           aria-label={`${label} 이미지 주소`}
@@ -11064,7 +11103,7 @@ function getInitialEventState(): EventState {
 }
 
 function normalizeStoredThemeMode(value: string): ThemeMode | '' {
-  return value === 'light' || value === 'stage' || value === 'pastel' ? value : ''
+  return isThemeMode(value) ? value : ''
 }
 
 function normalizeStoredFontMode(value: string): FontMode | '' {
@@ -11366,7 +11405,18 @@ function normalizeLogoSourceValue(value: string) {
     return `https://drive.google.com/thumbnail?id=${encodeURIComponent(driveId)}&sz=w1200`
   }
 
+  const publicAssetPath = normalizePublicAssetPath(trimmed)
+  if (publicAssetPath) return publicAssetPath
+
   return trimmed
+}
+
+function normalizePublicAssetPath(value: string) {
+  if (!value || /^data:image\//i.test(value) || /^[a-z]+:/i.test(value)) return ''
+  const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/?public\//, '').trim()
+  if (/^(event-brand|team-logos|prev_settings)\//i.test(normalized)) return `/${normalized}`
+  if (/^\/(event-brand|team-logos|prev_settings)\//i.test(normalized)) return normalized
+  return ''
 }
 
 function extractGoogleDriveFileId(value: string) {
@@ -12613,9 +12663,19 @@ function getTeamPhotoFrameLabel(team: TeamVisual) {
 }
 
 function getThemeMode(state: EventState): ThemeMode {
-  if (state.settings.themeMode === 'stage') return 'stage'
-  if (state.settings.themeMode === 'pastel') return 'pastel'
-  return 'light'
+  return isThemeMode(state.settings.themeMode) ? state.settings.themeMode : 'light'
+}
+
+function isThemeMode(value: unknown): value is ThemeMode {
+  return typeof value === 'string' && themePackOptions.some((option) => option.value === value)
+}
+
+function getThemeSurfaceClass(themeMode: ThemeMode): ThemeSurfaceClass {
+  return themePackOptions.find((option) => option.value === themeMode)?.surface || 'light'
+}
+
+function getThemeClassName(themeMode: ThemeMode) {
+  return `theme-${getThemeSurfaceClass(themeMode)} theme-pack-${themeMode}`
 }
 
 function getFontMode(state: EventState): FontMode {
