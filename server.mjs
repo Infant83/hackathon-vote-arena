@@ -238,6 +238,8 @@ const brandLogoCopyKeys = [
   'appLogoFocusX',
   'appLogoFocusY',
 ]
+// Before this deployment, airever could carry a stale inline logo in storage.
+const legacyInlineBrandLogoCutoffMs = Date.parse('2026-06-08T03:45:00.000Z')
 
 const defaultTeams = [
   {
@@ -996,7 +998,7 @@ function getRuntimeSettings(source = settings) {
 }
 
 function getRuntimeCopy() {
-  if (!shouldPreferBundledBrandCopy(copy, appConfig.copy)) return copy
+  if (!shouldPreferBundledBrandCopy(copy, appConfig.copy, configUpdatedAt)) return copy
   return normalizeCopy({ ...copy, ...pickBundledBrandLogoCopy(appConfig.copy) })
 }
 
@@ -1230,8 +1232,8 @@ function shouldPreferBundledLogo(currentLogo, bundledLogo) {
   return isLargeInlineImageSource(currentLogo) && typeof bundledLogo === 'string' && Boolean(bundledLogo) && !isLargeInlineImageSource(bundledLogo)
 }
 
-function shouldPreferBundledBrandCopy(current, bundled) {
-  return shouldPreferBundledLogo(current.appLogoFile, bundled.appLogoFile)
+function shouldPreferBundledBrandCopy(current, bundled, updatedAt) {
+  return Number(updatedAt || 0) < legacyInlineBrandLogoCutoffMs && shouldPreferBundledLogo(current.appLogoFile, bundled.appLogoFile)
 }
 
 function pickBundledBrandLogoCopy(bundled) {

@@ -549,6 +549,8 @@ const brandLogoCopyKeys = [
   'appLogoFocusX',
   'appLogoFocusY',
 ] as const satisfies Array<keyof typeof defaultCopy>
+// Before this deployment, airever could carry a stale inline logo in storage.
+const legacyInlineBrandLogoCutoffMs = Date.parse('2026-06-08T03:45:00.000Z')
 
 const defaultTeams: TeamConfig[] = [
   {
@@ -1875,7 +1877,7 @@ export class ArenaRoom {
   }
 
   private getRuntimeCopy(): EventCopy {
-    if (!shouldPreferBundledBrandCopy(this.copy, this.initialConfig.copy)) return this.copy
+    if (!shouldPreferBundledBrandCopy(this.copy, this.initialConfig.copy, this.configUpdatedAt)) return this.copy
     return normalizeCopy({ ...this.copy, ...pickBundledBrandLogoCopy(this.initialConfig.copy) })
   }
 
@@ -3053,8 +3055,8 @@ function shouldPreferBundledLogo(currentLogo: unknown, bundledLogo: unknown): bu
   return isLargeInlineImageSource(currentLogo) && typeof bundledLogo === 'string' && Boolean(bundledLogo) && !isLargeInlineImageSource(bundledLogo)
 }
 
-function shouldPreferBundledBrandCopy(current: EventCopy, bundled: EventCopy) {
-  return shouldPreferBundledLogo(current.appLogoFile, bundled.appLogoFile)
+function shouldPreferBundledBrandCopy(current: EventCopy, bundled: EventCopy, updatedAt: number) {
+  return Number(updatedAt || 0) < legacyInlineBrandLogoCutoffMs && shouldPreferBundledLogo(current.appLogoFile, bundled.appLogoFile)
 }
 
 function pickBundledBrandLogoCopy(bundled: EventCopy): Partial<EventCopy> {
