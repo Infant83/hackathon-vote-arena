@@ -537,6 +537,19 @@ const defaultCopy = {
   awardHistoryNotice: '당첨 선물은 행사 종료 후 운영진 확인을 거쳐 순차적으로 전달됩니다.',
 }
 
+const brandLogoCopyKeys = [
+  'appLogoFile',
+  'appLogoShape',
+  'appLogoFrame',
+  'appLogoFit',
+  'appLogoSize',
+  'appLogoWidth',
+  'appLogoHeight',
+  'appLogoZoom',
+  'appLogoFocusX',
+  'appLogoFocusY',
+] as const satisfies Array<keyof typeof defaultCopy>
+
 const defaultTeams: TeamConfig[] = [
   {
     id: 'team-aurora',
@@ -1863,7 +1876,7 @@ export class ArenaRoom {
 
   private getRuntimeCopy(): EventCopy {
     if (!shouldPreferBundledBrandCopy(this.copy, this.initialConfig.copy)) return this.copy
-    return normalizeCopy({ ...this.copy, ...this.initialConfig.copy })
+    return normalizeCopy({ ...this.copy, ...pickBundledBrandLogoCopy(this.initialConfig.copy) })
   }
 
   private getRuntimeTeams(): TeamConfig[] {
@@ -3042,6 +3055,16 @@ function shouldPreferBundledLogo(currentLogo: unknown, bundledLogo: unknown): bu
 
 function shouldPreferBundledBrandCopy(current: EventCopy, bundled: EventCopy) {
   return shouldPreferBundledLogo(current.appLogoFile, bundled.appLogoFile)
+}
+
+function pickBundledBrandLogoCopy(bundled: EventCopy): Partial<EventCopy> {
+  const next: Partial<EventCopy> = {}
+
+  for (const key of brandLogoCopyKeys) {
+    next[key] = bundled[key]
+  }
+
+  return next
 }
 
 function extractStoredMedia<T>(value: T) {

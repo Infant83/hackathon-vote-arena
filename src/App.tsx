@@ -4620,7 +4620,7 @@ function AdminView({
           {visiblePanel === 'arena' ? <ArenaDetailPanel state={state} starBudget={starBudget} maxStarsPerTeam={maxStarsPerTeam} /> : null}
           {visiblePanel === 'participants' ? <ParticipantDetailPanel state={state} post={post} /> : null}
           {visiblePanel === 'messages' ? <MessageManagerDetail state={state} post={post} /> : null}
-          {visiblePanel === 'teams' ? <TeamConfigDetail key={getEditableConfigSignature(state)} state={state} post={post} /> : null}
+          {visiblePanel === 'teams' ? <TeamConfigDetail state={state} post={post} /> : null}
           {visiblePanel === 'quiz' ? <QuizAdminPanel state={state} post={post} onEndQuiz={endQuizAndClosePanel} detail /> : null}
           {visiblePanel === 'export' ? <ResultExportDetailPanel state={state} /> : null}
           {visiblePanel === 'raffle' ? (
@@ -7239,7 +7239,7 @@ function EventOpsPolicyNotice({ state }: { state: EventState }) {
         <div>
           <span>Preset</span>
           <strong>{settingsRoomName}</strong>
-          <em>불러오기는 DB를 바꾸지 않고 현재 room에 설정만 적용합니다.</em>
+          <em>불러와 적용은 현재 room에 선택한 설정을 반영합니다.</em>
         </div>
         <div>
           <span>행사 종료</span>
@@ -7712,7 +7712,7 @@ function TeamConfigDetail({
       eventId: String(event.id || '').trim() || undefined,
       roomName: String(event.roomName || state.eventProfile?.roomName || '').trim() || undefined,
       settingsFile: String(event.settingsFile || '').trim() || undefined,
-      description: `${draftTeams.length}팀 · 퀴즈 ${draftQuizzes.length}개 · ${formatSettingsSnapshotTime(Date.now())}`,
+      description: `${draftCopy.appTitle || label} · ${draftTeams.length}팀 · 퀴즈 ${draftQuizzes.length}개 · ${formatSettingsSnapshotTime(Date.now())}`,
       createdAt: Date.now(),
       payload,
     }
@@ -7723,7 +7723,7 @@ function TeamConfigDetail({
       setLocalSettingsSnapshots(nextSnapshots)
       setSelectedPresetId(`local:${snapshot.id}`)
       setSettingsSnapshotName('')
-      setStatusText(`${label} 설정을 이 브라우저 보관함에 저장했습니다. 다음 운영 때 드롭다운에서 바로 불러올 수 있습니다.`)
+      setStatusText(`${label} 설정을 이 브라우저 보관함에 저장했고 드롭다운에서 선택했습니다. 현재 room에 반영할 때는 불러와 적용을 누르세요.`)
     } catch {
       setStatusText('브라우저 보관함 용량이 부족해 이름으로 저장하지 못했습니다. settings.json 저장으로 파일 백업을 먼저 남겨주세요.')
     }
@@ -7804,10 +7804,10 @@ function TeamConfigDetail({
       const currentRoom = state.eventProfile?.roomName || '확인되지 않음'
       const presetRoom = preset.roomName || '지정 없음'
       const confirmed = window.confirm(
-        `선택한 프리셋의 권장 DB room은 "${presetRoom}"이고 현재 실행 중인 DB room은 "${currentRoom}"입니다.\n\n불러오기를 계속하면 DB를 바꾸지 않고 현재 room에 설정만 적용합니다. 계속할까요?`,
+        `선택한 프리셋의 권장 DB room은 "${presetRoom}"이고 현재 실행 중인 DB room은 "${currentRoom}"입니다.\n\n계속하면 현재 room에 이 설정을 적용합니다. 계속할까요?`,
       )
       if (!confirmed) {
-        setStatusText('프리셋 불러오기를 취소했습니다. 현재 DB room은 변경되지 않았습니다.')
+        setStatusText('프리셋 적용을 취소했습니다. 현재 room 설정은 그대로 유지했습니다.')
         return
       }
     }
@@ -7836,7 +7836,8 @@ function TeamConfigDetail({
         setDraftCopy({ ...fallbackCopy, ...nextState.copy })
         setDraftTeams(createTeamDrafts(nextState.teams))
         setDraftQuizzes(createQuizDrafts(nextState.quizBank))
-        setStatusText(`${preset.label} 설정을 적용했습니다. ${getConfigSavedStatus(nextState)}`)
+        setSelectedPresetId(preset.id)
+        setStatusText(`${preset.label} 설정을 현재 room ${nextState.eventProfile?.roomName || currentRoomName || '확인 전'}에 적용했습니다. ${getConfigSavedStatus(nextState)}`)
       } else {
         setStatusText(getConfigSaveFailureMessage(new Error('no response'), saveTarget))
       }
@@ -7895,7 +7896,7 @@ function TeamConfigDetail({
             <Save size={16} />
             이름으로 보관
           </button>
-          <span>현재 편집 draft를 이 브라우저에 저장합니다. 다른 PC로 옮길 때는 settings.json 저장을 함께 사용합니다.</span>
+          <span>현재 편집 draft를 이 브라우저에 보관합니다. 운영 room 반영은 저장 및 반영 또는 불러와 적용으로 완료합니다.</span>
         </div>
 
         {availableSettingsPresets.length ? (
@@ -7912,7 +7913,7 @@ function TeamConfigDetail({
             </label>
             <button type="button" onClick={loadPresetConfig} disabled={savingConfig || !effectiveSelectedPresetId}>
               <Upload size={16} />
-              불러오기
+              불러와 적용
             </button>
             {selectedLocalSettingsSnapshot ? (
               <button type="button" className="subtle-danger-action" onClick={deleteNamedSettingsSnapshot} disabled={savingConfig}>
@@ -7929,7 +7930,7 @@ function TeamConfigDetail({
               {selectedSettingsPreset?.source === 'browser-snapshot' ? <span>출처: 이 브라우저 보관함</span> : null}
               {selectedSettingsPreset?.settingsFile ? <span>파일: {selectedSettingsPreset.settingsFile}</span> : null}
               {selectedSettingsPreset?.description ? <span>{selectedSettingsPreset.description}</span> : null}
-              {selectedPresetRoomMismatch ? <strong>room이 다릅니다. 불러오면 DB를 바꾸지 않고 현재 room에 설정만 적용됩니다.</strong> : null}
+              {selectedPresetRoomMismatch ? <strong>room 이름이 다릅니다. 계속하면 현재 room에 선택한 설정을 적용합니다.</strong> : null}
             </div>
           </div>
         ) : (
@@ -11582,7 +11583,7 @@ function isInlineImageSource(value: unknown): value is string {
 function getConfigSavedStatus(state: EventState) {
   const savedAt = state.configUpdatedAt || Date.now()
   const revision = Math.max(1, Math.floor(Number(state.configRevision) || 1))
-  return `팀 정보가 저장되고 화면에 반영되었습니다. 저장 시각 ${formatMessageTime(savedAt)} · 반영 버전 ${revision}`
+  return `운영 콘텐츠가 저장되고 열린 화면에 반영되었습니다. 저장 시각 ${formatMessageTime(savedAt)} · 반영 버전 ${revision}`
 }
 
 async function saveTeamConfigPayload(post: PostEventState, payload: TeamInfoUpload) {

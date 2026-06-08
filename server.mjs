@@ -226,6 +226,19 @@ const defaultCopy = {
   awardHistoryNotice: '당첨 선물은 행사 종료 후 운영진 확인을 거쳐 순차적으로 전달됩니다.',
 }
 
+const brandLogoCopyKeys = [
+  'appLogoFile',
+  'appLogoShape',
+  'appLogoFrame',
+  'appLogoFit',
+  'appLogoSize',
+  'appLogoWidth',
+  'appLogoHeight',
+  'appLogoZoom',
+  'appLogoFocusX',
+  'appLogoFocusY',
+]
+
 const defaultTeams = [
   {
     id: 'team-aurora',
@@ -984,7 +997,7 @@ function getRuntimeSettings(source = settings) {
 
 function getRuntimeCopy() {
   if (!shouldPreferBundledBrandCopy(copy, appConfig.copy)) return copy
-  return normalizeCopy({ ...copy, ...appConfig.copy })
+  return normalizeCopy({ ...copy, ...pickBundledBrandLogoCopy(appConfig.copy) })
 }
 
 function getRuntimeTeams() {
@@ -1219,6 +1232,18 @@ function shouldPreferBundledLogo(currentLogo, bundledLogo) {
 
 function shouldPreferBundledBrandCopy(current, bundled) {
   return shouldPreferBundledLogo(current.appLogoFile, bundled.appLogoFile)
+}
+
+function pickBundledBrandLogoCopy(bundled) {
+  const next = {}
+
+  for (const key of brandLogoCopyKeys) {
+    if (typeof bundled?.[key] === 'string') {
+      next[key] = bundled[key]
+    }
+  }
+
+  return next
 }
 
 function normalizeAllocations(input) {
