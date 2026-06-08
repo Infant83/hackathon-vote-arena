@@ -982,6 +982,34 @@ function getRuntimeSettings(source = settings) {
   }
 }
 
+function getRuntimeCopy() {
+  if (!shouldPreferBundledBrandCopy(copy, appConfig.copy)) return copy
+  return normalizeCopy({ ...copy, ...appConfig.copy })
+}
+
+function getRuntimeTeams() {
+  const bundledById = new Map(appConfig.teams.map((team) => [team.id, team]))
+
+  return teams.map((team, index) => {
+    const bundled = bundledById.get(team.id) || appConfig.teams[index]
+    if (!shouldPreferBundledLogo(team.logoFile, bundled?.logoFile)) return team
+
+    return normalizeTeam({
+      ...team,
+      logoFile: bundled.logoFile,
+      logoShape: bundled.logoShape,
+      logoFrame: bundled.logoFrame,
+      logoFit: bundled.logoFit,
+      logoSize: bundled.logoSize,
+      logoWidth: bundled.logoWidth,
+      logoHeight: bundled.logoHeight,
+      logoZoom: bundled.logoZoom,
+      logoFocusX: bundled.logoFocusX,
+      logoFocusY: bundled.logoFocusY,
+    }, team, index)
+  })
+}
+
 function getState(options = {}) {
   const serverTime = Date.now()
 
@@ -1038,7 +1066,9 @@ function getState(options = {}) {
       dynamicVotersByTeam.set(teamId, (dynamicVotersByTeam.get(teamId) || 0) + 1)
     }
   }
-  const teamStats = teams
+  const runtimeTeams = getRuntimeTeams()
+  const runtimeCopy = getRuntimeCopy()
+  const teamStats = runtimeTeams
     .map((team) => {
       const baselineStars = testMode ? team.baseStars : 0
       const baselineVoters = testMode ? team.baseVoters : 0
@@ -1085,7 +1115,7 @@ function getState(options = {}) {
     sessionId,
     testMode,
     settings: getRuntimeSettings(),
-    copy,
+    copy: runtimeCopy,
     eventProfile: getRuntimeEventProfile(),
     configRevision,
     configUpdatedAt,
@@ -1181,6 +1211,14 @@ function slimQuizConfigMedia(quiz) {
 
 function isLargeInlineImageSource(value) {
   return typeof value === 'string' && /^data:image\//i.test(value) && value.length > 4096
+}
+
+function shouldPreferBundledLogo(currentLogo, bundledLogo) {
+  return isLargeInlineImageSource(currentLogo) && typeof bundledLogo === 'string' && Boolean(bundledLogo) && !isLargeInlineImageSource(bundledLogo)
+}
+
+function shouldPreferBundledBrandCopy(current, bundled) {
+  return shouldPreferBundledLogo(current.appLogoFile, bundled.appLogoFile)
 }
 
 function normalizeAllocations(input) {
@@ -2697,7 +2735,7 @@ function getOpsAudit() {
     runtime: 'node',
     configFile: getConfigPathLabel(),
     eventProfile: getRuntimeEventProfile(),
-    appTitle: copy.appTitle,
+    appTitle: getRuntimeCopy().appTitle,
     sessionId,
     settings: runtimeSettings,
     counts: {

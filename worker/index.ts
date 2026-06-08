@@ -1576,7 +1576,9 @@ export class ArenaRoom {
       }
     }
 
-    const teamStats = this.teams
+    const runtimeTeams = this.getRuntimeTeams()
+    const runtimeCopy = this.getRuntimeCopy()
+    const teamStats = runtimeTeams
       .map((team) => {
         const baselineStars = this.testMode ? team.baseStars : 0
         const baselineVoters = this.testMode ? team.baseVoters : 0
@@ -1625,7 +1627,7 @@ export class ArenaRoom {
       sessionId: this.sessionId,
       testMode: this.testMode,
       settings: this.getRuntimeSettings(),
-      copy: this.copy,
+      copy: runtimeCopy,
       eventProfile: getRuntimeEventProfile(this.eventProfile, this.roomName),
       configRevision: this.configRevision,
       configUpdatedAt: this.configUpdatedAt,
@@ -1772,7 +1774,7 @@ export class ArenaRoom {
       runtime: 'cloudflare-workers',
       arenaRoomName: roomName,
       eventProfile: getRuntimeEventProfile(this.eventProfile, this.roomName),
-      appTitle: this.copy.appTitle,
+      appTitle: this.getRuntimeCopy().appTitle,
       sessionId: this.sessionId,
       settings: runtimeSettings,
       counts: {
@@ -1857,6 +1859,34 @@ export class ArenaRoom {
 
   private getRuntimeSettings(source: Settings = this.settings): Settings {
     return normalizeRuntimeSettings(source)
+  }
+
+  private getRuntimeCopy(): EventCopy {
+    if (!shouldPreferBundledBrandCopy(this.copy, this.initialConfig.copy)) return this.copy
+    return normalizeCopy({ ...this.copy, ...this.initialConfig.copy })
+  }
+
+  private getRuntimeTeams(): TeamConfig[] {
+    const bundledById = new Map(this.initialConfig.teams.map((team) => [team.id, team]))
+
+    return this.teams.map((team, index) => {
+      const bundled = bundledById.get(team.id) || this.initialConfig.teams[index]
+      if (!shouldPreferBundledLogo(team.logoFile, bundled?.logoFile)) return team
+
+      return normalizeTeam({
+        ...team,
+        logoFile: bundled.logoFile,
+        logoShape: bundled.logoShape,
+        logoFrame: bundled.logoFrame,
+        logoFit: bundled.logoFit,
+        logoSize: bundled.logoSize,
+        logoWidth: bundled.logoWidth,
+        logoHeight: bundled.logoHeight,
+        logoZoom: bundled.logoZoom,
+        logoFocusX: bundled.logoFocusX,
+        logoFocusY: bundled.logoFocusY,
+      }, team, index)
+    })
   }
 
   private applyTeamConfig(body: RequestBody) {
@@ -3004,6 +3034,14 @@ function slimQuizConfigMedia<T extends QuizConfig>(quiz: T): T {
 
 function isLargeInlineImageSource(value: unknown): value is string {
   return typeof value === 'string' && /^data:image\//i.test(value) && value.length > 4096
+}
+
+function shouldPreferBundledLogo(currentLogo: unknown, bundledLogo: unknown): bundledLogo is string {
+  return isLargeInlineImageSource(currentLogo) && typeof bundledLogo === 'string' && Boolean(bundledLogo) && !isLargeInlineImageSource(bundledLogo)
+}
+
+function shouldPreferBundledBrandCopy(current: EventCopy, bundled: EventCopy) {
+  return shouldPreferBundledLogo(current.appLogoFile, bundled.appLogoFile)
 }
 
 function extractStoredMedia<T>(value: T) {

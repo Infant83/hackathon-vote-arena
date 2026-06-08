@@ -1985,6 +1985,7 @@ function App() {
         mode={mode}
         connection={connection}
         state={state}
+        stateReady={stateReady}
         wallPanel={syncedWallPanel}
         onWallPanelChange={setWallPanel}
         onOpenCheerConstellation={() => setShowCheerConstellation(true)}
@@ -2025,18 +2026,32 @@ function App() {
       {mode === 'admin' ? (
         <AdminView state={state} connection={connection} post={post} />
       ) : mode === 'wall' ? (
-        <PublicWallView
-          state={state}
-          post={post}
-          wallPanel={syncedWallPanel}
-          onWallPanelChange={setWallPanel}
-          showCheerConstellation={showCheerConstellation}
-          onShowCheerConstellationChange={setShowCheerConstellation}
-        />
+        !stateReady ? (
+          <RouteStatusView
+            eyebrow="Wall"
+            title="송출 화면을 준비하는 중입니다."
+            summary="행사 DB room과 운영 콘텐츠를 확인한 뒤 현재 wall을 표시합니다."
+          />
+        ) : (
+          <PublicWallView
+            state={state}
+            post={post}
+            wallPanel={syncedWallPanel}
+            onWallPanelChange={setWallPanel}
+            showCheerConstellation={showCheerConstellation}
+            onShowCheerConstellationChange={setShowCheerConstellation}
+          />
+        )
       ) : mode === 'team' ? (
         <TeamSelfEditView key={getEditableConfigSignature(state)} state={state} post={post} />
       ) : mode === 'message' || mode === 'quiz' ? (
-        mode === 'quiz' && stateReady && !quizParticipationActive ? (
+        !stateReady ? (
+          <RouteStatusView
+            eyebrow="Q&A"
+            title="행사 설정을 불러오는 중입니다."
+            summary="잠시 뒤 현재 행사에 맞는 질문 화면으로 연결됩니다."
+          />
+        ) : mode === 'quiz' && !quizParticipationActive ? (
           <RouteStatusView
             eyebrow="Quiz"
             title="지금은 진행 중인 퀴즈가 없습니다."
@@ -2308,6 +2323,7 @@ function Header({
   mode,
   connection,
   state,
+  stateReady,
   wallPanel,
   onWallPanelChange,
   onOpenCheerConstellation,
@@ -2321,6 +2337,7 @@ function Header({
   mode: AppMode
   connection: ConnectionState
   state: EventState
+  stateReady: boolean
   wallPanel: WallPanel
   onWallPanelChange: (panel: WallPanel) => void
   onOpenCheerConstellation: () => void
@@ -2342,17 +2359,20 @@ function Header({
   const connectionLabel = connection === 'live' ? 'Live' : connection === 'connecting' ? '연결 중' : '오프라인 데모'
   const voteUrl = `${window.location.host}/vote`
   const isMessageLikeMode = mode === 'message' || mode === 'quiz'
+  const brandStateReady = stateReady
   const headerEyeline =
-    mode === 'admin'
-      ? state.copy.adminEyeline
-      : mode === 'wall'
-        ? state.copy.wallEyeline
-        : isMessageLikeMode
-          ? state.copy.qnaRoomEyeline
-          : state.copy.audienceEyeline
-  const headerTitle = state.copy.appTitle
+    brandStateReady
+      ? mode === 'admin'
+        ? state.copy.adminEyeline
+        : mode === 'wall'
+          ? state.copy.wallEyeline
+          : isMessageLikeMode
+            ? state.copy.qnaRoomEyeline
+            : state.copy.audienceEyeline
+      : ''
+  const headerTitle = brandStateReady ? state.copy.appTitle : ''
   const statusPillIcon = mode === 'team' ? <Settings2 size={16} /> : isMessageLikeMode ? <CircleHelp size={16} /> : <Radio size={16} />
-  const statusPillText = mode === 'team' ? '팀 정보 편집' : mode === 'quiz' ? 'AX Quiz' : mode === 'message' ? state.copy.qnaRoomTitle : '관객 투표 화면'
+  const statusPillText = mode === 'team' ? '팀 정보 편집' : mode === 'quiz' ? 'AX Quiz' : mode === 'message' ? (brandStateReady ? state.copy.qnaRoomTitle : 'Q&A') : '관객 투표 화면'
   const wallStateReady = mode !== 'wall' || hasResolvedEventState(state)
   const wallOverviewEnabled = isWallSessionEnabled(state, 'overview')
   const wallRaffleEnabled = isWallSessionEnabled(state, 'raffle')
@@ -2385,12 +2405,16 @@ function Header({
 
   return (
     <header className={`topbar ${mode === 'admin' ? 'admin-topbar' : 'audience-topbar'} ${mode === 'wall' ? 'wall-topbar' : ''}`} aria-label="행사 상태">
-      <div className="brand-lockup">
-        <BrandMark copy={state.copy} />
+      <div className={`brand-lockup ${brandStateReady ? '' : 'is-loading'}`}>
+        <BrandMark copy={state.copy} ready={brandStateReady} />
         <div>
-          <p className="eyeline">{headerEyeline}</p>
+          <p className={`eyeline ${brandStateReady ? '' : 'brand-loading-text'}`} aria-hidden={!brandStateReady}>
+            {brandStateReady ? headerEyeline : ' '}
+          </p>
           <div className="brand-title-row">
-            <h1>{isMessageLikeMode ? <QnaFontText text={headerTitle} /> : headerTitle}</h1>
+            <h1 className={brandStateReady ? '' : 'brand-loading-text'} aria-hidden={!brandStateReady}>
+              {brandStateReady ? (isMessageLikeMode ? <QnaFontText text={headerTitle} /> : headerTitle) : ' '}
+            </h1>
             {mode === 'admin' ? <span className="admin-console-badge">운영 콘솔</span> : null}
           </div>
         </div>
@@ -2631,9 +2655,15 @@ function Header({
   )
 }
 
-function BrandMark({ copy }: { copy: EventCopy }) {
+function BrandMark({ copy, ready = true }: { copy: EventCopy; ready?: boolean }) {
   const shape = normalizeImageShape(copy.appLogoShape, 'circle')
   const frame = normalizeImageFrame(copy.appLogoFrame, 'soft')
+  const logoStyle = getAppLogoStyle(copy)
+
+  if (!ready) {
+    return <div className={`lg-dot shape-${shape} frame-${frame} logo-loading`} style={logoStyle} aria-hidden="true" />
+  }
+
   const logoFile = copy.appLogoFile || defaultBrandLogoFile
   const isDefaultTrophy = !copy.appLogoFile
   const fit = isDefaultTrophy ? 'contain' : normalizeImageFit(copy.appLogoFit, 'cover')
@@ -2641,7 +2671,7 @@ function BrandMark({ copy }: { copy: EventCopy }) {
   return (
     <div
       className={`lg-dot shape-${shape} frame-${frame} ${logoFile ? 'has-image' : ''} ${isDefaultTrophy ? 'default-trophy-logo' : ''}`}
-      style={getAppLogoStyle(copy)}
+      style={logoStyle}
       aria-hidden="true"
     >
       {logoFile ? (
