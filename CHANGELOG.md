@@ -17,7 +17,8 @@
 
 - `/admin` 운영 규칙 안내에 현재 Worker, 현재 DB room, settings 권장 room, reset/export 경계를 표시했습니다.
 - `/admin?panel=export`에 행사 요약, 현재 DB room, 참여자/팀 수, 별/메시지 수를 표시하고 JSON 백업, XLSX 저장, settings 저장 버튼을 한 곳에 배치했습니다.
-- `/admin?panel=teams`에 `새 보관 이름`과 `이름으로 보관`을 추가해 현재 편집 draft를 브라우저 보관함에 저장하고, 같은 드롭다운에서 다시 불러올 수 있게 했습니다.
+- `/admin?panel=teams`에 `새 저장 이름`, `내 PC에 보관`, `운영 preset 등록`을 두어 브라우저 전용 초안과 같은 DB room 관리자 공유 preset을 분리했습니다.
+- 운영 preset은 현재 `ARENA_ROOM_NAME` Durable Object storage에 저장되며 다른 관리자 PC의 드롭다운에도 `운영 · ...` 항목으로 표시됩니다.
 - 보관 설정 삭제 버튼과 room mismatch 안내를 함께 두어, 빠른 재사용과 실제 DB 반영 흐름을 분리했습니다.
 - 운영 설정에 화면 테마 드롭다운과 글씨체 드롭다운을 추가해 `기본 밝은 테마`, `AX Lotto 파스텔`, `어두운 송출 테마`와 `Vibe Arena`, `Gowun Dodum`, `시스템 기본` 글씨체를 선택할 수 있게 했습니다.
 - README와 AGENTS에 `ARENA_ROOM_NAME`을 행사 DB room으로 보는 운영 규칙, reset 범위, preset 적용 범위, 행사 종료 백업 순서를 정리했습니다.

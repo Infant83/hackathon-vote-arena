@@ -14,6 +14,7 @@ import {
   Check,
   CircleHelp,
   Clock3,
+  CloudUpload,
   Download,
   Eye,
   EyeOff,
@@ -7496,6 +7497,7 @@ function TeamConfigDetail({
   const selectedLocalSettingsSnapshot = selectedSettingsPreset?.localSnapshotId
     ? localSettingsSnapshots.find((snapshot) => snapshot.id === selectedSettingsPreset.localSnapshotId)
     : undefined
+  const selectedOperationPreset = selectedSettingsPreset?.source === 'operation-preset' ? selectedSettingsPreset : undefined
   const selectedPresetRoomMismatch = isSettingsPresetRoomMismatch(selectedSettingsPreset, state.eventProfile)
   const currentRoomName = state.eventProfile?.roomName || ''
   const currentSettingsRoomName = state.eventProfile?.settingsRoomName || ''
@@ -7548,6 +7550,15 @@ function TeamConfigDetail({
         }
       } catch {
         // Missing public presets should not block event-config presets.
+      }
+
+      try {
+        const response = await fetch('/api/operation-presets', { credentials: 'same-origin', cache: 'no-store' })
+        if (response.ok) {
+          presets.push(...normalizeSettingsPresetManifest((await response.json()) as SettingsPresetManifest))
+        }
+      } catch {
+        // Operation presets are available only after the matching API is deployed.
       }
 
       if (cancelled) return
@@ -7728,6 +7739,52 @@ function TeamConfigDetail({
     }
   }
 
+  const saveOperationPreset = async () => {
+    if (savingConfig) return
+
+    const label = (settingsSnapshotName.trim() || getDefaultSettingsSnapshotName(state.eventProfile)).slice(0, 80)
+    const payload = buildDraftSettingsPayload()
+
+    try {
+      setSavingConfig(true)
+      setStatusText(`${label} 설정을 운영 preset으로 등록하는 중입니다...`)
+      const response = await fetch('/api/operation-presets', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label, payload }),
+      })
+
+      if (!response.ok) {
+        let detail = `운영 preset 등록 실패 (${response.status})`
+        try {
+          const errorPayload = (await response.json()) as { error?: string }
+          if (errorPayload.error) detail = `${errorPayload.error} (${response.status})`
+        } catch {
+          // Keep the generic status message when the response is not JSON.
+        }
+        throw new Error(detail)
+      }
+
+      const manifest = (await response.json()) as SettingsPresetManifest & { preset?: Partial<SettingsPreset> }
+      const operationPresets = normalizeSettingsPresetManifest(manifest)
+      const savedPreset = normalizeSettingsPresetManifest({ presets: manifest.preset ? [manifest.preset] : [] })[0] || operationPresets[0]
+      setSettingsPresets((current) =>
+        uniqueSettingsPresets([
+          ...operationPresets,
+          ...current.filter((preset) => preset.source !== 'operation-preset'),
+        ]),
+      )
+      if (savedPreset) setSelectedPresetId(savedPreset.id)
+      setSettingsSnapshotName('')
+      setStatusText(`${label} 설정을 운영 preset으로 등록했습니다. 같은 DB room의 다른 관리자 PC에서도 이 preset을 볼 수 있습니다.`)
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : '운영 preset으로 등록하지 못했습니다.')
+    } finally {
+      setSavingConfig(false)
+    }
+  }
+
   const deleteNamedSettingsSnapshot = () => {
     if (!selectedLocalSettingsSnapshot) return
     const nextSnapshots = localSettingsSnapshots.filter((snapshot) => snapshot.id !== selectedLocalSettingsSnapshot.id)
@@ -7739,6 +7796,50 @@ function TeamConfigDetail({
       setStatusText(`${selectedLocalSettingsSnapshot.label} 보관 설정을 삭제했습니다.`)
     } catch {
       setStatusText('보관 설정을 삭제하지 못했습니다. 브라우저 저장소 상태를 확인해주세요.')
+    }
+  }
+
+  const deleteOperationPreset = async () => {
+    const preset = selectedOperationPreset
+    if (!preset || savingConfig) return
+
+    const confirmed = window.confirm(`${preset.label} 운영 preset을 삭제할까요?\n\n현재 운영에 이미 반영된 설정은 그대로 유지됩니다.`)
+    if (!confirmed) return
+
+    try {
+      setSavingConfig(true)
+      setStatusText(`${preset.label} 운영 preset을 삭제하는 중입니다...`)
+      const response = await fetch('/api/operation-presets/delete', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ presetId: preset.id }),
+      })
+
+      if (!response.ok) {
+        let detail = `운영 preset 삭제 실패 (${response.status})`
+        try {
+          const errorPayload = (await response.json()) as { error?: string }
+          if (errorPayload.error) detail = `${errorPayload.error} (${response.status})`
+        } catch {
+          // Keep the generic status message when the response is not JSON.
+        }
+        throw new Error(detail)
+      }
+
+      const operationPresets = normalizeSettingsPresetManifest((await response.json()) as SettingsPresetManifest)
+      setSettingsPresets((current) =>
+        uniqueSettingsPresets([
+          ...operationPresets,
+          ...current.filter((entry) => entry.source !== 'operation-preset' && entry.id !== preset.id),
+        ]),
+      )
+      setSelectedPresetId('')
+      setStatusText(`${preset.label} 운영 preset을 삭제했습니다.`)
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : '운영 preset을 삭제하지 못했습니다.')
+    } finally {
+      setSavingConfig(false)
     }
   }
 
@@ -7876,7 +7977,7 @@ function TeamConfigDetail({
       <div className="settings-preset-loader">
         <div className="named-settings-saver">
           <label>
-            <span>새 보관 이름</span>
+            <span>새 저장 이름</span>
             <input
               type="text"
               value={settingsSnapshotName}
@@ -7893,9 +7994,13 @@ function TeamConfigDetail({
           </label>
           <button type="button" onClick={saveNamedSettingsSnapshot} disabled={savingConfig}>
             <Save size={16} />
-            이름으로 보관
+            내 PC에 보관
           </button>
-          <span>현재 편집 draft를 이 브라우저에 보관합니다. 운영 room 반영은 저장 및 반영 또는 불러와 적용으로 완료합니다.</span>
+          <button type="button" className="primary-action" onClick={saveOperationPreset} disabled={savingConfig}>
+            <CloudUpload size={16} />
+            운영 preset 등록
+          </button>
+          <span>내 PC 보관은 이 브라우저 전용입니다. 운영 preset은 현재 DB room에 저장되어 다른 관리자 PC에서도 보입니다.</span>
         </div>
 
         {availableSettingsPresets.length ? (
@@ -7905,7 +8010,7 @@ function TeamConfigDetail({
               <select value={effectiveSelectedPresetId} onChange={(event) => setSelectedPresetId(event.currentTarget.value)} disabled={savingConfig}>
                 {availableSettingsPresets.map((preset) => (
                   <option key={preset.id} value={preset.id}>
-                    {preset.label}
+                    {getSettingsPresetOptionLabel(preset)}
                   </option>
                 ))}
               </select>
@@ -7917,7 +8022,13 @@ function TeamConfigDetail({
             {selectedLocalSettingsSnapshot ? (
               <button type="button" className="subtle-danger-action" onClick={deleteNamedSettingsSnapshot} disabled={savingConfig}>
                 <Trash2 size={16} />
-                보관 삭제
+                내 PC 보관 삭제
+              </button>
+            ) : null}
+            {selectedOperationPreset ? (
+              <button type="button" className="subtle-danger-action" onClick={deleteOperationPreset} disabled={savingConfig}>
+                <Trash2 size={16} />
+                운영 preset 삭제
               </button>
             ) : null}
             <div className={`settings-preset-meta ${selectedPresetRoomMismatch ? 'has-warning' : ''}`}>
@@ -7927,6 +8038,8 @@ function TeamConfigDetail({
               ) : null}
               <span>프리셋 room: <strong>{selectedSettingsPreset?.roomName || '지정 없음'}</strong></span>
               {selectedSettingsPreset?.source === 'browser-snapshot' ? <span>출처: 이 브라우저 보관함</span> : null}
+              {selectedSettingsPreset?.source === 'operation-preset' ? <span>출처: 운영 preset · 같은 DB room 관리자 공유</span> : null}
+              {selectedSettingsPreset?.source === 'event-configs' ? <span>출처: 배포 preset · event-configs</span> : null}
               {selectedSettingsPreset?.settingsFile ? <span>파일: {selectedSettingsPreset.settingsFile}</span> : null}
               {selectedSettingsPreset?.description ? <span>{selectedSettingsPreset.description}</span> : null}
               {selectedPresetRoomMismatch ? <strong>room 이름이 다릅니다. 계속하면 현재 room에 선택한 설정을 적용합니다.</strong> : null}
@@ -11213,6 +11326,21 @@ function getSettingsPresetLoadUrl(preset: SettingsPreset) {
   return preset.file && isSafePresetFile(preset.file) ? `/prev_settings/${preset.file}` : ''
 }
 
+function getSettingsPresetOptionLabel(preset: SettingsPreset) {
+  const sourceLabel =
+    preset.source === 'browser-snapshot'
+      ? '내 PC'
+      : preset.source === 'operation-preset'
+        ? '운영'
+        : preset.source === 'event-configs'
+          ? '배포'
+          : preset.source === 'prev-settings'
+            ? '과거'
+            : ''
+
+  return sourceLabel ? `${sourceLabel} · ${preset.label}` : preset.label
+}
+
 function isSettingsPresetRoomMismatch(preset: SettingsPreset | undefined, profile: EventProfile | undefined) {
   if (!preset?.roomName || !profile?.roomName) return false
   if (profile.runtime !== 'cloudflare-workers') return false
@@ -11226,7 +11354,7 @@ function isSafePresetFile(file: string) {
 function normalizeSettingsPresetLoadUrl(value: unknown) {
   const loadUrl = String(value || '').replace(/\\/g, '/').trim()
   if (!loadUrl || !loadUrl.startsWith('/') || loadUrl.includes('..') || /^[a-z]+:/i.test(loadUrl)) return ''
-  if (!loadUrl.startsWith('/api/settings-presets/') && !loadUrl.startsWith('/prev_settings/')) return ''
+  if (!loadUrl.startsWith('/api/settings-presets/') && !loadUrl.startsWith('/api/operation-presets/') && !loadUrl.startsWith('/prev_settings/')) return ''
   return loadUrl
 }
 

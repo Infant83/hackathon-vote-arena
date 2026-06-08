@@ -538,7 +538,9 @@ npm run realtime
 
 관리자 화면에서 바로 불러올 사전/과거 설정은 `event-configs/`와 `public/prev_settings/`를 함께 활용합니다. 로컬 Node 서버는 `event-configs/*.json`을 관리자 전용 preset API(`/api/settings-presets`)로 노출하고, Cloudflare Worker는 번들에 포함된 행사 설정을 같은 API로 노출합니다. `public/prev_settings/settings_manifest.json`에 등록된 파일도 같은 드롭다운에 함께 표시됩니다. 단, `public/prev_settings/`는 공개 배포에 포함되므로 실명, 내부 소속, 비공개 사진이 들어간 설정은 익명화하거나 비공개 운영 저장소에 따로 보관합니다.
 
-운영 중 만든 편집 초안은 `/admin?panel=teams`의 `새 보관 이름`에 이름을 넣고 `이름으로 보관`을 누르면 같은 브라우저의 설정 보관함에 저장됩니다. 보관한 설정은 `저장된 설정` 드롭다운에 즉시 나타나며, 다음 리허설이나 행사 준비 때 현재 DB room에 다시 적용할 수 있습니다. 이 보관함은 빠른 재사용용입니다. 다른 관리자 PC로 옮기거나 행사 종료 자료로 남길 때는 `settings.json 저장`으로 파일 백업을 함께 보관합니다.
+운영 중 만든 편집 초안은 `/admin?panel=teams`의 `새 저장 이름`에 이름을 넣고 `내 PC에 보관`을 누르면 같은 브라우저의 설정 보관함에 저장됩니다. 보관한 설정은 `저장된 설정` 드롭다운에 즉시 나타나며, 다음 리허설이나 행사 준비 때 현재 DB room에 다시 적용할 수 있습니다. 이 보관함은 빠른 재사용용이며 다른 관리자 PC에는 표시되지 않습니다. 다른 관리자 PC로 옮기거나 행사 종료 자료로 남길 때는 `settings.json 저장`으로 파일 백업을 함께 보관합니다.
+
+같은 행사 room의 여러 관리자 PC가 함께 볼 preset은 `운영 preset 등록`으로 저장합니다. 이 기능은 현재 편집 draft를 현재 `ARENA_ROOM_NAME` Durable Object storage에 이름 붙여 보관하며, 같은 `/admin`에 로그인한 다른 PC의 `저장된 설정` 드롭다운에도 `운영 · ...` 항목으로 표시됩니다. 운영 preset은 repo의 `event-configs/*.json` 파일을 바꾸지 않습니다. 현재 운영 화면에 실제 적용하려면 해당 preset을 선택한 뒤 `불러와 적용`을 누릅니다.
 
 `settings.json`과 `event-configs/*.json`의 `event.roomName`은 해당 설정이 원래 의도한 Durable Object room을 기록하는 운영 메타데이터입니다. 관리자 화면에서 preset을 불러와도 DB room이 자동 전환되지는 않습니다. 현재 DB room은 Worker의 `ARENA_ROOM_NAME`으로 결정되며, Cloudflare 런타임에서 preset의 권장 room과 현재 room이 다르면 관리자 화면이 한 번 더 확인합니다.
 
@@ -661,7 +663,7 @@ settings.zip
 
 Cloudflare Worker에서는 배포된 파일시스템을 직접 수정할 수 없습니다. 그래서 행사 중 수정한 팀 정보와 로고는 `저장 및 반영`을 통해 Cloudflare Durable Object storage에 직접 저장됩니다. 즉, Cloudflare 배포 주소에서 누른 저장은 로컬 PC의 `server.mjs`나 `teams.json`을 호출하지 않고, Cloudflare Worker 안의 운영 상태를 바로 바꿉니다. 행사 후 이 설정을 코드에 영구 반영하려면 관리자 화면에서 `settings.json 저장`을 눌러 `settings.json`을 내려받고, 그 내용을 레포의 `event-configs/<행사명>.json`, `public/prev_settings/<행사명>.settings.json`, 또는 개발 기본값인 `teams.json`에 반영합니다.
 
-`이름으로 보관`은 관리자 브라우저의 로컬 보관함에 현재 편집 draft를 저장합니다. Cloudflare Durable Object에는 `저장 및 반영` 또는 `불러와 적용`으로 반영한 설정이 들어갑니다. 운영자는 행사 중 여러 초안을 보관해 비교할 수 있고, 실제 송출 화면에 적용할 시점에 저장된 설정을 선택한 뒤 `불러와 적용`을 누릅니다.
+`내 PC에 보관`은 관리자 브라우저의 로컬 보관함에 현재 편집 draft를 저장합니다. `운영 preset 등록`은 현재 DB room의 Durable Object storage에 현재 편집 draft를 저장해 다른 관리자 PC에서도 선택할 수 있게 합니다. Cloudflare Durable Object의 현재 운영 설정은 `Cloudflare 저장 및 반영` 또는 `불러와 적용`으로 바뀝니다. 운영자는 행사 중 여러 초안을 보관해 비교할 수 있고, 실제 송출 화면에 적용할 시점에 저장된 설정을 선택한 뒤 `불러와 적용`을 누릅니다.
 
 레포에 커밋된 `teams.json`은 공개 저장소와 개발 환경에서 안전하게 다루기 위해 익명화되어 있습니다. 운영 중 Cloudflare Durable Object storage에 저장된 팀명, 프로젝트명, 팀원, 사진은 레포의 샘플 JSON과 다를 수 있습니다. 행사 후 운영 데이터를 보존하려면 관리자 화면에서 JSON을 내려받아 별도 보관하고, 공개 레포에 반영할 때는 실명/소속/사진을 다시 익명화합니다.
 

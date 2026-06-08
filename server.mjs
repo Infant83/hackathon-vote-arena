@@ -451,6 +451,7 @@ const defaultRuntimeSettings = {
 }
 
 const appConfig = loadConfig()
+const maxOperationSettingsPresets = 24
 let teams = appConfig.teams
 let copy = appConfig.copy
 let quizBank = appConfig.quizBank
@@ -458,6 +459,7 @@ let configRevision = 1
 let configUpdatedAt = Date.now()
 let eventProfile = appConfig.eventProfile
 let validTeamIds = new Set(teams.map((team) => team.id))
+let operationPresets = []
 const participants = new Map()
 const cheers = []
 const questions = []
@@ -590,6 +592,123 @@ function getRuntimeEventProfile() {
     configFile: getConfigPathLabel(),
     roomName: activeRoomName,
     ...(settingsRoomName ? { settingsRoomName } : {}),
+  }
+}
+
+function normalizeOperationPresetPayload(input) {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
+  const sourceTeams = Array.isArray(source.teams) ? source.teams : []
+  if (!sourceTeams.length) {
+    throw new Error('teams array required')
+  }
+
+  const profile = normalizeEventProfile(source.event, getRuntimeEventProfile())
+
+  return {
+    ...(Object.values(profile).some(Boolean) ? { event: profile } : {}),
+    copy: normalizeCopy({ ...copy, ...(source.copy || {}) }),
+    settings: getRuntimeSettings({ ...settings, ...(source.settings || {}) }),
+    teams: normalizeTeamConfig(sourceTeams),
+    quizzes: normalizeQuizBank(source.quizzes || source.quizBank, quizBank),
+  }
+}
+
+function createOperationPreset(body) {
+  const label = sanitizeText(body?.label, 80) || getDefaultOperationPresetLabel()
+  const now = Date.now()
+  const payload = normalizeOperationPresetPayload(body?.payload || body)
+  const profile = normalizeEventProfile(payload.event, getRuntimeEventProfile())
+  const description = sanitizeText(body?.description, 160) ||
+    `${payload.copy?.appTitle || label} · ${payload.teams.length}팀 · 퀴즈 ${payload.quizzes?.length || 0}개 · 운영 preset`
+  const id = createOperationPresetId(label)
+
+  return {
+    id,
+    label,
+    ...(profile.id ? { eventId: profile.id } : {}),
+    ...(profile.workerName ? { workerName: profile.workerName } : {}),
+    roomName: getRuntimeEventProfile().roomName || 'local-node',
+    ...(profile.settingsFile ? { settingsFile: profile.settingsFile } : {}),
+    description,
+    createdAt: now,
+    updatedAt: now,
+    payload,
+  }
+}
+
+function normalizeOperationPresets(input) {
+  if (!Array.isArray(input)) return []
+
+  return input
+    .map((entry) => {
+      try {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+        const preset = {
+          ...entry,
+          payload: normalizeOperationPresetPayload(entry.payload),
+        }
+        const label = sanitizeText(preset.label, 80) || getDefaultOperationPresetLabel()
+        const profile = normalizeEventProfile(preset.payload.event, getRuntimeEventProfile())
+        return {
+          id: sanitizeOperationPresetId(preset.id) || createOperationPresetId(label),
+          label,
+          ...(profile.id ? { eventId: profile.id } : {}),
+          ...(profile.workerName ? { workerName: profile.workerName } : {}),
+          roomName: getRuntimeEventProfile().roomName || 'local-node',
+          ...(profile.settingsFile ? { settingsFile: profile.settingsFile } : {}),
+          description: sanitizeText(preset.description, 160) || undefined,
+          createdAt: Math.max(0, Math.floor(Number(preset.createdAt) || Date.now())),
+          updatedAt: Math.max(0, Math.floor(Number(preset.updatedAt) || Number(preset.createdAt) || Date.now())),
+          payload: preset.payload,
+        }
+      } catch {
+        return null
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => (right.updatedAt || right.createdAt) - (left.updatedAt || left.createdAt))
+    .slice(0, maxOperationSettingsPresets)
+}
+
+function createOperationPresetId(label) {
+  const slug = sanitizeSlug(label) || 'settings'
+  return `op-${Date.now().toString(36)}-${hashIdentity(`${label}|${Date.now()}|${Math.random()}`)}-${slug}`.slice(0, 96)
+}
+
+function sanitizeOperationPresetId(value) {
+  return String(value || '').replace(/[^a-zA-Z0-9_.:-]/g, '').slice(0, 96)
+}
+
+function getDefaultOperationPresetLabel() {
+  const profile = getRuntimeEventProfile()
+  return `${profile.label || profile.roomName || '운영 설정'} ${new Date().toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })}`
+}
+
+function operationPresetToManifestEntry(preset) {
+  return {
+    id: preset.id,
+    label: preset.label,
+    source: 'operation-preset',
+    loadUrl: `/api/operation-presets/${encodeURIComponent(preset.id)}`,
+    ...(preset.eventId ? { eventId: preset.eventId } : {}),
+    ...(preset.workerName ? { workerName: preset.workerName } : {}),
+    ...(preset.roomName ? { roomName: preset.roomName } : {}),
+    ...(preset.settingsFile ? { settingsFile: preset.settingsFile } : {}),
+    ...(preset.description ? { description: preset.description } : {}),
+    createdAt: preset.createdAt,
+  }
+}
+
+function getOperationPresetManifest() {
+  return {
+    presets: operationPresets.map(operationPresetToManifestEntry),
   }
 }
 
@@ -2245,6 +2364,8 @@ function isAdminProtectedPath(pathname) {
     '/api/settings',
     '/api/team-config',
     '/api/team-self-config',
+    '/api/operation-presets',
+    '/api/operation-presets/delete',
     '/api/raffle',
     '/api/raffle/stage',
     '/api/raffle/reset',
@@ -3011,6 +3132,33 @@ async function handleApi(request, response, url) {
     return
   }
 
+  if (request.method === 'GET' && url.pathname === '/api/operation-presets') {
+    if (!isAdminAuthenticated(request)) {
+      sendJson(response, 401, { error: 'admin authentication required' })
+      return
+    }
+
+    sendJson(response, 200, getOperationPresetManifest())
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname.startsWith('/api/operation-presets/')) {
+    if (!isAdminAuthenticated(request)) {
+      sendJson(response, 401, { error: 'admin authentication required' })
+      return
+    }
+
+    const presetId = sanitizeOperationPresetId(decodeURIComponent(url.pathname.slice('/api/operation-presets/'.length)))
+    const preset = operationPresets.find((entry) => entry.id === presetId)
+    if (!preset) {
+      sendJson(response, 404, { error: 'operation preset not found' })
+      return
+    }
+
+    sendJson(response, 200, preset.payload)
+    return
+  }
+
   if (request.method === 'GET' && url.pathname.startsWith('/api/settings-presets/event-configs/')) {
     if (!isAdminAuthenticated(request)) {
       sendJson(response, 401, { error: 'admin authentication required' })
@@ -3656,6 +3804,33 @@ async function handleApi(request, response, url) {
     } catch (error) {
       sendJson(response, 400, { error: error.message || 'invalid team config' })
     }
+    return
+  }
+
+  if (url.pathname === '/api/operation-presets') {
+    try {
+      const preset = createOperationPreset(body)
+      operationPresets = normalizeOperationPresets([preset, ...operationPresets])
+      sendJson(response, 200, {
+        preset: operationPresetToManifestEntry(preset),
+        ...getOperationPresetManifest(),
+      })
+    } catch (error) {
+      sendJson(response, 400, { error: error.message || 'invalid operation preset' })
+    }
+    return
+  }
+
+  if (url.pathname === '/api/operation-presets/delete') {
+    const presetId = sanitizeOperationPresetId(body.presetId || body.id)
+    const before = operationPresets.length
+    operationPresets = operationPresets.filter((preset) => preset.id !== presetId)
+    if (operationPresets.length === before) {
+      sendJson(response, 404, { error: 'operation preset not found' })
+      return
+    }
+
+    sendJson(response, 200, getOperationPresetManifest())
     return
   }
 

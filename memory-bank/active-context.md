@@ -43,7 +43,8 @@ Worker bundled presets must be kept in sync in `worker/index.ts` through imports
 - Default `/admin` is an operations console, not a realtime feed screen.
 - Realtime stars, star events, and cheer message bodies stay in detail panels or `/wall`.
 - `/admin?panel=teams` handles settings upload/download, preset load, visual assets, screen copy, teams, and quizzes.
-- `/admin?panel=teams` can save the current settings draft under a new name in the admin browser storage. These saved drafts appear in the same settings dropdown and apply to the current DB room when loaded.
+- `/admin?panel=teams` can save the current settings draft under a new name in the admin browser storage with `내 PC에 보관`; these drafts stay on that browser only.
+- `/admin?panel=teams` can register the current settings draft as an `운영 preset`; these presets are stored in the current `ARENA_ROOM_NAME` Durable Object storage and appear as `운영 · ...` entries for other admin PCs in the same DB room.
 - Screen copy editing has live previews for `global`, `vote`, `admin`, `wall`, `qna`, `showup`, and `quiz`.
 - Team photo editing previews the actual `/wall` selected-team card layout and includes frame presets.
 - `/admin?panel=export` should remain the primary event closeout place for JSON backup, XLSX result export, and settings download.
@@ -73,6 +74,6 @@ After verification, local test state was reset with `/api/reset`.
 - When adding a new event config, run `npm run ops:audit:all` before deployment.
 - When adding or renaming copy fields, update `copyGroups`, `CopyGroupPreview`, README, and AGENTS together.
 - Do not put real internal names, private photos, or sensitive prize details in `public/prev_settings`.
-- Browser-saved named settings are quick reuse drafts. Event closeout and cross-PC transfer still require downloading `settings.json`.
+- Browser-saved named settings are quick reuse drafts. Operation presets are room-shared admin presets. Event closeout and code/repo transfer still require downloading `settings.json`.
 - Deployment, separated event Workers, rollback, reset/export, and command-line response procedures are documented in `docs/DEPLOYMENT_AND_OPERATIONS_RUNBOOK.md`.
 - When changing `/help`, keep `app_introduction/remotion-deck/src/deckData.ts`, `deck.config.json`, and `app_introduction/README.md` aligned.

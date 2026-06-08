@@ -64,7 +64,9 @@
 - Cloudflare 운영에서 행사 DB는 `ARENA_ROOM_NAME`으로 선택되는 Durable Object instance로 본다. 운영 관점의 권장 규칙은 `event slug = Worker name = ARENA_ROOM_NAME = event.roomName`이다.
 - 관리자 화면에서 `ARENA_ROOM_NAME`을 바꾸는 기능은 기본 범위에 넣지 않는다. DB room 변경은 `wrangler deploy --name ... --var ARENA_ROOM_NAME:...` 같은 배포 단계에서만 한다.
 - 관리자 화면의 preset/settings `불러와 적용`은 현재 room에 선택한 설정을 반영한다. DB room 전환은 배포 환경변수 `ARENA_ROOM_NAME` 변경으로 처리한다.
-- `/admin?panel=teams`의 `이름으로 보관`은 현재 편집 draft를 관리자 브라우저 보관함에 저장한다. 다른 PC 이동, 행사 종료 보존, 코드 반영은 `settings.json 저장` 파일 백업을 기준으로 한다.
+- `/admin?panel=teams`의 `내 PC에 보관`은 현재 편집 draft를 관리자 브라우저 보관함에 저장한다. 다른 PC에는 표시되지 않는다.
+- `/admin?panel=teams`의 `운영 preset 등록`은 현재 편집 draft를 현재 `ARENA_ROOM_NAME` Durable Object storage에 저장한다. 같은 DB room의 다른 관리자 PC에서도 `운영 · ...` preset으로 보인다. repo의 `event-configs/*.json`은 바꾸지 않는다.
+- 다른 PC 이동, 행사 종료 보존, 코드 반영은 `settings.json 저장` 파일 백업을 기준으로 한다.
 - 관리자 화면의 Reset은 현재 접속한 Worker가 가리키는 현재 DB room만 초기화한다. 다른 room이나 과거 행사 room을 건드리지 않는다.
 - 행사 종료 보존은 `/api/export` 원본 JSON, 결과 XLSX, `settings.json`을 함께 내려받는 것을 기준으로 한다.
 - 기존 행사 DB를 내려받을 때는 같은 Durable Object binding/class와 같은 `ARENA_ROOM_NAME`으로 임시 Worker를 띄워 `/api/export`만 수행하고 reset은 실행하지 않는다.
