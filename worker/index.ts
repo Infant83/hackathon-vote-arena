@@ -1118,7 +1118,7 @@ export class ArenaRoom {
       this.removeCheersForClearedTeams(person, previousAllocations, nextAllocations)
       this.lastRaffle = null
       await this.commit()
-      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: person.id }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
     if (pathname === '/api/cheer') {
@@ -1146,7 +1146,7 @@ export class ArenaRoom {
       })
       this.cheers.splice(maxStoredCheerMessages)
       await this.commit({ audience: true })
-      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: person.id }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
     if (pathname === '/api/question') {
@@ -1171,7 +1171,7 @@ export class ArenaRoom {
       })
       this.questions.splice(maxStoredQuestions)
       await this.commit({ audience: true })
-      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: person.id }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
     if (pathname === '/api/question/update') {
@@ -1376,7 +1376,7 @@ export class ArenaRoom {
       if (!answer) {
         return json(
           {
-            ...this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }),
+            ...this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: person?.id || deviceId }),
             quizSubmission: {
               accepted: false,
               reason: this.getQuizAnswerRejectionReason(person, body.text, body),
@@ -1391,7 +1391,7 @@ export class ArenaRoom {
       await this.commit()
       return json(
         {
-          ...this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }),
+          ...this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: answer.participantId }),
           quizSubmission: {
             accepted: true,
             answerId: answer.id,
@@ -1440,7 +1440,7 @@ export class ArenaRoom {
       if (!person) return json({ error: 'nickname and device required' }, 400)
 
       await this.commit()
-      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
+      return json(this.getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: person.id }), 200, { 'Set-Cookie': participantCookieHeader(deviceId) })
     }
 
     if (pathname === '/api/participant/reset') {

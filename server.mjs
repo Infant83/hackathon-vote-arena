@@ -3135,7 +3135,7 @@ async function handleApi(request, response, url) {
     removeCheersForClearedTeams(person, previousAllocations, nextAllocations)
     lastRaffle = null
     broadcast()
-    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: person.id }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -3180,7 +3180,7 @@ async function handleApi(request, response, url) {
     })
     cheers.splice(maxStoredCheerMessages)
     broadcast({ audience: true })
-    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: person.id }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -3212,7 +3212,7 @@ async function handleApi(request, response, url) {
     })
     questions.splice(maxStoredQuestions)
     broadcast({ audience: true })
-    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: person.id }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 
@@ -3470,7 +3470,7 @@ async function handleApi(request, response, url) {
         response,
         200,
         {
-          ...getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }),
+          ...getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: person?.id || deviceId }),
           quizSubmission: {
             accepted: false,
             reason: getQuizAnswerRejectionReason(person, body.text, body),
@@ -3486,7 +3486,7 @@ async function handleApi(request, response, url) {
       response,
       200,
       {
-        ...getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }),
+        ...getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: answer.participantId }),
         quizSubmission: {
           accepted: true,
           answerId: answer.id,
@@ -3545,7 +3545,7 @@ async function handleApi(request, response, url) {
     }
 
     broadcast()
-    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: deviceId }), { 'Set-Cookie': participantCookieHeader(deviceId) })
+    sendJson(response, 200, getStateForRequest(request, { slimMedia: true, role: 'vote', participantId: person.id }), { 'Set-Cookie': participantCookieHeader(deviceId) })
     return
   }
 

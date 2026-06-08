@@ -1862,7 +1862,7 @@ const messageTimeFormatter = new Intl.DateTimeFormat('ko-KR', {
 
 function App() {
   const mode = getAppMode()
-  const [participantId, setParticipantId] = useState(getOrCreateParticipantId)
+  const [participantId] = useState(getOrCreateParticipantId)
   const protectedDisplayMode = mode === 'admin' || mode === 'wall' || mode === 'team'
   const adminSession = useAdminSession(protectedDisplayMode)
   const allowProtectedRealtime = !protectedDisplayMode || adminSession.authenticated
@@ -1879,7 +1879,10 @@ function App() {
   )
   const syncedWallPanel: WallPanel = mode === 'wall' ? resolveWallPanel(state, wallPanel) : wallPanel
 
-  const participant = state.participants.find((person) => isSameParticipantDevice(person, participantId))
+  const localParticipantRegistered = Boolean(getStoredValue(registeredKey) || getStoredValue(registeredSessionKey))
+  const participant = localParticipantRegistered
+    ? state.participants.find((person) => isSameParticipantDevice(person, participantId))
+    : undefined
   const allocations = participant?.allocations ?? {}
   const starBudget = getStarBudget(state)
   const maxStarsPerTeam = getMaxStarsPerTeam(state)
@@ -1940,7 +1943,6 @@ function App() {
   )
 
   const switchVoteParticipant = () => {
-    clearStoredValue(storageKey)
     clearStoredValue(nameKey)
     clearStoredValue(groupKey)
     clearStoredValue(departmentKey)
@@ -1949,9 +1951,6 @@ function App() {
     clearStoredValue(raffleDismissedKey)
     clearStoredValue(quizWinnerDismissedKey)
 
-    const nextParticipantId = createParticipantId()
-    storeValue(storageKey, nextParticipantId)
-    setParticipantId(nextParticipantId)
     setName('')
     setGroup('')
     setDepartment('')
@@ -2645,7 +2644,7 @@ function Header({
           <span>{connectionLabel}</span>
         </div>
         {(mode === 'vote' || isMessageLikeMode) && onVoteLogout ? (
-          <button type="button" className="session-logout-button" onClick={onVoteLogout} title="현재 참여 정보를 지우고 다시 입장">
+          <button type="button" className="session-logout-button" onClick={onVoteLogout} title="입장 화면으로 돌아갑니다. 같은 브라우저에서는 관리 ID를 유지합니다.">
             <LogOut size={15} />
             다시 입장
           </button>
