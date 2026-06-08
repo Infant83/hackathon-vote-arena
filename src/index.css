@@ -39,6 +39,40 @@
   --canvas: #030611;
 }
 
+:root[data-theme='pastel'] {
+  --lg-red: #ff6b6b;
+  --active-red: #ff4f64;
+  --ink: #0d2111;
+  --body: #1a535c;
+  --muted: #60706c;
+  --line: rgba(13, 33, 17, 0.16);
+  --line-strong: rgba(13, 33, 17, 0.32);
+  --surface: rgba(255, 255, 255, 0.9);
+  --canvas: #f8f9e9;
+  --event-night: #0d2111;
+  --event-navy: #1a535c;
+  --event-blue: #4ecdc4;
+  --event-cyan: #4ecdc4;
+  --event-violet: #ffe66d;
+  --event-magenta: #ff6b6b;
+  --event-coral: #ff8b78;
+}
+
+:root[data-font='vibe'] {
+  --font-sans:
+    Inter, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+:root[data-font='system'] {
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+}
+
+:root[data-font='soft'] {
+  --font-sans:
+    'Gowun Dodum', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -69,6 +103,13 @@ body {
     linear-gradient(145deg, var(--event-night), var(--event-navy) 58%, #120817);
 }
 
+:root[data-theme='pastel'] body {
+  background:
+    linear-gradient(135deg, rgba(255, 230, 109, 0.28) 0 14%, transparent 14% 100%),
+    linear-gradient(165deg, rgba(78, 205, 196, 0.22) 0 20%, transparent 20% 100%),
+    linear-gradient(180deg, #f7fff7 0%, #f8f9e9 54%, #fff7ed 100%);
+}
+
 #root {
   width: 100%;
   min-width: 0;
@@ -88,4 +129,9 @@ button {
 ::selection {
   color: #fff;
   background: var(--lg-red);
+}
+
+:root[data-theme='pastel'] ::selection {
+  color: #0d2111;
+  background: #ffe66d;
 }

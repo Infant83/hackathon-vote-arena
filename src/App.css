@@ -526,6 +526,200 @@
   background: rgba(143, 214, 255, 0.08);
 }
 
+.theme-pastel {
+  color: var(--body);
+  --pastel-ink: #0d2111;
+  --pastel-body: #1a535c;
+  --pastel-muted: #60706c;
+  --pastel-line: rgba(13, 33, 17, 0.18);
+  --pastel-line-strong: rgba(13, 33, 17, 0.34);
+  --pastel-paper: rgba(255, 255, 255, 0.86);
+  --pastel-paper-strong: rgba(255, 255, 255, 0.95);
+  --pastel-mint: #4ecdc4;
+  --pastel-coral: #ff6b6b;
+  --pastel-yellow: #ffe66d;
+  --pastel-shadow: 8px 8px 0 rgba(13, 33, 17, 0.1);
+}
+
+.theme-pastel .topbar.admin-topbar,
+.theme-pastel .topbar.wall-topbar,
+.theme-pastel .topbar:not(.admin-topbar) {
+  border-bottom-color: var(--pastel-line);
+  background:
+    linear-gradient(100deg, rgba(255, 230, 109, 0.48), rgba(78, 205, 196, 0.28) 58%, rgba(255, 107, 107, 0.2)),
+    rgba(255, 255, 255, 0.88);
+  box-shadow: 0 14px 34px rgba(13, 33, 17, 0.08);
+}
+
+.theme-pastel .admin-topbar .eyeline,
+.theme-pastel .eyeline,
+.theme-pastel .section-kicker,
+.theme-pastel .control-note,
+.theme-pastel .admin-ops-muted,
+.theme-pastel .control-hint,
+.theme-pastel .config-help,
+.theme-pastel .config-status,
+.theme-pastel .team-editor-head span,
+.theme-pastel .copy-group-heading span,
+.theme-pastel .logo-source-head small,
+.theme-pastel .logo-source-preview p {
+  color: var(--pastel-muted);
+}
+
+.theme-pastel .admin-topbar h1,
+.theme-pastel .topbar h1,
+.theme-pastel .hero-band h2,
+.theme-pastel .section-heading h2,
+.theme-pastel .admin-ops-card-head h2,
+.theme-pastel .admin-ops-card-head strong,
+.theme-pastel .team-meta p,
+.theme-pastel .admin-stats strong,
+.theme-pastel .config-summary strong,
+.theme-pastel .team-editor-head strong,
+.theme-pastel .quiz-editor-head strong,
+.theme-pastel .copy-group-heading h3,
+.theme-pastel .public-cheer-message p,
+.theme-pastel .selected-team-preview strong,
+.theme-pastel .selected-team-preview p {
+  color: var(--pastel-ink);
+}
+
+.theme-pastel .admin-console-badge,
+.theme-pastel .admin-topbar .role-nav-link,
+.theme-pastel .admin-topbar .short-url,
+.theme-pastel .admin-topbar .timer,
+.theme-pastel .admin-topbar .connection,
+.theme-pastel .role-nav-link,
+.theme-pastel .audience-status-pill,
+.theme-pastel .session-logout-button,
+.theme-pastel .short-url,
+.theme-pastel .timer,
+.theme-pastel .connection,
+.theme-pastel .public-wall-actions button,
+.theme-pastel .panel-open-button,
+.theme-pastel .logo-source-row button,
+.theme-pastel .logo-file-button {
+  color: var(--pastel-ink);
+  border-color: var(--pastel-line-strong);
+  background: var(--pastel-paper);
+}
+
+.theme-pastel .lg-dot {
+  color: var(--pastel-ink);
+  background: var(--pastel-yellow);
+  box-shadow: 4px 4px 0 var(--pastel-ink);
+}
+
+.theme-pastel .admin-topbar .lg-dot {
+  color: var(--pastel-ink);
+  background: #fff;
+  box-shadow: 4px 4px 0 rgba(13, 33, 17, 0.78);
+}
+
+.theme-pastel .hero-band,
+.theme-pastel .ops-policy-panel,
+.theme-pastel .admin-auth-card,
+.theme-pastel .admin-ops-card,
+.theme-pastel .admin-control-panel,
+.theme-pastel .admin-detail-panel,
+.theme-pastel .arena-panel,
+.theme-pastel .event-feed,
+.theme-pastel .message-manager,
+.theme-pastel .participant-panel,
+.theme-pastel .team-config-panel,
+.theme-pastel .export-panel,
+.theme-pastel .raffle-panel,
+.theme-pastel .quiz-admin-panel,
+.theme-pastel .public-ranking-panel,
+.theme-pastel .public-cheer-board,
+.theme-pastel .public-raffle-board,
+.theme-pastel .team-editor-card,
+.theme-pastel .quiz-editor-card,
+.theme-pastel .copy-config-group,
+.theme-pastel .config-toolbar,
+.theme-pastel .settings-preset-loader,
+.theme-pastel .selected-team-preview,
+.theme-pastel .public-cheer-focus-card,
+.theme-pastel .logo-source-field,
+.theme-pastel .ops-policy-current,
+.theme-pastel .ops-policy-grid > div,
+.theme-pastel .admin-ops-status,
+.theme-pastel .admin-session-list span,
+.theme-pastel .admin-ops-data-grid button,
+.theme-pastel .admin-reset-grid button,
+.theme-pastel .admin-ops-link-row a,
+.theme-pastel .admin-ops-link-row button {
+  border-color: var(--pastel-line);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(247, 255, 247, 0.74)),
+    var(--pastel-paper);
+  box-shadow: var(--pastel-shadow);
+}
+
+.theme-pastel :is(input, select, textarea),
+.theme-pastel .wall-session-field,
+.theme-pastel .wall-session-field label {
+  color: var(--pastel-ink);
+  border-color: var(--pastel-line-strong);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.theme-pastel :is(input, select, textarea)::placeholder {
+  color: rgba(26, 83, 92, 0.48);
+}
+
+.theme-pastel .role-nav-link.active,
+.theme-pastel .mode-link.active,
+.theme-pastel .public-wall-actions button.active,
+.theme-pastel .control-grid button,
+.theme-pastel .registration-form button,
+.theme-pastel .quiz-actions .primary-action,
+.theme-pastel .quiz-answer-form button,
+.theme-pastel .hero-band button {
+  color: var(--pastel-ink);
+  border-color: var(--pastel-ink);
+  background: var(--pastel-yellow);
+  box-shadow: 3px 3px 0 var(--pastel-ink);
+}
+
+.theme-pastel .control-grid .secondary-control,
+.theme-pastel .panel-open-button,
+.theme-pastel .quiz-actions button,
+.theme-pastel .public-wall-actions button,
+.theme-pastel .wall-panel-toolbar button,
+.theme-pastel .config-toolbar button,
+.theme-pastel .logo-source-row button,
+.theme-pastel .logo-file-button {
+  color: var(--pastel-body);
+  border-color: var(--pastel-line-strong);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: none;
+}
+
+.theme-pastel .team-row,
+.theme-pastel .message-list-item,
+.theme-pastel .participant-row,
+.theme-pastel .winner,
+.theme-pastel .quiz-answer-message,
+.theme-pastel .public-cheer-message,
+.theme-pastel .draw-stage > div,
+.theme-pastel .stat-popover,
+.theme-pastel .selected-team-preview .team-photo-preview,
+.theme-pastel .logo-source-preview .team-photo-preview {
+  border-color: color-mix(in srgb, var(--team-color, var(--pastel-mint)) 28%, var(--pastel-line));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--team-color, var(--pastel-mint)) 14%, transparent), transparent 72%),
+    rgba(255, 255, 255, 0.82);
+}
+
+.theme-pastel .control-grid .danger-control,
+.theme-pastel .admin-reset-grid button.danger,
+.theme-pastel .session-logout-button {
+  color: #8c1730;
+  border-color: rgba(255, 107, 107, 0.52);
+  background: rgba(255, 107, 107, 0.12);
+}
+
 .mode-link.active {
   color: #fff;
   border-color: var(--lg-red);

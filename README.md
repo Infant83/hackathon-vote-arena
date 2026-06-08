@@ -357,6 +357,12 @@ npx wrangler deploy --name event26q2 --var ARENA_ROOM_NAME:event26q2
 
 이 경우 `event26q1.axgroup.workers.dev`와 `event26q2.axgroup.workers.dev`는 같은 코드와 Durable Object class를 쓰더라도 서로 다른 room storage를 봅니다.
 
+`airever` 행사는 다음 명령으로 기존 `meeting.axgroup.workers.dev`를 유지한 채 별도 Worker와 별도 DB room으로 배포합니다.
+
+```powershell
+npx wrangler deploy --name airever --var ARENA_ROOM_NAME:airever
+```
+
 현재 번들에 등록된 예시 room은 다음과 같습니다.
 
 | 행사 | Worker/room 권장 slug | 설정 파일 | 기본 조합 |
@@ -364,6 +370,7 @@ npx wrangler deploy --name event26q2 --var ARENA_ROOM_NAME:event26q2
 | 2026 AX 해커톤 1분기 본선 | `hackathon26q1` | `event-configs/2026_ax_hackathon_q1_vote_quiz_luckydraw.json` | vote + quiz + luckydraw |
 | 2026 AX 그룹 1분기 모임 | `meeting26q1` | `event-configs/2026_ax_group_q1_meeting.json` | message/Q&A + quiz |
 | 2026 AX 그룹 2분기 모임 | `2026-ax-q2-meeting` | `event-configs/2026_ax_group_q2_meeting.json` | message/Q&A + quiz |
+| airever | `airever` | `event-configs/2026_06_airever.json` | message/Q&A + quiz |
 | 2026 AX 특별 세션 | `special26ax` | `event-configs/2026_ax_special_message_vote_quiz.json` | message/Q&A + vote + quiz |
 
 ### 5.5. Git Build 자동 배포
@@ -537,7 +544,7 @@ npm run realtime
 
 Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 런타임에 바꿔 읽을 수 없습니다. Cloudflare 운영에서는 행사별로 `ARENA_ROOM_NAME`을 다르게 지정해 Durable Object 저장소를 분리합니다. 예를 들어 이번 행사는 `ARENA_ROOM_NAME=2026-ax-q2-meeting`처럼 별도 룸 이름을 쓰면 이전 행사 DB와 섞이지 않습니다. Worker에서 새 `event-configs/*.json`을 preset으로 쓰려면 해당 JSON을 `worker/index.ts`에 import하고 `bundledEventConfigPresets`와 `initialConfigByRoomName`에 함께 등록한 뒤 배포합니다.
 
-`worker/index.ts`는 현재 `hackathon26q1`, `meeting26q1`, `2026-ax-q2-meeting`, `special26ax` 룸의 초기 설정을 함께 번들링합니다. 새 행사 프리셋을 추가할 때는 `event-configs/<행사>.json`을 만든 뒤 Worker import, `initialConfigByRoomName`, `bundledEventConfigPresets`, `npm run ops:audit:all`을 함께 갱신합니다. 운영 중 내용이 바뀌면 `/admin > 운영 콘텐츠 > 관리`에서 저장 적용하고, 행사 후에는 관리자 화면에서 settings 파일을 내려받아 `event-configs/` 또는 비공개 운영 보관함에 반영합니다.
+`worker/index.ts`는 현재 `hackathon26q1`, `meeting26q1`, `2026-ax-q2-meeting`, `airever`, `special26ax` 룸의 초기 설정을 함께 번들링합니다. 새 행사 프리셋을 추가할 때는 `event-configs/<행사>.json`을 만든 뒤 Worker import, `initialConfigByRoomName`, `bundledEventConfigPresets`, `npm run ops:audit:all`을 함께 갱신합니다. 운영 중 내용이 바뀌면 `/admin > 운영 콘텐츠 > 관리`에서 저장 적용하고, 행사 후에는 관리자 화면에서 settings 파일을 내려받아 `event-configs/` 또는 비공개 운영 보관함에 반영합니다.
 
 관리자 화면에서도 수정할 수 있습니다.
 
@@ -570,7 +577,7 @@ Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 �
 
 팀 사진은 작은 로고와 wall 하단 선택 팀 카드가 서로 다른 프레임을 씁니다. 운영 콘텐츠의 사진 편집 미리보기는 실제 `/wall` 응원 보드의 선택 팀 카드 구조를 따라 렌더링됩니다. `송출 기본`, `16:9`, `4:3`, `전체보기` 프리셋으로 프레임을 빠르게 잡고, 드래그/슬라이더로 초점과 확대를 조정한 뒤 `/wall`에서 최종 확인합니다.
 
-운영 설정에서 화면 테마를 `현재 모드`와 `어두운 모드` 중 선택할 수 있습니다. 어두운 모드는 `ppt_sample/EDM_(일반진행)해커톤 간지 선정_양식(외부)_v0.1.pptx`의 블랙/네이비, 블루, 바이올렛, 마젠타 톤을 기준으로 합니다.
+운영 설정에서 화면 테마를 `기본 밝은 테마`, `AX Lotto 파스텔`, `어두운 송출 테마` 중 선택할 수 있습니다. `AX Lotto 파스텔`은 코랄, 민트, 옐로, 딥그린을 쓰는 밝은 파스텔/수채화톤 브루탈리즘입니다. 글씨체는 `Vibe Arena`, `Gowun Dodum`, `시스템 기본` 중 선택할 수 있으며, 새 행사 기본값은 현재 Vibe Arena 글씨체입니다. 어두운 송출 테마는 `ppt_sample/EDM_(일반진행)해커톤 간지 선정_양식(외부)_v0.1.pptx`의 블랙/네이비, 블루, 바이올렛, 마젠타 톤을 기준으로 합니다.
 
 ### 6.1. JSON 구조
 
@@ -593,6 +600,7 @@ Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 �
   },
   "settings": {
     "themeMode": "stage",
+    "fontMode": "vibe",
     "wallEnabledPanels": ["qna", "quiz"],
     "qnaWallFontScale": 1.12
   },

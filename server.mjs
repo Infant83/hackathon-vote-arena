@@ -430,6 +430,7 @@ const defaultRuntimeSettings = {
   quizInitialConfirmDelaySeconds: defaultQuizInitialConfirmDelaySeconds,
   cheerNameMode: 'masked',
   themeMode: 'stage',
+  fontMode: 'vibe',
   wallEnabledPanels: defaultWallEnabledPanels,
   qnaWallFontScale: defaultQnaWallFontScale,
 }
@@ -975,6 +976,7 @@ function getRuntimeSettings(source = settings) {
     ),
     cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
     themeMode: normalizeThemeMode(source.themeMode, 'stage'),
+    fontMode: normalizeFontMode(source.fontMode, 'vibe'),
     wallEnabledPanels: normalizeWallEnabledPanels(source.wallEnabledPanels),
     qnaWallFontScale: clamp(Number(source.qnaWallFontScale ?? defaultQnaWallFontScale), 0.85, 1.55),
   }
@@ -2053,7 +2055,13 @@ function normalizeCheerNameMode(value, fallback = 'masked') {
 }
 
 function normalizeThemeMode(value, fallback = 'light') {
-  return value === 'stage' ? 'stage' : value === 'light' ? 'light' : fallback
+  if (value === 'stage' || value === 'light' || value === 'pastel') return value
+  return fallback
+}
+
+function normalizeFontMode(value, fallback = 'vibe') {
+  if (value === 'vibe' || value === 'system' || value === 'soft') return value
+  return fallback
 }
 
 function normalizeWallEnabledPanels(value) {
@@ -3551,6 +3559,7 @@ async function handleApi(request, response, url) {
       quizInitialConfirmDelaySeconds: nextQuizInitialConfirmDelaySeconds,
       cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, settings.cheerNameMode),
       themeMode: normalizeThemeMode(body.themeMode, settings.themeMode),
+      fontMode: normalizeFontMode(body.fontMode, settings.fontMode),
       wallEnabledPanels: normalizeWallEnabledPanels(body.wallEnabledPanels ?? settings.wallEnabledPanels),
       qnaWallFontScale: nextQnaWallFontScale,
     }

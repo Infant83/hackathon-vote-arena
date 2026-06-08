@@ -258,7 +258,8 @@ type CheerHistoryResponse = {
   hasMore: boolean
 }
 
-type ThemeMode = 'light' | 'stage'
+type ThemeMode = 'light' | 'stage' | 'pastel'
+type FontMode = 'vibe' | 'system' | 'soft'
 type TimerMode = 'duration' | 'targetTime'
 
 type EventProfile = {
@@ -309,6 +310,7 @@ type EventState = {
     quizInitialConfirmDelaySeconds: number
     cheerNameMode: CheerNameMode
     themeMode: ThemeMode
+    fontMode: FontMode
     wallEnabledPanels: WallSession[]
     qnaWallFontScale: number
   }
@@ -1436,6 +1438,7 @@ const registeredSessionKey = 'vibe-vote-registered-session'
 const raffleDismissedKey = 'vibe-vote-raffle-dismissed-at'
 const quizWinnerDismissedKey = 'vibe-vote-quiz-winner-dismissed'
 const themeModeKey = 'vibe-vote-theme-mode'
+const fontModeKey = 'vibe-vote-font-mode'
 const defaultBrandLogoFile = '/event-brand/trophy-static.png'
 const raffleTrophyGifFile = '/event-brand/trophy-spin.gif'
 const cookieMaxAge = 60 * 60 * 24 * 14
@@ -1844,6 +1847,7 @@ const fallbackState: EventState = {
     quizInitialConfirmDelaySeconds: DEFAULT_QUIZ_INITIAL_CONFIRM_DELAY_SECONDS,
     cheerNameMode: 'masked',
     themeMode: 'stage',
+    fontMode: 'vibe',
     wallEnabledPanels: defaultWallEnabledSessions,
     qnaWallFontScale: DEFAULT_QNA_WALL_FONT_SCALE,
   },
@@ -1865,6 +1869,7 @@ function App() {
   const eventStateEnabled = mode !== 'not-found' && (!protectedDisplayMode || adminSession.authenticated)
   const { state, connection, post } = useEventState(mode, participantId, eventStateEnabled, allowProtectedRealtime)
   const themeMode = getThemeMode(state)
+  const fontMode = getFontMode(state)
   const [name, setName] = useState(() => getStoredValue(nameKey))
   const [group, setGroup] = useState(() => getStoredValue(groupKey))
   const [department, setDepartment] = useState(() => getStoredValue(departmentKey))
@@ -1889,6 +1894,11 @@ function App() {
     document.documentElement.dataset.theme = themeMode
     storeValue(themeModeKey, themeMode)
   }, [themeMode])
+
+  useEffect(() => {
+    document.documentElement.dataset.font = fontMode
+    storeValue(fontModeKey, fontMode)
+  }, [fontMode])
 
   useEffect(() => {
     document.title = getDocumentTitle(mode, syncedWallPanel)
@@ -4383,6 +4393,7 @@ function AdminView({
   const quizInitialConfirmDelaySeconds = getQuizInitialConfirmDelaySeconds(state)
   const cheerNameMode = getCheerNameMode(state)
   const themeMode = getThemeMode(state)
+  const fontMode = getFontMode(state)
   const wallEnabledPanels = getWallEnabledSessions(state)
   const qnaWallFontScale = getQnaWallFontScale(state)
   const [draftTimerMode, setDraftTimerMode] = useState<TimerMode>(timerMode)
@@ -4516,12 +4527,13 @@ function AdminView({
       quizInitialConfirmDelaySeconds: data.get('quizInitialConfirmDelaySeconds'),
       cheerNameMode: data.get('cheerNameMode'),
       themeMode: data.get('themeMode'),
+      fontMode: data.get('fontMode'),
       wallEnabledPanels: data.getAll('wallEnabledPanels'),
       qnaWallFontScale: data.get('qnaWallFontScale'),
     })
   }
 
-  const applyThemeMode = (nextThemeMode: ThemeMode) => {
+  const applyDisplayMode = (nextThemeMode: ThemeMode, nextFontMode: FontMode) => {
     post('/api/settings', {
       starBudget,
       maxStarsPerTeam,
@@ -4534,6 +4546,7 @@ function AdminView({
       quizInitialConfirmDelaySeconds,
       cheerNameMode,
       themeMode: nextThemeMode,
+      fontMode: nextFontMode,
       wallEnabledPanels,
       qnaWallFontScale,
     })
@@ -4779,7 +4792,7 @@ function AdminView({
         </div>
         <form
           className="control-grid"
-          key={`${starBudget}:${maxStarsPerTeam}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${raffleCheerWeight}:${quizAnswerLimit}:${quizInitialConfirmDelaySeconds}:${cheerNameMode}:${themeMode}:${wallEnabledPanels.join(',')}:${qnaWallFontScale}`}
+          key={`${starBudget}:${maxStarsPerTeam}:${durationMinutes}:${timerMode}:${targetTime}:${minScore}:${raffleCheerWeight}:${quizAnswerLimit}:${quizInitialConfirmDelaySeconds}:${cheerNameMode}:${themeMode}:${fontMode}:${wallEnabledPanels.join(',')}:${qnaWallFontScale}`}
           onSubmit={(event) => {
             event.preventDefault()
             applySettings(event.currentTarget)
@@ -4939,33 +4952,30 @@ function AdminView({
             </div>
             <small className="control-hint">Q&A board의 질문 본문과 작성자 정보 크기를 조정합니다. 기본 1.12x입니다.</small>
           </label>
-          <fieldset className="theme-toggle-field">
-            <legend>화면 테마</legend>
-            <label>
-              <input
-                type="radio"
-                name="themeMode"
-                value="light"
-                defaultChecked={themeMode === 'light'}
-                onChange={(event) => {
-                  if (event.currentTarget.checked) applyThemeMode('light')
-                }}
-              />
-              <span>현재 모드</span>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="themeMode"
-                value="stage"
-                defaultChecked={themeMode === 'stage'}
-                onChange={(event) => {
-                  if (event.currentTarget.checked) applyThemeMode('stage')
-                }}
-              />
-              <span>어두운 모드</span>
-            </label>
-          </fieldset>
+          <label>
+            <span>화면 테마</span>
+            <select
+              name="themeMode"
+              defaultValue={themeMode}
+              onChange={(event) => applyDisplayMode(event.currentTarget.value as ThemeMode, fontMode)}
+            >
+              <option value="light">기본 밝은 테마</option>
+              <option value="pastel">AX Lotto 파스텔</option>
+              <option value="stage">어두운 송출 테마</option>
+            </select>
+          </label>
+          <label>
+            <span>글씨체</span>
+            <select
+              name="fontMode"
+              defaultValue={fontMode}
+              onChange={(event) => applyDisplayMode(themeMode, event.currentTarget.value as FontMode)}
+            >
+              <option value="vibe">Vibe Arena</option>
+              <option value="soft">Gowun Dodum</option>
+              <option value="system">시스템 기본</option>
+            </select>
+          </label>
           <fieldset className="wall-session-field">
             <legend>Wall 표시 세션</legend>
             {wallSessionOptions.map((option) => (
@@ -10896,19 +10906,26 @@ function preserveQuizMedia(previous: QuizState | undefined, incoming: QuizState 
 
 function getInitialEventState(): EventState {
   const storedTheme = normalizeStoredThemeMode(getStoredValue(themeModeKey))
+  const storedFont = normalizeStoredFontMode(getStoredValue(fontModeKey))
   const initialTheme = storedTheme || fallbackState.settings.themeMode
+  const initialFont = storedFont || fallbackState.settings.fontMode
 
   return {
     ...fallbackState,
     settings: {
       ...fallbackState.settings,
       themeMode: initialTheme,
+      fontMode: initialFont,
     },
   }
 }
 
 function normalizeStoredThemeMode(value: string): ThemeMode | '' {
-  return value === 'light' || value === 'stage' ? value : ''
+  return value === 'light' || value === 'stage' || value === 'pastel' ? value : ''
+}
+
+function normalizeStoredFontMode(value: string): FontMode | '' {
+  return value === 'vibe' || value === 'system' || value === 'soft' ? value : ''
 }
 
 type TeamConfigDraft = {
@@ -12438,7 +12455,15 @@ function getTeamPhotoFrameLabel(team: TeamVisual) {
 }
 
 function getThemeMode(state: EventState): ThemeMode {
-  return state.settings.themeMode === 'stage' ? 'stage' : 'light'
+  if (state.settings.themeMode === 'stage') return 'stage'
+  if (state.settings.themeMode === 'pastel') return 'pastel'
+  return 'light'
+}
+
+function getFontMode(state: EventState): FontMode {
+  if (state.settings.fontMode === 'system') return 'system'
+  if (state.settings.fontMode === 'soft') return 'soft'
+  return 'vibe'
 }
 
 function getEditableConfigSignature(state: EventState) {

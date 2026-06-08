@@ -7,6 +7,8 @@
 ### 다중 행사 운영과 설정 관리
 
 - `event-configs/`에 해커톤 본선, 1분기 모임, 2분기 모임, 특별 세션처럼 서로 다른 기능 조합의 행사 preset을 정리했습니다.
+- `event-configs/2026_06_airever.json`을 추가해 `airever` 행사 preset을 Q&A/퀴즈 중심 운영 포맷으로 준비했습니다. 이 preset은 `airever.axgroup.workers.dev`와 `ARENA_ROOM_NAME=airever` 운영을 기준으로 합니다.
+- `$imagegen`으로 생성한 AI/BD 로고를 `public/event-brand/ai-bd-reverse-reporting-logo.png`에 배치하고, 새 행사 preset의 앱 로고와 팀 로고로 연결했습니다.
 - 각 행사 설정에 `event.features`, Worker/room/settingsFile 메타데이터를 두고, Worker 번들 초기 설정과 관리자 preset 목록에서 함께 활용하도록 맞췄습니다.
 - `npm run ops:audit:all`을 추가해 모든 `event-configs/*.json`의 기능 조합, wall 세션, 팀 수, 퀴즈 수, 팀 사진 표시값, inline media, 팀 편집 키, HTTP 이미지 URL을 정적으로 검사합니다.
 - Q2 설정은 기존 운영 URL 유지를 위해 `workerName=meeting`, `roomName=2026-ax-q2-meeting` 조합을 유지하며, audit에서는 추적성 WARN으로 표시합니다.
@@ -17,6 +19,7 @@
 - `/admin?panel=export`에 행사 요약, 현재 DB room, 참여자/팀 수, 별/메시지 수를 표시하고 JSON 백업, XLSX 저장, settings 저장 버튼을 한 곳에 배치했습니다.
 - `/admin?panel=teams`에 `새 보관 이름`과 `이름으로 보관`을 추가해 현재 편집 draft를 브라우저 보관함에 저장하고, 같은 드롭다운에서 다시 불러올 수 있게 했습니다.
 - 보관 설정 삭제 버튼과 room mismatch 안내를 함께 두어, 빠른 재사용과 실제 DB 반영 흐름을 분리했습니다.
+- 운영 설정에 화면 테마 드롭다운과 글씨체 드롭다운을 추가해 `기본 밝은 테마`, `AX Lotto 파스텔`, `어두운 송출 테마`와 `Vibe Arena`, `Gowun Dodum`, `시스템 기본` 글씨체를 선택할 수 있게 했습니다.
 - README와 AGENTS에 `ARENA_ROOM_NAME`을 행사 DB room으로 보는 운영 규칙, reset 범위, preset 적용 범위, 행사 종료 백업 순서를 정리했습니다.
 - 관리자 passcode 설정과 변경 방법을 `ADMIN_PASSCODE` 환경변수/Cloudflare secret 기준으로 문서화했습니다.
 

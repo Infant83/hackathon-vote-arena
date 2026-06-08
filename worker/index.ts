@@ -1,6 +1,7 @@
 import rawHackathonQ1Config from '../event-configs/2026_ax_hackathon_q1_vote_quiz_luckydraw.json'
 import rawAxQ1Config from '../event-configs/2026_ax_group_q1_meeting.json'
 import rawAxQ2Config from '../event-configs/2026_ax_group_q2_meeting.json'
+import rawAireverConfig from '../event-configs/2026_06_airever.json'
 import rawSpecialConfig from '../event-configs/2026_ax_special_message_vote_quiz.json'
 import rawConfig from '../teams.json'
 import { inflateSync, strFromU8 } from 'fflate'
@@ -316,7 +317,8 @@ type Settings = {
   quizAnswerLimit: number
   quizInitialConfirmDelaySeconds: number
   cheerNameMode: 'masked' | 'real'
-  themeMode: 'light' | 'stage'
+  themeMode: 'light' | 'stage' | 'pastel'
+  fontMode: 'vibe' | 'system' | 'soft'
   wallEnabledPanels: Array<(typeof wallSessionValues)[number]>
   qnaWallFontScale: number
 }
@@ -650,6 +652,7 @@ const defaultRuntimeSettings: Settings = {
   quizInitialConfirmDelaySeconds: defaultQuizInitialConfirmDelaySeconds,
   cheerNameMode: 'masked',
   themeMode: 'stage',
+  fontMode: 'vibe',
   wallEnabledPanels: [...defaultWallEnabledPanels],
   qnaWallFontScale: defaultQnaWallFontScale,
 }
@@ -660,6 +663,7 @@ const initialConfigByRoomName = new Map<string, LoadedConfig>([
   ['hackathon26q1', loadConfig(rawHackathonQ1Config)],
   ['meeting26q1', loadConfig(rawAxQ1Config)],
   ['2026-ax-q2-meeting', loadConfig(rawAxQ2Config)],
+  ['airever', loadConfig(rawAireverConfig)],
   ['special26ax', loadConfig(rawSpecialConfig)],
 ])
 const bundledEventConfigPresets = [
@@ -674,6 +678,10 @@ const bundledEventConfigPresets = [
   {
     file: '2026_ax_group_q2_meeting.json',
     config: rawAxQ2Config,
+  },
+  {
+    file: '2026_06_airever.json',
+    config: rawAireverConfig,
   },
   {
     file: '2026_ax_special_message_vote_quiz.json',
@@ -1471,6 +1479,7 @@ export class ArenaRoom {
         })(),
         cheerNameMode: normalizeCheerNameMode(body.cheerNameMode, this.settings.cheerNameMode),
         themeMode: normalizeThemeMode(body.themeMode, this.settings.themeMode),
+        fontMode: normalizeFontMode(body.fontMode, this.settings.fontMode),
         wallEnabledPanels: normalizeWallEnabledPanels(body.wallEnabledPanels ?? this.settings.wallEnabledPanels),
         qnaWallFontScale: clamp(
           Number(body.qnaWallFontScale ?? this.settings.qnaWallFontScale ?? defaultQnaWallFontScale),
@@ -3144,6 +3153,7 @@ function normalizeRuntimeSettings(input: unknown): Settings {
     ),
     cheerNameMode: normalizeCheerNameMode(source.cheerNameMode, 'masked'),
     themeMode: normalizeThemeMode(source.themeMode, 'stage'),
+    fontMode: normalizeFontMode(source.fontMode, 'vibe'),
     wallEnabledPanels: normalizeWallEnabledPanels(source.wallEnabledPanels),
     qnaWallFontScale: clamp(Number(source.qnaWallFontScale ?? defaultQnaWallFontScale), 0.85, 1.55),
   }
@@ -3728,7 +3738,13 @@ function normalizeCheerNameMode(value: unknown, fallback: Settings['cheerNameMod
 }
 
 function normalizeThemeMode(value: unknown, fallback: Settings['themeMode'] = 'light'): Settings['themeMode'] {
-  return value === 'stage' ? 'stage' : value === 'light' ? 'light' : fallback
+  if (value === 'stage' || value === 'light' || value === 'pastel') return value
+  return fallback
+}
+
+function normalizeFontMode(value: unknown, fallback: Settings['fontMode'] = 'vibe'): Settings['fontMode'] {
+  if (value === 'vibe' || value === 'system' || value === 'soft') return value
+  return fallback
 }
 
 function normalizeWallEnabledPanels(value: unknown): Settings['wallEnabledPanels'] {
