@@ -15,7 +15,7 @@
     "run_worker_first": true
   },
   "vars": {
-    "ARENA_ROOM_NAME": "2026-ax-q2-meeting"
+    "ARENA_ROOM_NAME": "meeting"
   },
   "durable_objects": {
     "bindings": [

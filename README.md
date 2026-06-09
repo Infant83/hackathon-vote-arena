@@ -22,7 +22,7 @@ https://meeting.axgroup.workers.dev/vote
 https://meeting.axgroup.workers.dev/help
 ```
 
-운영 Worker 이름은 `meeting`이고, Cloudflare workers.dev 서브도메인은 `axgroup`입니다. 이번 행사 Durable Object room은 `2026-ax-q2-meeting`입니다.
+운영 Worker 이름은 `meeting`이고, Cloudflare workers.dev 서브도메인은 `axgroup`입니다. 기본 Durable Object room도 추적성을 위해 `meeting`으로 맞춥니다.
 
 ## 0. 앱/행사 운영 규칙 요약
 
@@ -370,7 +370,7 @@ npx wrangler deploy --name scmax --var ARENA_ROOM_NAME:scmax
 | --- | --- | --- | --- |
 | 2026 AX 해커톤 1분기 본선 | `hackathon26q1` | `event-configs/2026_ax_hackathon_q1_vote_quiz_luckydraw.json` | vote + quiz + luckydraw |
 | 2026 AX 그룹 1분기 모임 | `meeting26q1` | `event-configs/2026_ax_group_q1_meeting.json` | message/Q&A + quiz |
-| 2026 AX 그룹 2분기 모임 | `2026-ax-q2-meeting` | `event-configs/2026_ax_group_q2_meeting.json` | message/Q&A + quiz |
+| 2026 AX 그룹 2분기 모임 | `meeting` | `event-configs/2026_ax_group_q2_meeting.json` | message/Q&A + quiz |
 | airever | `airever` | `event-configs/2026_06_airever.json` | message/Q&A + quiz |
 | scmax | `scmax` | `event-configs/2026_06_scmax.json` | message/Q&A + quiz |
 | 2026 AX 특별 세션 | `special26ax` | `event-configs/2026_ax_special_message_vote_quiz.json` | message/Q&A + vote + quiz |
@@ -397,7 +397,9 @@ npx wrangler deployments list --name meeting --json
 
 2026-06-04 점검 기준으로는 `git push` 이후 새 Cloudflare deployment가 자동 생성되는 것을 확인하지 못했습니다. 현재 운영 배포는 수동 `wrangler deploy`로 반영된 상태입니다. Git Build 자동 배포를 운영에 쓰려면 Dashboard에서 repository, production branch, build/deploy command가 위 값으로 연결되어 있는지 먼저 확인하고, push 후 deployments 목록에 새 항목이 생기는지 검증합니다.
 
-코드와 정적 assets만 다시 배포하는 것은 기존 Q&A 질문을 지우지 않습니다. 질문, 참가자, 퀴즈 답변 같은 운영 상태는 `ARENA_ROOM_NAME=2026-ax-q2-meeting` Durable Object storage에 저장됩니다. 단, `wrangler.jsonc`의 Worker 이름, Durable Object binding/class, `ARENA_ROOM_NAME`을 바꾸거나 `/api/reset`, `/api/question/reset`, 관리자 `Q&A reset`을 실행하면 운영 데이터에 영향을 줄 수 있습니다.
+코드와 정적 assets만 다시 배포하는 것은 기존 Q&A 질문을 지우지 않습니다. 질문, 참가자, 퀴즈 답변 같은 운영 상태는 현재 Worker가 가리키는 `ARENA_ROOM_NAME` Durable Object storage에 저장됩니다. 단, `wrangler.jsonc`의 Worker 이름, Durable Object binding/class, `ARENA_ROOM_NAME`을 바꾸거나 `/api/reset`, `/api/question/reset`, 관리자 `Q&A reset`을 실행하면 운영 데이터에 영향을 줄 수 있습니다.
+
+`airever.axgroup.workers.dev`와 `scmax.axgroup.workers.dev`는 각각 `ARENA_ROOM_NAME=airever`, `ARENA_ROOM_NAME=scmax` room을 봅니다. 기본 `meeting` Worker를 배포하거나 git push만 하는 것은 두 room의 운영 저장값을 바꾸지 않습니다. 두 Worker를 따로 `--name airever --var ARENA_ROOM_NAME:airever`, `--name scmax --var ARENA_ROOM_NAME:scmax`로 재배포해도 코드와 정적 assets만 갱신되며, 관리자 화면에서 저장한 로고·문구·운영 preset은 같은 Durable Object room storage에 남습니다. 운영 설정이 바뀌는 경우는 `ARENA_ROOM_NAME`을 다른 값으로 배포하거나, 해당 Worker의 관리자 화면에서 `Cloudflare 저장 및 반영`, `불러와 적용`, reset류 작업을 실행할 때입니다.
 
 ### 5.6. 긴급 롤백
 
@@ -548,9 +550,9 @@ npm run realtime
 
 운영 콘텐츠의 이미지 입력은 `event-brand/scmax_logo.jpg`, `public/event-brand/scmax_logo.jpg`, `/event-brand/scmax_logo.jpg`를 모두 `/event-brand/scmax_logo.jpg`로 정리합니다. 이 경로 방식은 repo의 `public/event-brand/scmax_logo.jpg` 파일이 배포에 포함될 때 사용합니다. 관리자 화면의 PC 파일 업로드는 JPG/PNG/WebP/SVG 파일을 base64 data URL로 읽어 현재 Durable Object room에 저장하는 방식입니다. 큰 JPG/PNG는 브라우저에서 압축한 뒤 저장하며, 실패하면 운영 콘텐츠 화면의 상태 메시지에 원인을 표시합니다.
 
-Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 런타임에 바꿔 읽을 수 없습니다. Cloudflare 운영에서는 행사별로 `ARENA_ROOM_NAME`을 다르게 지정해 Durable Object 저장소를 분리합니다. 예를 들어 이번 행사는 `ARENA_ROOM_NAME=2026-ax-q2-meeting`처럼 별도 룸 이름을 쓰면 이전 행사 DB와 섞이지 않습니다. Worker에서 새 `event-configs/*.json`을 preset으로 쓰려면 해당 JSON을 `worker/index.ts`에 import하고 `bundledEventConfigPresets`와 `initialConfigByRoomName`에 함께 등록한 뒤 배포합니다.
+Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 런타임에 바꿔 읽을 수 없습니다. Cloudflare 운영에서는 행사별로 `ARENA_ROOM_NAME`을 다르게 지정해 Durable Object 저장소를 분리합니다. 기본 `meeting` Worker는 추적성을 위해 `ARENA_ROOM_NAME=meeting`을 사용합니다. Worker에서 새 `event-configs/*.json`을 preset으로 쓰려면 해당 JSON을 `worker/index.ts`에 import하고 `bundledEventConfigPresets`와 `initialConfigByRoomName`에 함께 등록한 뒤 배포합니다.
 
-`worker/index.ts`는 현재 `hackathon26q1`, `meeting26q1`, `2026-ax-q2-meeting`, `airever`, `scmax`, `special26ax` 룸의 초기 설정을 함께 번들링합니다. 새 행사 프리셋을 추가할 때는 `event-configs/<행사>.json`을 만든 뒤 Worker import, `initialConfigByRoomName`, `bundledEventConfigPresets`, `npm run ops:audit:all`을 함께 갱신합니다. 운영 중 내용이 바뀌면 `/admin > 운영 콘텐츠 > 관리`에서 저장 적용하고, 행사 후에는 관리자 화면에서 settings 파일을 내려받아 `event-configs/` 또는 비공개 운영 보관함에 반영합니다.
+`worker/index.ts`는 현재 `hackathon26q1`, `meeting26q1`, `meeting`, `airever`, `scmax`, `special26ax` 룸의 초기 설정을 함께 번들링합니다. 과거 Q2 room인 `2026-ax-q2-meeting`도 export와 복구 접근을 위해 legacy alias로 남겨둡니다. 새 행사 프리셋을 추가할 때는 `event-configs/<행사>.json`을 만든 뒤 Worker import, `initialConfigByRoomName`, `bundledEventConfigPresets`, `npm run ops:audit:all`을 함께 갱신합니다. 운영 중 내용이 바뀌면 `/admin > 운영 콘텐츠 > 관리`에서 저장 적용하고, 행사 후에는 관리자 화면에서 settings 파일을 내려받아 `event-configs/` 또는 비공개 운영 보관함에 반영합니다.
 
 관리자 화면에서도 수정할 수 있습니다.
 
@@ -593,7 +595,7 @@ Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 �
     "id": "2026-ax-q2-meeting",
     "label": "2026 AX 그룹 2분기 모임",
     "workerName": "meeting",
-    "roomName": "2026-ax-q2-meeting",
+    "roomName": "meeting",
     "settingsFile": "event-configs/2026_ax_group_q2_meeting.json",
     "description": "Q&A와 퀴즈 중심 운영 프로필",
     "features": ["message", "quiz"]
@@ -757,7 +759,7 @@ GET /api/export
 
 Cloudflare 운영 배포에서는 행사 상태가 Durable Object `ArenaRoom`의 storage에 저장됩니다. 큰 inline 이미지(data URL)는 snapshot에 직접 넣지 않고 `event-media-v1:*` storage key로 분리 저장하며, snapshot에는 참조 token만 들어갑니다. 이 구조는 상품 이미지와 트로피 로고처럼 큰 미디어 때문에 Durable Object 저장 payload가 커지는 문제를 줄이기 위한 것입니다.
 
-같은 Worker `meeting`과 같은 `ARENA_ROOM_NAME=2026-ax-q2-meeting`으로 새 코드를 배포하면 Durable Object storage의 기존 질문은 유지됩니다. 워드클라우드 단어 추출 규칙이나 화면 UI를 개선해 배포하면 기존 질문 텍스트가 새 규칙으로 다시 표시될 뿐, 질문 자체를 수정하거나 삭제하지 않습니다.
+같은 Worker와 같은 `ARENA_ROOM_NAME`으로 새 코드를 배포하면 Durable Object storage의 기존 질문은 유지됩니다. 예를 들어 기본 `meeting` Worker는 `ARENA_ROOM_NAME=meeting` room을 계속 볼 때 운영 질문과 설정을 이어받습니다. 워드클라우드 단어 추출 규칙이나 화면 UI를 개선해 배포하면 기존 질문 텍스트가 새 규칙으로 다시 표시될 뿐, 질문 자체를 수정하거나 삭제하지 않습니다.
 
 Durable Object storage는 운영 중 상태 저장소이지, 영구 아카이브나 분석 DB를 대체하지 않습니다. 행사 후 보존이 필요하면 `/api/export` JSON과 XLSX를 내려받아 별도 저장합니다.
 

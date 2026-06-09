@@ -4,6 +4,14 @@
 
 ## 2026-06-09
 
+### 운영 안정성과 meeting room 추적성
+
+- `wrangler.jsonc`의 CPU limit이 `limits.cpu_ms=300000`으로 설정되어 있음을 확인하고, Cloudflare observability 설정도 함께 점검했습니다.
+- Worker 상태 생성과 퀴즈 답변 제한 검사에서 불필요한 배열 생성을 줄여, 공개 질문/메시지 카운팅과 퀴즈 제출 hot path의 CPU 사용을 낮췄습니다.
+- 기본 `meeting` Worker의 `ARENA_ROOM_NAME`을 `meeting`으로 맞추고, `event-configs/2026_ax_group_q2_meeting.json`의 `event.roomName`도 `meeting`으로 정리해 `Worker name = ARENA_ROOM_NAME = event.roomName` 추적 규칙을 적용했습니다.
+- 과거 Q2 room인 `2026-ax-q2-meeting`은 `worker/index.ts`의 legacy alias로 남겨, 필요한 경우 예전 room export와 복구 접근을 할 수 있게 했습니다.
+- README에 기본 `meeting` 배포와 git push가 `airever`/`scmax` Durable Object room의 로고·문구·운영 preset 저장값을 바꾸지 않는 조건을 정리했습니다.
+
 ### airever/scmax 동시 운영 반영
 
 - `event-configs/2026_06_scmax.json`을 추가해 `scmax` 행사 preset을 Q&A/퀴즈 중심 운영 포맷으로 준비했습니다.

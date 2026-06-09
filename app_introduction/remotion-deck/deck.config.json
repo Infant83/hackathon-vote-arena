@@ -211,7 +211,7 @@
     {
       "kicker": "05 배포 순서",
       "title": "배포는 빌드, 사전 확인, 배포, 운영 점검 순서로 갑니다",
-      "subtitle": "현재 기본 배포는 meeting Worker와 2026-ax-q2-meeting room입니다. 다른 행사는 --name과 --var로 분리합니다.",
+      "subtitle": "현재 기본 배포는 meeting Worker와 meeting room입니다. 다른 행사는 --name과 --var로 분리합니다.",
       "layout": "hosting",
       "code": [
         "npm run lint",

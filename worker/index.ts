@@ -715,6 +715,7 @@ const fallbackInitialConfig = loadConfig(rawConfig)
 const initialConfigByRoomName = new Map<string, LoadedConfig>([
   ['hackathon26q1', loadConfig(rawHackathonQ1Config)],
   ['meeting26q1', loadConfig(rawAxQ1Config)],
+  ['meeting', loadConfig(rawAxQ2Config)],
   ['2026-ax-q2-meeting', loadConfig(rawAxQ2Config)],
   ['airever', loadConfig(rawAireverConfig)],
   ['scmax', loadConfig(rawScmaxConfig)],
@@ -1704,6 +1705,11 @@ export class ArenaRoom {
       share: maxStars > 0 ? Math.max(8, Math.round((team.totalStars / maxStars) * 100)) : 0,
     }))
 
+    let visibleQuestionTotalCount = 0
+    for (const question of this.questions) {
+      if (!question.hidden) visibleQuestionTotalCount += 1
+    }
+
     const state = {
       teams: rankedTeams,
       participants: participantList,
@@ -1712,7 +1718,7 @@ export class ArenaRoom {
       visibleCheerTotalCount,
       questions: this.questions.slice(0, 120),
       questionTotalCount: this.questions.length,
-      visibleQuestionTotalCount: this.questions.filter((question) => !question.hidden).length,
+      visibleQuestionTotalCount,
       voteEvents: this.voteEvents.slice(0, 100),
       awardHistory: this.awardHistory.slice(0, 200),
       closed: this.closed,
@@ -1866,6 +1872,16 @@ export class ArenaRoom {
         ? 'warn'
         : 'pass'
 
+    let visibleCheers = 0
+    for (const message of this.cheers) {
+      if (!message.hidden) visibleCheers += 1
+    }
+
+    let visibleQuestions = 0
+    for (const question of this.questions) {
+      if (!question.hidden) visibleQuestions += 1
+    }
+
     return {
       status,
       generatedAt: Date.now(),
@@ -1879,9 +1895,9 @@ export class ArenaRoom {
         teams: this.teams.length,
         participants: this.participants.size,
         cheers: this.cheers.length,
-        visibleCheers: this.cheers.filter((message) => !message.hidden).length,
+        visibleCheers,
         questions: this.questions.length,
-        visibleQuestions: this.questions.filter((question) => !question.hidden).length,
+        visibleQuestions,
         quizAnswers: this.quiz.answers.length,
       },
       clients: clientCounts,
@@ -2828,7 +2844,7 @@ export class ArenaRoom {
     this.advanceQuizPhase(serverReceivedAt)
     if (!person || (this.quiz.mode !== 'open' && this.quiz.mode !== 'settling') || !this.quiz.id || !text) return null
     if (Number(body.quizId) && Number(body.quizId) !== this.quiz.id) return null
-    if (this.quiz.answers.filter((answer) => answer.participantId === person.id).length >= quizAnswerLimit) return null
+    if (this.hasReachedQuizAnswerLimit(person.id, quizAnswerLimit)) return null
 
     const normalized = normalizeQuizAnswer(text)
     const correct = isQuizAnswerCorrect(normalized, this.quizAnswerKeys)
@@ -2896,11 +2912,22 @@ export class ArenaRoom {
     if (this.quiz.mode === 'countdown') return '문제가 공개되면 답변을 제출해주세요.'
     if (Number(body.quizId) && Number(body.quizId) !== this.quiz.id) return '이미 다른 문제가 진행 중입니다.'
     if (this.quiz.mode !== 'open' && this.quiz.mode !== 'settling') return '정답자 선정이 마감되었습니다.'
-    if (this.quiz.answers.filter((answer) => answer.participantId === person.id).length >= quizAnswerLimit) {
+    if (this.hasReachedQuizAnswerLimit(person.id, quizAnswerLimit)) {
       return `이 문제는 최대 ${quizAnswerLimit}번까지만 제출할 수 있습니다.`
     }
 
     return '답변을 접수하지 못했습니다.'
+  }
+
+  private hasReachedQuizAnswerLimit(participantId: string, limit: number) {
+    let count = 0
+    for (const answer of this.quiz.answers) {
+      if (answer.participantId !== participantId) continue
+      count += 1
+      if (count >= limit) return true
+    }
+
+    return false
   }
 
   private getQuizAnswerLimit() {

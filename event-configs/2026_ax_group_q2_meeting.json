@@ -3,7 +3,7 @@
     "id": "2026-ax-q2-meeting",
     "label": "2026 AX 그룹 2분기 모임",
     "workerName": "meeting",
-    "roomName": "2026-ax-q2-meeting",
+    "roomName": "meeting",
     "settingsFile": "event-configs/2026_ax_group_q2_meeting.json",
     "description": "Q&A와 퀴즈 중심 운영 프로필",
     "features": [

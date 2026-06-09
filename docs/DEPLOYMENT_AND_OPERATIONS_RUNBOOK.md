@@ -11,7 +11,7 @@
 ```text
 Worker name: meeting
 URL: https://meeting.axgroup.workers.dev
-ARENA_ROOM_NAME: 2026-ax-q2-meeting
+ARENA_ROOM_NAME: meeting
 Config: event-configs/2026_ax_group_q2_meeting.json
 Features: message, quiz
 ```

@@ -16,7 +16,7 @@ Current live URLs:
 Current Q2 production identity:
 
 - Worker name: `meeting`
-- Durable Object room: `2026-ax-q2-meeting`
+- Durable Object room: `meeting`
 - settings file: `event-configs/2026_ax_group_q2_meeting.json`
 - features: `message`, `quiz`
 
@@ -32,7 +32,7 @@ Current Q2 production identity:
 
 - `event-configs/2026_ax_hackathon_q1_vote_quiz_luckydraw.json`: `hackathon26q1`, features `vote`, `quiz`, `luckydraw`
 - `event-configs/2026_ax_group_q1_meeting.json`: `meeting26q1`, features `message`, `quiz`
-- `event-configs/2026_ax_group_q2_meeting.json`: `2026-ax-q2-meeting`, features `message`, `quiz`
+- `event-configs/2026_ax_group_q2_meeting.json`: `meeting`, features `message`, `quiz`; legacy `2026-ax-q2-meeting` alias remains for export/recovery access
 - `event-configs/2026_06_airever.json`: `airever`, features `message`, `quiz`, default theme `pastel`, default font `vibe`
 - `event-configs/2026_06_scmax.json`: `scmax`, features `message`, `quiz`, default theme `lg-brutal-pastel`, default font `vibe`
 - `event-configs/2026_ax_special_message_vote_quiz.json`: `special26ax`, features `message`, `vote`, `quiz`
@@ -53,11 +53,11 @@ Worker bundled presets must be kept in sync in `worker/index.ts` through imports
 
 ## Verification Snapshot
 
-Last verified on 2026-06-08:
+Last verified on 2026-06-09:
 
 - `npm run lint`: pass
 - `npm run build`: pass
-- `npm run ops:audit:all`: WARN only for existing Q2 `workerName=meeting` vs `roomName=2026-ax-q2-meeting`
+- `npm run ops:audit:all`: pass after aligning Q2 `workerName`, `ARENA_ROOM_NAME`, and `event.roomName` to `meeting`
 - `npm run ops:audit:ax-q2`: PASS with expected local runtime WARN for `local-node`
 - Browser check through Chrome Playwright:
   - `/admin?panel=teams` copy previews rendered 7 groups
@@ -71,7 +71,7 @@ After verification, local test state was reset with `/api/reset`.
 
 ## Next Things To Watch
 
-- If Q2 should be easier to trace, decide whether to align `workerName` and `roomName`. Keeping `meeting` is currently intentional for the live URL.
+- Basic `meeting` deploys now use `ARENA_ROOM_NAME=meeting`; `airever` and `scmax` remain separate Durable Object rooms and keep their admin-saved logos/copy unless those specific workers are reset or saved over.
 - When adding a new event config, run `npm run ops:audit:all` before deployment.
 - When adding or renaming copy fields, update `copyGroups`, `CopyGroupPreview`, README, and AGENTS together.
 - Do not put real internal names, private photos, or sensitive prize details in `public/prev_settings`.
