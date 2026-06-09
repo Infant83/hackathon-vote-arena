@@ -14,6 +14,8 @@
 
 ### airever/scmax 동시 운영 반영
 
+- `event-configs/2026_06_AIBD_REVERSE.json`와 `event-configs/2026_06_SCMAX_REVERSE.json`을 Worker 번들에 추가하고, `airever`/`scmax` room의 활성 기본 설정으로 연결했습니다.
+- `SCMAX_REVERSE` 설정의 room 메타데이터, wall 세션, 팀 편집 키를 운영 audit 기준에 맞춰 보정했습니다.
 - `event-configs/2026_06_scmax.json`을 추가해 `scmax` 행사 preset을 Q&A/퀴즈 중심 운영 포맷으로 준비했습니다.
 - Worker 번들 초기 설정과 관리자 preset manifest에 `scmax` room을 등록했습니다. `scmax.axgroup.workers.dev`는 `ARENA_ROOM_NAME=scmax` Durable Object room을 기준으로 운영합니다.
 - `airever`와 `scmax` 모두 최신 Vibe Arena 로고, favicon, theme pack, `/message` 상단 바 정렬 개선을 적용할 수 있도록 같은 배포 흐름에 올렸습니다.

@@ -371,8 +371,8 @@ npx wrangler deploy --name scmax --var ARENA_ROOM_NAME:scmax
 | 2026 AX 해커톤 1분기 본선 | `hackathon26q1` | `event-configs/2026_ax_hackathon_q1_vote_quiz_luckydraw.json` | vote + quiz + luckydraw |
 | 2026 AX 그룹 1분기 모임 | `meeting26q1` | `event-configs/2026_ax_group_q1_meeting.json` | message/Q&A + quiz |
 | 2026 AX 그룹 2분기 모임 | `meeting` | `event-configs/2026_ax_group_q2_meeting.json` | message/Q&A + quiz |
-| airever | `airever` | `event-configs/2026_06_airever.json` | message/Q&A + quiz |
-| scmax | `scmax` | `event-configs/2026_06_scmax.json` | message/Q&A + quiz |
+| airever | `airever` | `event-configs/2026_06_AIBD_REVERSE.json` | message/Q&A + quiz |
+| scmax | `scmax` | `event-configs/2026_06_SCMAX_REVERSE.json` | message/Q&A + vote + quiz |
 | 2026 AX 특별 세션 | `special26ax` | `event-configs/2026_ax_special_message_vote_quiz.json` | message/Q&A + vote + quiz |
 
 ### 5.5. Git Build 자동 배포
@@ -552,7 +552,7 @@ npm run realtime
 
 Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 런타임에 바꿔 읽을 수 없습니다. Cloudflare 운영에서는 행사별로 `ARENA_ROOM_NAME`을 다르게 지정해 Durable Object 저장소를 분리합니다. 기본 `meeting` Worker는 추적성을 위해 `ARENA_ROOM_NAME=meeting`을 사용합니다. Worker에서 새 `event-configs/*.json`을 preset으로 쓰려면 해당 JSON을 `worker/index.ts`에 import하고 `bundledEventConfigPresets`와 `initialConfigByRoomName`에 함께 등록한 뒤 배포합니다.
 
-`worker/index.ts`는 현재 `hackathon26q1`, `meeting26q1`, `meeting`, `airever`, `scmax`, `special26ax` 룸의 초기 설정을 함께 번들링합니다. 과거 Q2 room인 `2026-ax-q2-meeting`도 export와 복구 접근을 위해 legacy alias로 남겨둡니다. 새 행사 프리셋을 추가할 때는 `event-configs/<행사>.json`을 만든 뒤 Worker import, `initialConfigByRoomName`, `bundledEventConfigPresets`, `npm run ops:audit:all`을 함께 갱신합니다. 운영 중 내용이 바뀌면 `/admin > 운영 콘텐츠 > 관리`에서 저장 적용하고, 행사 후에는 관리자 화면에서 settings 파일을 내려받아 `event-configs/` 또는 비공개 운영 보관함에 반영합니다.
+`worker/index.ts`는 현재 `hackathon26q1`, `meeting26q1`, `meeting`, `airever`, `scmax`, `special26ax` 룸의 초기 설정을 함께 번들링합니다. `airever`의 활성 기본값은 `event-configs/2026_06_AIBD_REVERSE.json`, `scmax`의 활성 기본값은 `event-configs/2026_06_SCMAX_REVERSE.json`입니다. 과거 Q2 room인 `2026-ax-q2-meeting`도 export와 복구 접근을 위해 legacy alias로 남겨둡니다. 새 행사 프리셋을 추가할 때는 `event-configs/<행사>.json`을 만든 뒤 Worker import, `initialConfigByRoomName`, `bundledEventConfigPresets`, `npm run ops:audit:all`을 함께 갱신합니다. 운영 중 내용이 바뀌면 `/admin > 운영 콘텐츠 > 관리`에서 저장 적용하고, 행사 후에는 관리자 화면에서 settings 파일을 내려받아 `event-configs/` 또는 비공개 운영 보관함에 반영합니다.
 
 관리자 화면에서도 수정할 수 있습니다.
 

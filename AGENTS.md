@@ -73,8 +73,8 @@
 - 기존 행사 DB를 내려받을 때는 같은 Durable Object binding/class와 같은 `ARENA_ROOM_NAME`으로 임시 Worker를 띄워 `/api/export`만 수행하고 reset은 실행하지 않는다.
 - `event-configs/`는 관리자 전용 preset과 Cloudflare 번들 초기 설정의 기준이다. 새 이벤트 JSON을 추가하면 `worker/index.ts`의 import, `initialConfigByRoomName`, `bundledEventConfigPresets`, `npm run ops:audit:all`을 함께 갱신한다.
 - 화면 테마는 기본 `light`, `pastel`, `stage` 표면과 확장 theme pack을 지원한다. 글씨체는 `vibe`, `soft`, `system`을 지원한다. 새 설정값을 추가하면 `src/App.tsx`, `server.mjs`, `worker/index.ts`, 행사 JSON을 같은 schema로 맞춘다.
-- `airever` 행사는 `event-configs/2026_06_airever.json`, Worker `airever`, `ARENA_ROOM_NAME=airever` room을 기준으로 운영한다.
-- `scmax` 행사는 `event-configs/2026_06_scmax.json`, Worker `scmax`, `ARENA_ROOM_NAME=scmax` room을 기준으로 운영한다.
+- `airever` 행사는 활성 기본값 `event-configs/2026_06_AIBD_REVERSE.json`, Worker `airever`, `ARENA_ROOM_NAME=airever` room을 기준으로 운영한다.
+- `scmax` 행사는 활성 기본값 `event-configs/2026_06_SCMAX_REVERSE.json`, Worker `scmax`, `ARENA_ROOM_NAME=scmax` room을 기준으로 운영한다.
 - `public/prev_settings/`는 공개 배포에 포함되는 샘플/과거 설정 보관함이다. 실명, 내부 소속, 비공개 사진, 민감한 상품 정보가 있는 파일은 여기에 두지 않는다.
 - 관리자 비밀번호는 코드가 아니라 `ADMIN_PASSCODE` 환경변수 또는 Cloudflare secret으로 설정한다. passcode를 바꾸면 기존 관리자 쿠키는 무효가 되며 다시 로그인해야 한다.
 - 운영 콘텐츠의 화면별 문구를 수정할 때는 오른쪽 preview가 실제 노출 화면을 대표해야 한다. 새 copy 필드를 추가하면 `copyGroups`, preview 컴포넌트, README 운영 콘텐츠 설명을 함께 갱신한다.

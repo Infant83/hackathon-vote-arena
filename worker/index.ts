@@ -1,7 +1,9 @@
 import rawHackathonQ1Config from '../event-configs/2026_ax_hackathon_q1_vote_quiz_luckydraw.json'
 import rawAxQ1Config from '../event-configs/2026_ax_group_q1_meeting.json'
 import rawAxQ2Config from '../event-configs/2026_ax_group_q2_meeting.json'
+import rawAibdReverseConfig from '../event-configs/2026_06_AIBD_REVERSE.json'
 import rawAireverConfig from '../event-configs/2026_06_airever.json'
+import rawScmaxReverseConfig from '../event-configs/2026_06_SCMAX_REVERSE.json'
 import rawScmaxConfig from '../event-configs/2026_06_scmax.json'
 import rawSpecialConfig from '../event-configs/2026_ax_special_message_vote_quiz.json'
 import rawConfig from '../teams.json'
@@ -717,8 +719,8 @@ const initialConfigByRoomName = new Map<string, LoadedConfig>([
   ['meeting26q1', loadConfig(rawAxQ1Config)],
   ['meeting', loadConfig(rawAxQ2Config)],
   ['2026-ax-q2-meeting', loadConfig(rawAxQ2Config)],
-  ['airever', loadConfig(rawAireverConfig)],
-  ['scmax', loadConfig(rawScmaxConfig)],
+  ['airever', loadConfig(rawAibdReverseConfig)],
+  ['scmax', loadConfig(rawScmaxReverseConfig)],
   ['special26ax', loadConfig(rawSpecialConfig)],
 ])
 const bundledEventConfigPresets = [
@@ -735,8 +737,16 @@ const bundledEventConfigPresets = [
     config: rawAxQ2Config,
   },
   {
+    file: '2026_06_AIBD_REVERSE.json',
+    config: rawAibdReverseConfig,
+  },
+  {
     file: '2026_06_airever.json',
     config: rawAireverConfig,
+  },
+  {
+    file: '2026_06_SCMAX_REVERSE.json',
+    config: rawScmaxReverseConfig,
   },
   {
     file: '2026_06_scmax.json',
