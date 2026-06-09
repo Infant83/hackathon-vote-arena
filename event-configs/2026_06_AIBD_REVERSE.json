@@ -1,7 +1,7 @@
 {
   "event": {
     "id": "airever",
-    "label": "airever",
+    "label": "AI/BigData Reverse Reporting",
     "workerName": "airever",
     "roomName": "airever",
     "settingsFile": "event-configs/2026_06_AIBD_REVERSE.json",

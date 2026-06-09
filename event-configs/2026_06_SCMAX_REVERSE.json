@@ -1,7 +1,7 @@
 {
   "event": {
     "id": "scmax",
-    "label": "scmax",
+    "label": "SCM AX Reverse Reporting",
     "workerName": "scmax",
     "roomName": "scmax",
     "settingsFile": "event-configs/2026_06_SCMAX_REVERSE.json",
