@@ -22,6 +22,13 @@
 - `public/event-brand/scmax_logo.png`를 `scmax` preset의 상단 브랜드 로고와 팀 로고 경로로 연결했습니다.
 - JPG/PNG 파일 업로드 시 파일 헤더로 실제 이미지 MIME을 보정하고, base64 변환/압축 진행 상태와 실패 메시지를 운영 콘텐츠 화면에 즉시 표시하도록 개선했습니다.
 
+### 운영 콘텐츠 저장과 송출 가독성
+
+- `/admin?panel=teams`에서 내 PC 보관 또는 운영 preset을 `불러와 적용`한 뒤 이름을 비워 저장하면, 새 이름을 강제로 만들지 않고 확인 후 같은 항목을 덮어쓰도록 정리했습니다.
+- 운영 preset 덮어쓰기는 같은 `ARENA_ROOM_NAME` Durable Object room 안에서 기존 preset ID를 유지하고 `updatedAt`만 갱신합니다.
+- 배포 preset, 과거 preset, 업로드 파일은 읽기 전용 출처로 다루며, 저장 시 내 PC 보관 또는 운영 preset으로 별도 항목을 만들게 했습니다.
+- `/wall`/Showup의 응원 메시지와 Q&A 카드 본문 색상, 글자 두께, 반투명 말풍선 배경을 조정해 밝은 테마와 stage 테마 모두에서 메시지 가독성을 높였습니다.
+
 ## 2026-06-08
 
 ### Vibe Arena 로고와 테마팩

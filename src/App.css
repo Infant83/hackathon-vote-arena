@@ -1028,6 +1028,7 @@
   flex: 0 0 auto;
   width: var(--app-logo-width, 52px);
   height: var(--app-logo-height, 52px);
+  aspect-ratio: var(--app-logo-aspect-ratio, 1);
   max-width: min(220px, 24vw);
   max-height: 92px;
   min-width: min(var(--app-logo-width, 52px), 220px);
@@ -4602,7 +4603,7 @@ body.is-wall-resizing * {
 
 .public-cheer-message strong {
   overflow: hidden;
-  color: var(--ink);
+  color: color-mix(in srgb, var(--ink) 90%, #2f3a4a);
   font-size: clamp(15px, 1vw, 18px);
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -4753,7 +4754,7 @@ body.is-wall-resizing * {
 
 .public-cheer-focus-card p {
   margin: 0;
-  color: var(--ink);
+  color: color-mix(in srgb, var(--ink) 86%, #2f3a4a);
   font-size: clamp(24px, 2vw, 38px);
   font-weight: 820;
   line-height: 1.2;
@@ -5051,11 +5052,12 @@ body.is-wall-resizing * {
 
 .qna-question-card p {
   margin: 0;
-  color: rgba(255, 255, 255, 0.94);
+  color: rgba(255, 255, 255, 0.97);
   font-family: var(--qna-font);
   font-size: calc(clamp(20px, 1.5vw, 29px) * var(--qna-font-scale, 1));
   font-weight: 840;
   line-height: 1.22;
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.16);
   min-height: 0;
   align-self: start;
   display: -webkit-box;
@@ -5099,9 +5101,9 @@ body.is-wall-resizing * {
   min-height: 26px;
   align-self: end;
   overflow: hidden;
-  color: rgba(226, 234, 255, 0.72);
+  color: rgba(226, 234, 255, 0.8);
   font-size: calc(clamp(12px, 0.86vw, 16px) * var(--qna-font-scale, 1));
-  font-weight: 760;
+  font-weight: 810;
   line-height: 1.15;
 }
 
@@ -5151,15 +5153,15 @@ body.is-wall-resizing * {
 }
 
 .qna-question-card.is-read p {
-  color: rgba(215, 224, 238, 0.62);
+  color: rgba(215, 224, 238, 0.72);
 }
 
 .qna-question-card.is-read footer {
-  color: rgba(198, 209, 224, 0.48);
+  color: rgba(198, 209, 224, 0.58);
 }
 
 .qna-question-card.is-read footer strong {
-  color: rgba(196, 202, 212, 0.68);
+  color: rgba(196, 202, 212, 0.78);
 }
 
 .qna-question-card.is-read .qna-question-mark {
@@ -5743,7 +5745,8 @@ body.is-wall-resizing * {
 }
 
 .theme-stage .qna-question-card p {
-  color: rgba(255, 255, 255, 0.94);
+  color: rgba(255, 255, 255, 0.98);
+  text-shadow: 0 1px 16px rgba(0, 0, 0, 0.2);
 }
 
 .theme-stage .qna-composer-heading p:not(.section-kicker),
@@ -5753,7 +5756,7 @@ body.is-wall-resizing * {
 }
 
 .theme-stage .qna-question-card footer {
-  color: rgba(226, 234, 255, 0.72);
+  color: rgba(226, 234, 255, 0.82);
 }
 
 .theme-stage .qna-composer-heading > span,
@@ -5839,12 +5842,12 @@ body.is-wall-resizing * {
 }
 
 .theme-stage .qna-question-card.is-read p {
-  color: rgba(215, 224, 238, 0.62);
+  color: rgba(215, 224, 238, 0.72);
 }
 
 .theme-stage .qna-question-card.is-read footer,
 .theme-stage .qna-question-card.is-read footer strong {
-  color: rgba(198, 209, 224, 0.5);
+  color: rgba(198, 209, 224, 0.6);
 }
 
 .theme-stage .qna-read-badge,
@@ -9803,13 +9806,14 @@ body.is-wall-resizing * {
   display: grid;
   gap: 4px;
   justify-items: center;
+  color: color-mix(in srgb, var(--ink) 90%, #263244);
   font-size: 20px;
   font-weight: 880;
   letter-spacing: 0;
 }
 
 .floating-cheer.is-open strong span {
-  color: var(--muted);
+  color: color-mix(in srgb, var(--body) 82%, #334155);
   font-size: 13px;
   font-weight: 780;
 }
@@ -9842,9 +9846,9 @@ body.is-wall-resizing * {
   z-index: 2;
   display: -webkit-box;
   overflow: hidden;
-  color: var(--body);
+  color: color-mix(in srgb, var(--body) 90%, #263244);
   font-size: clamp(13px, 1.2vw, 16px);
-  font-weight: 760;
+  font-weight: 790;
   line-height: 1.3;
   text-overflow: ellipsis;
   -webkit-box-orient: vertical;
@@ -9854,7 +9858,7 @@ body.is-wall-resizing * {
 .floating-cheer small {
   position: relative;
   z-index: 2;
-  color: var(--muted);
+  color: color-mix(in srgb, var(--muted) 86%, #475569);
   font-size: 11px;
   font-weight: 760;
 }
@@ -9885,10 +9889,10 @@ body.is-wall-resizing * {
   padding: 10px 13px;
   border: 1px solid color-mix(in srgb, var(--team-color) 12%, rgba(255, 255, 255, 0.7));
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.62);
-  color: var(--body);
+  background: rgba(255, 255, 255, 0.78);
+  color: color-mix(in srgb, var(--body) 88%, #263244);
   font-size: 18px;
-  font-weight: 760;
+  font-weight: 800;
   line-height: 1.36;
   text-align: left;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52);
@@ -12015,6 +12019,7 @@ body.is-wall-resizing * {
 .theme-stage .public-cheer-message strong,
 .theme-stage .public-cheer-message p {
   color: var(--stage-ink);
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.18);
 }
 
 .theme-stage .public-cheer-message .cheer-route-team {
@@ -12815,6 +12820,7 @@ body.is-wall-resizing * {
 .theme-stage .floating-cheer .bubble-message-preview,
 .theme-stage .floating-cheer small {
   color: var(--stage-ink);
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.18);
 }
 
 .theme-stage .floating-cheer.is-open strong span,
@@ -12825,7 +12831,8 @@ body.is-wall-resizing * {
 .theme-stage .bubble-message-list span {
   color: var(--stage-ink);
   border-color: rgba(143, 214, 255, 0.22);
-  background: rgba(7, 13, 31, 0.68);
+  background: rgba(7, 13, 31, 0.74);
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.18);
 }
 
 @keyframes starRise {
@@ -13554,8 +13561,11 @@ body.is-wall-resizing * {
   }
 
   .message-shell-app > .topbar.audience-topbar .lg-dot {
-    width: min(var(--app-logo-width, 52px), 42vw);
-    height: min(var(--app-logo-height, 52px), 64px);
+    width: min(var(--app-logo-width, 52px), 56vw);
+    height: auto;
+    aspect-ratio: var(--app-logo-aspect-ratio, 1);
+    max-width: min(var(--app-logo-width, 52px), calc(100vw - 48px));
+    max-height: 64px;
     min-width: 0;
   }
 

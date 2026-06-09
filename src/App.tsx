@@ -1893,8 +1893,9 @@ function App() {
   const allowProtectedRealtime = !protectedDisplayMode || adminSession.authenticated
   const eventStateEnabled = mode !== 'not-found' && (!protectedDisplayMode || adminSession.authenticated)
   const { state, connection, post } = useEventState(mode, participantId, eventStateEnabled, allowProtectedRealtime)
-  const themeMode = getThemeMode(state)
-  const fontMode = getFontMode(state)
+  const stateReady = hasResolvedEventState(state)
+  const themeMode = stateReady ? getThemeMode(state) : 'light'
+  const fontMode = stateReady ? getFontMode(state) : 'vibe'
   const themeClassName = getThemeClassName(themeMode)
   const [name, setName] = useState(() => getStoredValue(nameKey))
   const [group, setGroup] = useState(() => getStoredValue(groupKey))
@@ -1914,20 +1915,19 @@ function App() {
   const maxStarsPerTeam = getMaxStarsPerTeam(state)
   const spentStars = sumStars(allocations)
   const remainingStars = Math.max(0, starBudget - spentStars)
-  const stateReady = hasResolvedEventState(state)
   const appQuizNow = useQuizClock(state.quiz, state.serverTime, state.receivedAt)
   const quizParticipationActive = stateReady && isQuizParticipationActive(state.quiz, appQuizNow)
   const voteRouteEnabled = stateReady && isVoteRouteEnabled(state)
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode
-    storeValue(themeModeKey, themeMode)
-  }, [themeMode])
+    if (stateReady) storeValue(themeModeKey, themeMode)
+  }, [stateReady, themeMode])
 
   useEffect(() => {
     document.documentElement.dataset.font = fontMode
-    storeValue(fontModeKey, fontMode)
-  }, [fontMode])
+    if (stateReady) storeValue(fontModeKey, fontMode)
+  }, [fontMode, stateReady])
 
   useEffect(() => {
     document.title = getDocumentTitle(mode, syncedWallPanel)
@@ -7523,6 +7523,7 @@ function TeamConfigDetail({
   const [settingsPresets, setSettingsPresets] = useState<SettingsPreset[]>([])
   const [localSettingsSnapshots, setLocalSettingsSnapshots] = useState<LocalSettingsSnapshot[]>(() => readLocalSettingsSnapshots())
   const [settingsSnapshotName, setSettingsSnapshotName] = useState('')
+  const [draftSettingsOrigin, setDraftSettingsOrigin] = useState<DraftSettingsOrigin | null>(null)
   const [selectedPresetId, setSelectedPresetId] = useState('')
   const [activeConfigSection, setActiveConfigSection] = useState<ConfigSectionId>('copy')
   const [activeCopyGroupId, setActiveCopyGroupId] = useState(copyGroups[0]?.id || '')
@@ -7541,6 +7542,18 @@ function TeamConfigDetail({
     ? localSettingsSnapshots.find((snapshot) => snapshot.id === selectedSettingsPreset.localSnapshotId)
     : undefined
   const selectedOperationPreset = selectedSettingsPreset?.source === 'operation-preset' ? selectedSettingsPreset : undefined
+  const explicitSettingsSnapshotName = settingsSnapshotName.trim().slice(0, 80)
+  const draftSettingsOriginLocalSnapshot = draftSettingsOrigin?.localSnapshotId
+    ? localSettingsSnapshots.find((snapshot) => snapshot.id === draftSettingsOrigin.localSnapshotId)
+    : undefined
+  const draftSettingsOriginOperationPreset = draftSettingsOrigin?.source === 'operation-preset'
+    ? settingsPresets.find((preset) => preset.source === 'operation-preset' && preset.id === draftSettingsOrigin.id)
+    : undefined
+  const canOverwriteLocalSettings = !explicitSettingsSnapshotName && Boolean(draftSettingsOriginLocalSnapshot)
+  const canOverwriteOperationPreset = !explicitSettingsSnapshotName && Boolean(draftSettingsOriginOperationPreset)
+  const localSettingsSaveLabel = canOverwriteLocalSettings ? '내 PC 보관 덮어쓰기' : '내 PC에 보관'
+  const operationPresetSaveLabel = canOverwriteOperationPreset ? '운영 preset 덮어쓰기' : '운영 preset 등록'
+  const settingsSaveHint = getSettingsSaveHint(draftSettingsOrigin, Boolean(explicitSettingsSnapshotName))
   const selectedPresetRoomMismatch = isSettingsPresetRoomMismatch(selectedSettingsPreset, state.eventProfile)
   const currentRoomName = state.eventProfile?.roomName || ''
   const currentSettingsRoomName = state.eventProfile?.settingsRoomName || ''
@@ -7770,12 +7783,10 @@ function TeamConfigDetail({
     }
   }
 
-  const saveNamedSettingsSnapshot = () => {
-    const label = (settingsSnapshotName.trim() || getDefaultSettingsSnapshotName(state.eventProfile)).slice(0, 80)
-    const payload = buildDraftSettingsPayload()
+  const buildSettingsSnapshot = (label: string, payload: TeamInfoUpload, baseSnapshot?: LocalSettingsSnapshot): LocalSettingsSnapshot => {
     const event = payload.event || {}
-    const snapshot: LocalSettingsSnapshot = {
-      id: createLocalSettingsSnapshotId(label),
+    return {
+      id: baseSnapshot?.id || createLocalSettingsSnapshotId(label),
       label,
       eventId: String(event.id || '').trim() || undefined,
       roomName: String(event.roomName || state.eventProfile?.roomName || '').trim() || undefined,
@@ -7784,14 +7795,40 @@ function TeamConfigDetail({
       createdAt: Date.now(),
       payload,
     }
+  }
+
+  const saveNamedSettingsSnapshot = () => {
+    const label = getResolvedSettingsSaveLabel(settingsSnapshotName, draftSettingsOrigin, state.eventProfile)
+    const payload = buildDraftSettingsPayload()
+    const existingSnapshot = explicitSettingsSnapshotName
+      ? localSettingsSnapshots.find((snapshot) => isSameSettingsLabel(snapshot.label, label))
+      : draftSettingsOriginLocalSnapshot
+
+    if (existingSnapshot) {
+      const confirmed = window.confirm(`${existingSnapshot.label} 내 PC 보관 설정을 덮어쓸까요?\n\n이 브라우저의 기존 보관 내용이 현재 편집본으로 바뀝니다.`)
+      if (!confirmed) {
+        setStatusText('내 PC 보관 저장을 취소했습니다.')
+        return
+      }
+    }
+
+    const snapshot = buildSettingsSnapshot(label, payload, existingSnapshot)
 
     try {
-      const nextSnapshots = normalizeLocalSettingsSnapshots([snapshot, ...localSettingsSnapshots])
+      const nextSnapshots = normalizeLocalSettingsSnapshots([
+        snapshot,
+        ...localSettingsSnapshots.filter((entry) => entry.id !== snapshot.id),
+      ])
       writeLocalSettingsSnapshots(nextSnapshots)
       setLocalSettingsSnapshots(nextSnapshots)
       setSelectedPresetId(`local:${snapshot.id}`)
+      setDraftSettingsOrigin(settingsPresetToDraftOrigin(localSettingsSnapshotToPreset(snapshot)))
       setSettingsSnapshotName('')
-      setStatusText(`${label} 설정을 이 브라우저 보관함에 저장했고 드롭다운에서 선택했습니다. 현재 room에 반영할 때는 불러와 적용을 누르세요.`)
+      setStatusText(
+        existingSnapshot
+          ? `${label} 내 PC 보관 설정을 현재 편집본으로 덮어썼습니다.`
+          : `${label} 설정을 이 브라우저 보관함에 저장했고 드롭다운에서 선택했습니다. 현재 room에 반영할 때는 불러와 적용을 누르세요.`,
+      )
     } catch {
       setStatusText('브라우저 보관함 용량이 부족해 이름으로 저장하지 못했습니다. settings.json 저장으로 파일 백업을 먼저 남겨주세요.')
     }
@@ -7800,17 +7837,32 @@ function TeamConfigDetail({
   const saveOperationPreset = async () => {
     if (savingConfig) return
 
-    const label = (settingsSnapshotName.trim() || getDefaultSettingsSnapshotName(state.eventProfile)).slice(0, 80)
+    const label = getResolvedSettingsSaveLabel(settingsSnapshotName, draftSettingsOrigin, state.eventProfile)
     const payload = buildDraftSettingsPayload()
+    const existingOperationPreset = explicitSettingsSnapshotName
+      ? settingsPresets.find((preset) => preset.source === 'operation-preset' && isSameSettingsLabel(preset.label, label))
+      : draftSettingsOriginOperationPreset
+
+    if (existingOperationPreset) {
+      const confirmed = window.confirm(`${existingOperationPreset.label} 운영 preset을 덮어쓸까요?\n\n같은 DB room의 다른 관리자 PC에서도 갱신된 preset을 보게 됩니다.`)
+      if (!confirmed) {
+        setStatusText('운영 preset 저장을 취소했습니다.')
+        return
+      }
+    }
 
     try {
       setSavingConfig(true)
-      setStatusText(`${label} 설정을 운영 preset으로 등록하는 중입니다...`)
+      setStatusText(existingOperationPreset ? `${label} 운영 preset을 덮어쓰는 중입니다...` : `${label} 설정을 운영 preset으로 등록하는 중입니다...`)
       const response = await fetch('/api/operation-presets', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label, payload }),
+        body: JSON.stringify({
+          label,
+          payload,
+          ...(existingOperationPreset ? { overwrite: true, presetId: existingOperationPreset.id } : {}),
+        }),
       })
 
       if (!response.ok) {
@@ -7833,9 +7885,16 @@ function TeamConfigDetail({
           ...current.filter((preset) => preset.source !== 'operation-preset'),
         ]),
       )
-      if (savedPreset) setSelectedPresetId(savedPreset.id)
+      if (savedPreset) {
+        setSelectedPresetId(savedPreset.id)
+        setDraftSettingsOrigin(settingsPresetToDraftOrigin(savedPreset))
+      }
       setSettingsSnapshotName('')
-      setStatusText(`${label} 설정을 운영 preset으로 등록했습니다. 같은 DB room의 다른 관리자 PC에서도 이 preset을 볼 수 있습니다.`)
+      setStatusText(
+        existingOperationPreset
+          ? `${label} 운영 preset을 현재 편집본으로 덮어썼습니다. 같은 DB room의 다른 관리자 PC에도 갱신됩니다.`
+          : `${label} 설정을 운영 preset으로 등록했습니다. 같은 DB room의 다른 관리자 PC에서도 이 preset을 볼 수 있습니다.`,
+      )
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : '운영 preset으로 등록하지 못했습니다.')
     } finally {
@@ -7940,6 +7999,11 @@ function TeamConfigDetail({
         setDraftCopy({ ...fallbackCopy, ...response.copy })
         setDraftTeams(createTeamDrafts(response.teams))
         setDraftQuizzes(createQuizDrafts(response.quizBank))
+        setDraftSettingsOrigin({
+          id: `upload:${file.name}:${Date.now()}`,
+          label: file.name.replace(/\.(settings|json|zip)$/i, '').slice(0, 80) || file.name.slice(0, 80),
+          source: 'upload',
+        })
         setStatusText(`${file.name}을 적용했습니다. ${getConfigSavedStatus(response)}`)
       } else {
         setStatusText(getConfigSaveFailureMessage(new Error('no response'), saveTarget))
@@ -7995,6 +8059,7 @@ function TeamConfigDetail({
         setDraftTeams(createTeamDrafts(nextState.teams))
         setDraftQuizzes(createQuizDrafts(nextState.quizBank))
         setSelectedPresetId(preset.id)
+        setDraftSettingsOrigin(settingsPresetToDraftOrigin(preset))
         setStatusText(`${preset.label} 설정을 현재 room ${nextState.eventProfile?.roomName || currentRoomName || '확인 전'}에 적용했습니다. ${getConfigSavedStatus(nextState)}`)
       } else {
         setStatusText(getConfigSaveFailureMessage(new Error('no response'), saveTarget))
@@ -8035,7 +8100,7 @@ function TeamConfigDetail({
       <div className="settings-preset-loader">
         <div className="named-settings-saver">
           <label>
-            <span>새 저장 이름</span>
+            <span>저장 이름</span>
             <input
               type="text"
               value={settingsSnapshotName}
@@ -8052,13 +8117,13 @@ function TeamConfigDetail({
           </label>
           <button type="button" onClick={saveNamedSettingsSnapshot} disabled={savingConfig}>
             <Save size={16} />
-            내 PC에 보관
+            {localSettingsSaveLabel}
           </button>
           <button type="button" className="primary-action" onClick={saveOperationPreset} disabled={savingConfig}>
             <CloudUpload size={16} />
-            운영 preset 등록
+            {operationPresetSaveLabel}
           </button>
-          <span>내 PC 보관은 이 브라우저 전용입니다. 운영 preset은 현재 DB room에 저장되어 다른 관리자 PC에서도 보입니다.</span>
+          <span>{settingsSaveHint} 내 PC 보관은 이 브라우저 전용입니다. 운영 preset은 현재 DB room에 저장되어 다른 관리자 PC에서도 보입니다.</span>
         </div>
 
         {availableSettingsPresets.length ? (
@@ -11011,12 +11076,16 @@ function useEventState(mode: AppMode, participantId?: string, enabled = true, al
         return
       }
 
-      fetchState()
-      openEvents()
+      void (async () => {
+        await fetchState()
+        if (active) openEvents()
+      })()
     }
 
-    fetchState()
-    openEvents()
+    void (async () => {
+      await fetchState()
+      if (active) openEvents()
+    })()
 
     if (shouldPoll) {
       pollTimer = window.setInterval(fetchState, 15_000)
@@ -11120,27 +11189,14 @@ function preserveQuizMedia(previous: QuizState | undefined, incoming: QuizState 
 }
 
 function getInitialEventState(): EventState {
-  const storedTheme = normalizeStoredThemeMode(getStoredValue(themeModeKey))
-  const storedFont = normalizeStoredFontMode(getStoredValue(fontModeKey))
-  const initialTheme = storedTheme || fallbackState.settings.themeMode
-  const initialFont = storedFont || fallbackState.settings.fontMode
-
   return {
     ...fallbackState,
     settings: {
       ...fallbackState.settings,
-      themeMode: initialTheme,
-      fontMode: initialFont,
+      themeMode: fallbackState.settings.themeMode,
+      fontMode: fallbackState.settings.fontMode,
     },
   }
-}
-
-function normalizeStoredThemeMode(value: string): ThemeMode | '' {
-  return isThemeMode(value) ? value : ''
-}
-
-function normalizeStoredFontMode(value: string): FontMode | '' {
-  return value === 'vibe' || value === 'system' || value === 'soft' ? value : ''
 }
 
 type TeamConfigDraft = {
@@ -11249,6 +11305,13 @@ type SettingsPreset = {
   createdAt?: number
 }
 
+type DraftSettingsOrigin = {
+  id: string
+  label: string
+  source: string
+  localSnapshotId?: string
+}
+
 type SettingsPresetManifest = {
   settings?: Array<Partial<SettingsPreset>>
   presets?: Array<Partial<SettingsPreset>>
@@ -11350,6 +11413,42 @@ function formatSettingsSnapshotTime(timestamp: number) {
 function getDefaultSettingsSnapshotName(profile: EventProfile | undefined) {
   const baseName = profile?.label || profile?.roomName || profile?.id || '운영 설정'
   return `${baseName} ${formatSettingsSnapshotTime(Date.now())}`
+}
+
+function isSameSettingsLabel(left: string, right: string) {
+  return left.trim().toLocaleLowerCase('ko-KR') === right.trim().toLocaleLowerCase('ko-KR')
+}
+
+function getResolvedSettingsSaveLabel(value: string, origin: DraftSettingsOrigin | null, profile: EventProfile | undefined) {
+  const explicitName = value.trim().slice(0, 80)
+  if (explicitName) return explicitName
+  if (origin?.label) return origin.label.slice(0, 80)
+  return getDefaultSettingsSnapshotName(profile).slice(0, 80)
+}
+
+function settingsPresetToDraftOrigin(preset: SettingsPreset): DraftSettingsOrigin {
+  return {
+    id: preset.id,
+    label: preset.label,
+    source: preset.source || '',
+    localSnapshotId: preset.localSnapshotId,
+  }
+}
+
+function getSettingsSaveHint(origin: DraftSettingsOrigin | null, hasExplicitName: boolean) {
+  if (hasExplicitName) return '입력한 이름으로 저장합니다. 같은 이름의 항목이 있으면 확인 후 덮어씁니다.'
+  if (!origin) return '이름을 비워두면 현재 행사명과 시간을 조합해 새 보관 이름을 만듭니다.'
+
+  const sourceLabel = getSettingsPresetOptionLabel({
+    id: origin.id,
+    label: origin.label,
+    source: origin.source,
+    localSnapshotId: origin.localSnapshotId,
+  })
+
+  if (origin.source === 'browser-snapshot') return `${sourceLabel}에서 불러온 편집본입니다. 이름을 비워두면 같은 내 PC 보관을 덮어씁니다.`
+  if (origin.source === 'operation-preset') return `${sourceLabel}에서 불러온 편집본입니다. 이름을 비워두면 같은 운영 preset을 덮어씁니다.`
+  return `${sourceLabel}에서 불러온 편집본입니다. 배포/과거 preset은 읽기 전용이라 저장 시 새 보관으로 남깁니다.`
 }
 
 function normalizeSettingsPresetManifest(manifest: SettingsPresetManifest): SettingsPreset[] {
@@ -12700,6 +12799,7 @@ function getAppLogoStyle(copy: EventCopy) {
     '--app-logo-width': `${metrics.width}px`,
     '--app-logo-height': `${metrics.height}px`,
     '--app-logo-radius': `${metrics.radius}px`,
+    '--app-logo-aspect-ratio': `${metrics.width} / ${metrics.height}`,
   } as CSSProperties
 }
 

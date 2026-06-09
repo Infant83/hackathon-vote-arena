@@ -633,14 +633,15 @@ function normalizeOperationPresetPayload(input) {
   }
 }
 
-function createOperationPreset(body) {
-  const label = sanitizeText(body?.label, 80) || getDefaultOperationPresetLabel()
+function createOperationPreset(body, existingPreset) {
+  const label = sanitizeText(body?.label, 80) || sanitizeText(existingPreset?.label, 80) || getDefaultOperationPresetLabel()
   const now = Date.now()
   const payload = normalizeOperationPresetPayload(body?.payload || body)
   const profile = normalizeEventProfile(payload.event, getRuntimeEventProfile())
   const description = sanitizeText(body?.description, 160) ||
+    sanitizeText(existingPreset?.description, 160) ||
     `${payload.copy?.appTitle || label} · ${payload.teams.length}팀 · 퀴즈 ${payload.quizzes?.length || 0}개 · 운영 preset`
-  const id = createOperationPresetId(label)
+  const id = sanitizeOperationPresetId(existingPreset?.id) || createOperationPresetId(label)
 
   return {
     id,
@@ -650,7 +651,7 @@ function createOperationPreset(body) {
     roomName: getRuntimeEventProfile().roomName || 'local-node',
     ...(profile.settingsFile ? { settingsFile: profile.settingsFile } : {}),
     description,
-    createdAt: now,
+    createdAt: Math.max(0, Math.floor(Number(existingPreset?.createdAt) || now)),
     updatedAt: now,
     payload,
   }
@@ -3829,8 +3830,19 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/operation-presets') {
     try {
-      const preset = createOperationPreset(body)
-      operationPresets = normalizeOperationPresets([preset, ...operationPresets])
+      const overwrite = Boolean(body.overwrite)
+      const presetId = sanitizeOperationPresetId(body.presetId || body.id)
+      const existingPreset = overwrite ? operationPresets.find((entry) => entry.id === presetId) : undefined
+      if (overwrite && !existingPreset) {
+        sendJson(response, 404, { error: 'operation preset not found' })
+        return
+      }
+
+      const preset = createOperationPreset(body, existingPreset)
+      operationPresets = normalizeOperationPresets([
+        preset,
+        ...operationPresets.filter((entry) => entry.id !== preset.id),
+      ])
       sendJson(response, 200, {
         preset: operationPresetToManifestEntry(preset),
         ...getOperationPresetManifest(),

@@ -44,8 +44,8 @@ Worker bundled presets must be kept in sync in `worker/index.ts` through imports
 - Default `/admin` is an operations console, not a realtime feed screen.
 - Realtime stars, star events, and cheer message bodies stay in detail panels or `/wall`.
 - `/admin?panel=teams` handles settings upload/download, preset load, visual assets, screen copy, teams, and quizzes.
-- `/admin?panel=teams` can save the current settings draft under a new name in the admin browser storage with `내 PC에 보관`; these drafts stay on that browser only.
-- `/admin?panel=teams` can register the current settings draft as an `운영 preset`; these presets are stored in the current `ARENA_ROOM_NAME` Durable Object storage and appear as `운영 · ...` entries for other admin PCs in the same DB room.
+- `/admin?panel=teams` can save the current settings draft in the admin browser storage with `내 PC에 보관`; these drafts stay on that browser only. If a browser-saved setting was loaded and the save name is left blank, the same local snapshot is overwritten after confirmation.
+- `/admin?panel=teams` can register the current settings draft as an `운영 preset`; these presets are stored in the current `ARENA_ROOM_NAME` Durable Object storage and appear as `운영 · ...` entries for other admin PCs in the same DB room. If an operation preset was loaded and the save name is left blank, the same room-shared preset is overwritten after confirmation.
 - Screen copy editing has live previews for `global`, `vote`, `admin`, `wall`, `qna`, `showup`, and `quiz`.
 - Team photo editing previews the actual `/wall` selected-team card layout and includes frame presets.
 - `/admin?panel=export` should remain the primary event closeout place for JSON backup, XLSX result export, and settings download.

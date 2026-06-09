@@ -1579,12 +1579,20 @@ export class ArenaRoom {
     if (pathname === '/api/operation-presets') {
       let preset: OperationSettingsPreset
       try {
-        preset = this.createOperationPreset(body)
+        const overwrite = Boolean(body.overwrite)
+        const presetId = sanitizeOperationPresetId(body.presetId || body.id)
+        const existingPreset = overwrite ? this.operationPresets.find((entry) => entry.id === presetId) : undefined
+        if (overwrite && !existingPreset) return json({ error: 'operation preset not found' }, 404)
+
+        preset = this.createOperationPreset(body, existingPreset)
       } catch (error) {
         return json({ error: error instanceof Error ? error.message : 'invalid operation preset' }, 400)
       }
 
-      this.operationPresets = this.normalizeOperationPresets([preset, ...this.operationPresets])
+      this.operationPresets = this.normalizeOperationPresets([
+        preset,
+        ...this.operationPresets.filter((entry) => entry.id !== preset.id),
+      ])
       await this.commit()
       return json({
         preset: this.operationPresetToManifestEntry(preset),
@@ -2031,23 +2039,24 @@ export class ArenaRoom {
     }
   }
 
-  private createOperationPreset(body: RequestBody): OperationSettingsPreset {
-    const label = sanitizeText(body.label, 80) || this.getDefaultOperationPresetLabel()
+  private createOperationPreset(body: RequestBody, existingPreset?: OperationSettingsPreset): OperationSettingsPreset {
+    const label = sanitizeText(body.label, 80) || sanitizeText(existingPreset?.label, 80) || this.getDefaultOperationPresetLabel()
     const now = Date.now()
     const payload = this.normalizeOperationPresetPayload(body.payload || body)
     const profile = normalizeEventProfile(payload.event, getRuntimeEventProfile(this.eventProfile, this.roomName))
     const description = sanitizeText(body.description, 160) ||
+      sanitizeText(existingPreset?.description, 160) ||
       `${(payload.copy as Partial<EventCopy> | undefined)?.appTitle || label} · ${(payload.teams as unknown[]).length}팀 · 퀴즈 ${(payload.quizzes as unknown[] | undefined)?.length || 0}개 · 운영 preset`
 
     return {
-      id: createOperationPresetId(label),
+      id: sanitizeOperationPresetId(existingPreset?.id) || createOperationPresetId(label),
       label,
       ...(profile.id ? { eventId: profile.id } : {}),
       ...(profile.workerName ? { workerName: profile.workerName } : {}),
       roomName: this.roomName || 'default',
       ...(profile.settingsFile ? { settingsFile: profile.settingsFile } : {}),
       description,
-      createdAt: now,
+      createdAt: Math.max(0, Math.floor(Number(existingPreset?.createdAt) || now)),
       updatedAt: now,
       payload,
     }
