@@ -11,6 +11,8 @@
 - `airever`와 `scmax` 모두 최신 Vibe Arena 로고, favicon, theme pack, `/message` 상단 바 정렬 개선을 적용할 수 있도록 같은 배포 흐름에 올렸습니다.
 - `npm run ops:audit:scmax`를 추가해 `scmax` 설정만 따로 점검할 수 있게 했습니다.
 - 운영 콘텐츠의 이미지 경로 입력에서 `event-brand/scmax_logo.jpg`, `public/event-brand/scmax_logo.jpg` 같은 공개 asset 경로를 `/event-brand/scmax_logo.jpg`로 정리하도록 개선했습니다.
+- `public/event-brand/scmax_logo.png`를 `scmax` preset의 상단 브랜드 로고와 팀 로고 경로로 연결했습니다.
+- JPG/PNG 파일 업로드 시 파일 헤더로 실제 이미지 MIME을 보정하고, base64 변환/압축 진행 상태와 실패 메시지를 운영 콘텐츠 화면에 즉시 표시하도록 개선했습니다.
 
 ## 2026-06-08
 

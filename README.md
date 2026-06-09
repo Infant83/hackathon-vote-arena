@@ -546,7 +546,7 @@ npm run realtime
 
 `settings.json`과 `event-configs/*.json`의 `event.roomName`은 해당 설정이 원래 의도한 Durable Object room을 기록하는 운영 메타데이터입니다. 관리자 화면에서 preset을 불러와도 DB room이 자동 전환되지는 않습니다. 현재 DB room은 Worker의 `ARENA_ROOM_NAME`으로 결정되며, Cloudflare 런타임에서 preset의 권장 room과 현재 room이 다르면 관리자 화면이 한 번 더 확인합니다.
 
-운영 콘텐츠의 이미지 입력은 `event-brand/scmax_logo.jpg`, `public/event-brand/scmax_logo.jpg`, `/event-brand/scmax_logo.jpg`를 모두 `/event-brand/scmax_logo.jpg`로 정리합니다. 이 경로 방식은 repo의 `public/event-brand/scmax_logo.jpg` 파일이 배포에 포함될 때 사용합니다. 관리자 화면의 PC 파일 업로드는 파일을 data URL로 읽어 현재 Durable Object room에 저장하는 방식입니다.
+운영 콘텐츠의 이미지 입력은 `event-brand/scmax_logo.jpg`, `public/event-brand/scmax_logo.jpg`, `/event-brand/scmax_logo.jpg`를 모두 `/event-brand/scmax_logo.jpg`로 정리합니다. 이 경로 방식은 repo의 `public/event-brand/scmax_logo.jpg` 파일이 배포에 포함될 때 사용합니다. 관리자 화면의 PC 파일 업로드는 JPG/PNG/WebP/SVG 파일을 base64 data URL로 읽어 현재 Durable Object room에 저장하는 방식입니다. 큰 JPG/PNG는 브라우저에서 압축한 뒤 저장하며, 실패하면 운영 콘텐츠 화면의 상태 메시지에 원인을 표시합니다.
 
 Cloudflare Worker는 배포된 파일시스템에서 임의의 JSON 파일을 런타임에 바꿔 읽을 수 없습니다. Cloudflare 운영에서는 행사별로 `ARENA_ROOM_NAME`을 다르게 지정해 Durable Object 저장소를 분리합니다. 예를 들어 이번 행사는 `ARENA_ROOM_NAME=2026-ax-q2-meeting`처럼 별도 룸 이름을 쓰면 이전 행사 DB와 섞이지 않습니다. Worker에서 새 `event-configs/*.json`을 preset으로 쓰려면 해당 JSON을 `worker/index.ts`에 import하고 `bundledEventConfigPresets`와 `initialConfigByRoomName`에 함께 등록한 뒤 배포합니다.
 

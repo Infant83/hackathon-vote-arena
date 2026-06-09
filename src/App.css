@@ -8850,6 +8850,12 @@ body.is-wall-resizing * {
   pointer-events: none;
 }
 
+.logo-file-button.is-uploading,
+.photo-upload-hotspot.is-uploading {
+  cursor: wait;
+  opacity: 0.78;
+}
+
 .logo-source-preview {
   display: grid;
   grid-template-columns: minmax(240px, 0.42fr) minmax(0, 1fr);

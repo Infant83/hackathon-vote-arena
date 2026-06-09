@@ -2727,10 +2727,12 @@ function BrandLogoFrameEditor({
   copy,
   onChange,
   onUpload,
+  uploading = false,
 }: {
   copy: EventCopy
   onChange: (field: ImageTuningField, value: string) => void
   onUpload: (file: File | undefined) => void
+  uploading?: boolean
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{
@@ -2837,12 +2839,13 @@ function BrandLogoFrameEditor({
           <span className="photo-editor-focus" style={{ left: `${focusX}%`, top: `${focusY}%` }} aria-hidden="true" />
         </>
       ) : null}
-      <label className="photo-upload-hotspot compact" title="상단 로고 파일 변경">
+      <label className={`photo-upload-hotspot compact ${uploading ? 'is-uploading' : ''}`} title="상단 로고 파일 변경">
         <ImagePlus size={13} />
-        변경
+        {uploading ? '처리 중' : '변경'}
         <input
           type="file"
           accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon"
+          disabled={uploading}
           onChange={(event) => {
             onUpload(event.currentTarget.files?.[0])
             event.currentTarget.value = ''
@@ -7525,6 +7528,7 @@ function TeamConfigDetail({
   const [activeCopyGroupId, setActiveCopyGroupId] = useState(copyGroups[0]?.id || '')
   const [selectedTeamEditorIndex, setSelectedTeamEditorIndex] = useState(0)
   const [selectedQuizIndex, setSelectedQuizIndex] = useState(0)
+  const [activeImageUploadKey, setActiveImageUploadKey] = useState('')
   const teamEditorRefs = useRef<Record<number, HTMLElement | null>>({})
   const saveTarget = getConfigSaveTarget()
   const availableSettingsPresets = useMemo(
@@ -7678,24 +7682,34 @@ function TeamConfigDetail({
   const uploadTeamLogo = async (index: number, file: File | undefined) => {
     if (!file) return
 
+    const uploadKey = `team:${index}`
     try {
+      setActiveImageUploadKey(uploadKey)
+      setStatusText(`${file.name} 파일을 읽고 있습니다. JPG/PNG는 base64로 변환하거나 필요한 경우 압축합니다.`)
       const dataUrl = await readLogoFileAsDataUrl(file)
       updateTeam(index, 'logoFile', dataUrl)
-      setStatusText(`${draftTeams[index]?.name || `Team ${index + 1}`} 로고/사진 파일을 불러왔습니다.`)
+      setStatusText(`${draftTeams[index]?.name || `Team ${index + 1}`} 로고/사진 파일을 불러왔습니다. ${getImageUploadSummary(file, dataUrl)} 저장 및 반영을 눌러 적용하세요.`)
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : '이미지 파일을 불러오지 못했습니다.')
+    } finally {
+      setActiveImageUploadKey((current) => (current === uploadKey ? '' : current))
     }
   }
 
   const uploadCopyImage = async (key: EventCopyImageKey, file: File | undefined) => {
     if (!file) return
 
+    const uploadKey = `copy:${key}`
     try {
+      setActiveImageUploadKey(uploadKey)
+      setStatusText(`${file.name} 파일을 읽고 있습니다. JPG/PNG는 base64로 변환하거나 필요한 경우 압축합니다.`)
       const dataUrl = await readLogoFileAsDataUrl(file)
       updateCopy(key, dataUrl)
-      setStatusText(`${copyLabels[key]} 파일을 불러왔습니다.`)
+      setStatusText(`${copyLabels[key]} 파일을 불러왔습니다. ${getImageUploadSummary(file, dataUrl)} 저장 및 반영을 눌러 적용하세요.`)
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : '이미지 파일을 불러오지 못했습니다.')
+    } finally {
+      setActiveImageUploadKey((current) => (current === uploadKey ? '' : current))
     }
   }
 
@@ -7712,12 +7726,17 @@ function TeamConfigDetail({
   const uploadQuizPrizeImage = async (index: number, file: File | undefined) => {
     if (!file) return
 
+    const uploadKey = `quiz:${index}`
     try {
+      setActiveImageUploadKey(uploadKey)
+      setStatusText(`${file.name} 파일을 읽고 있습니다. JPG/PNG는 base64로 변환하거나 필요한 경우 압축합니다.`)
       const dataUrl = await readLogoFileAsDataUrl(file)
       updateQuiz(index, 'prizeImageFile', dataUrl)
-      setStatusText(`${draftQuizzes[index]?.title || `퀴즈 ${index + 1}`} 상품 이미지를 불러왔습니다.`)
+      setStatusText(`${draftQuizzes[index]?.title || `퀴즈 ${index + 1}`} 상품 이미지를 불러왔습니다. ${getImageUploadSummary(file, dataUrl)} 저장 및 반영을 눌러 적용하세요.`)
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : '이미지 파일을 불러오지 못했습니다.')
+    } finally {
+      setActiveImageUploadKey((current) => (current === uploadKey ? '' : current))
     }
   }
 
@@ -8146,6 +8165,7 @@ function TeamConfigDetail({
             onChange={(value) => updateCopyImage('appLogoFile', value)}
             onUpload={(file) => uploadCopyImage('appLogoFile', file)}
             onClear={() => updateCopy('appLogoFile', '')}
+            uploading={activeImageUploadKey === 'copy:appLogoFile'}
           />
           <ImageTuningControls
             title="상단 로고 표시 방식"
@@ -8169,6 +8189,7 @@ function TeamConfigDetail({
                       updateCopy(keyByField[field], value)
                     }}
                     onUpload={(file) => uploadCopyImage('appLogoFile', file)}
+                    uploading={activeImageUploadKey === 'copy:appLogoFile'}
                   />
                   <div>
                     <span>{draftCopy.wallEyeline || draftCopy.audienceEyeline}</span>
@@ -8232,6 +8253,7 @@ function TeamConfigDetail({
                 onChange={(value) => updateCopyImage(field.key, value)}
                 onUpload={(file) => uploadCopyImage(field.key, file)}
                 onClear={() => updateCopy(field.key, '')}
+                uploading={activeImageUploadKey === `copy:${field.key}`}
               />
             ))}
           </div>
@@ -8415,6 +8437,7 @@ function TeamConfigDetail({
                 onPhotoRevert={() => revertTeamPhotoTuning(selectedTeamIndex)}
                 onPhotoReset={() => resetTeamPhotoTuning(selectedTeamIndex)}
                 photoRevertDisabled={!selectedTeamPhotoChanged}
+                uploading={activeImageUploadKey === `team:${selectedTeamIndex}`}
               />
               <ColorField value={selectedTeamDraft.color} onChange={(value) => updateTeam(selectedTeamIndex, 'color', value)} />
               <label>
@@ -8509,6 +8532,7 @@ function TeamConfigDetail({
                 onChange={(value) => updateQuizPrizeImage(index, value)}
                 onUpload={(file) => uploadQuizPrizeImage(index, file)}
                 onClear={() => updateQuiz(index, 'prizeImageFile', '')}
+                uploading={activeImageUploadKey === `quiz:${index}`}
               />
             </div>
           </article>
@@ -8694,6 +8718,7 @@ function LogoSourceField({
   onPhotoRevert,
   onPhotoReset,
   photoRevertDisabled = true,
+  uploading = false,
 }: {
   team: TeamConfigDraft
   index: number
@@ -8705,6 +8730,7 @@ function LogoSourceField({
   onPhotoRevert?: () => void
   onPhotoReset?: () => void
   photoRevertDisabled?: boolean
+  uploading?: boolean
 }) {
   const preview = teamEditorPreview(team)
 
@@ -8726,12 +8752,13 @@ function LogoSourceField({
           <Link2 size={14} />
           링크 정리
         </button>
-        <label className="logo-file-button">
+        <label className={`logo-file-button ${uploading ? 'is-uploading' : ''}`} aria-disabled={uploading}>
           <ImagePlus size={14} />
-          파일
+          {uploading ? '처리 중' : '파일'}
           <input
             type="file"
             accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon"
+            disabled={uploading}
             onChange={(event) => {
               onUpload(event.currentTarget.files?.[0])
               event.currentTarget.value = ''
@@ -8755,7 +8782,7 @@ function LogoSourceField({
             </div>
           </div>
           <div className="photo-frame-editor-stage">
-            <TeamPhotoFrameEditor team={preview} onChange={onTuningChange} onUpload={onUpload} />
+            <TeamPhotoFrameEditor team={preview} onChange={onTuningChange} onUpload={onUpload} uploading={uploading} />
           </div>
           <TeamWallPhotoPreview team={preview} title={team.title} membersText={team.membersText} />
         </div>
@@ -8879,10 +8906,12 @@ function TeamPhotoFrameEditor({
   team,
   onChange,
   onUpload,
+  uploading = false,
 }: {
   team: TeamVisual
   onChange: (field: string, value: string) => void
   onUpload?: (file: File | undefined) => void
+  uploading?: boolean
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<TeamPhotoEditDrag | null>(null)
@@ -8973,12 +9002,13 @@ function TeamPhotoFrameEditor({
     >
       <TeamPhotoPreview team={team} />
       {onUpload ? (
-        <label className="photo-upload-hotspot" title="사진 파일 변경">
+        <label className={`photo-upload-hotspot ${uploading ? 'is-uploading' : ''}`} title="사진 파일 변경">
           <ImagePlus size={14} />
-          사진 변경
+          {uploading ? '처리 중' : '사진 변경'}
           <input
             type="file"
             accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon"
+            disabled={uploading}
             onChange={(event) => {
               onUpload(event.currentTarget.files?.[0])
               event.currentTarget.value = ''
@@ -9199,6 +9229,7 @@ function ImageSourceField({
   onRawChange,
   onUpload,
   onClear,
+  uploading = false,
 }: {
   label: string
   description: string
@@ -9208,6 +9239,7 @@ function ImageSourceField({
   onRawChange: (value: string) => void
   onUpload: (file: File | undefined) => void
   onClear: () => void
+  uploading?: boolean
 }) {
   return (
     <div className="logo-source-field image-source-field">
@@ -9227,12 +9259,13 @@ function ImageSourceField({
           <Link2 size={14} />
           링크 정리
         </button>
-        <label className="logo-file-button">
+        <label className={`logo-file-button ${uploading ? 'is-uploading' : ''}`} aria-disabled={uploading}>
           <ImagePlus size={14} />
-          파일
+          {uploading ? '처리 중' : '파일'}
           <input
             type="file"
             accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon"
+            disabled={uploading}
             onChange={(event) => {
               onUpload(event.currentTarget.files?.[0])
               event.currentTarget.value = ''
@@ -11232,7 +11265,8 @@ type LocalSettingsSnapshot = {
   payload: TeamInfoUpload
 }
 
-const logoUploadMaxDataUrlLength = 220_000
+const logoUploadMaxDataUrlLength = 640_000
+const supportedImageUploadExtensionPattern = /\.(png|jpe?g|webp|svg|ico)$/i
 const localSettingsSnapshotsStorageKey = 'vibe-arena:named-settings:v1'
 const maxLocalSettingsSnapshots = 16
 
@@ -11446,19 +11480,35 @@ function sanitizeDriveFileId(value: string) {
 }
 
 async function readLogoFileAsDataUrl(file: File) {
-  if (!file.type.startsWith('image/')) {
-    throw new Error('이미지 파일만 업로드할 수 있습니다.')
+  if (!file.size) {
+    throw new Error(`${file.name || '선택한 파일'}은 비어 있는 파일입니다.`)
   }
 
-  if (file.size <= 360_000 || file.type === 'image/svg+xml' || file.type === 'image/x-icon') {
-    const rawDataUrl = await readFileAsDataUrl(file)
+  const detectedMime = await detectImageMime(file)
+  const declaredImage = file.type.startsWith('image/')
+  const extensionImage = supportedImageUploadExtensionPattern.test(file.name || '')
+
+  if (!declaredImage && !extensionImage && !detectedMime) {
+    throw new Error(`${file.name || '선택한 파일'}은 이미지로 확인되지 않았습니다. JPG, PNG, WebP, SVG 파일을 사용해주세요.`)
+  }
+
+  const rawDataUrl = normalizeDataUrlMime(await readFileAsDataUrl(file), detectedMime || file.type)
+  const isVector = detectedMime === 'image/svg+xml' || file.type === 'image/svg+xml' || /\.svg$/i.test(file.name || '')
+  const isIcon = detectedMime === 'image/x-icon' || file.type === 'image/x-icon' || /\.ico$/i.test(file.name || '')
+
+  if (rawDataUrl.length <= logoUploadMaxDataUrlLength || isVector || isIcon) {
     if (rawDataUrl.length <= logoUploadMaxDataUrlLength) return rawDataUrl
-    if (file.type === 'image/svg+xml' || file.type === 'image/x-icon') {
-      throw new Error('이미지 파일이 너무 큽니다. 500KB 이하 파일이나 인터넷 URL을 사용해주세요.')
+    if (isVector || isIcon) {
+      throw new Error(`${file.name || '이미지 파일'}이 너무 큽니다. SVG/ICO는 ${formatFileSize(logoUploadMaxDataUrlLength)} 이하 파일이나 인터넷 URL을 사용해주세요.`)
     }
   }
 
-  return compressRasterImageFile(file)
+  try {
+    return await compressRasterImageFile(file)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : '압축 중 오류가 발생했습니다.'
+    throw new Error(`${file.name || '이미지 파일'}을 base64 이미지로 변환하지 못했습니다. ${detail}`, { cause: error })
+  }
 }
 
 function readFileAsDataUrl(file: File) {
@@ -11468,6 +11518,58 @@ function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(new Error('파일을 읽지 못했습니다.'))
     reader.readAsDataURL(file)
   })
+}
+
+async function detectImageMime(file: File) {
+  const header = new Uint8Array(await file.slice(0, 512).arrayBuffer())
+  if (header.length >= 4 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) return 'image/jpeg'
+  if (
+    header.length >= 8 &&
+    header[0] === 0x89 &&
+    header[1] === 0x50 &&
+    header[2] === 0x4e &&
+    header[3] === 0x47 &&
+    header[4] === 0x0d &&
+    header[5] === 0x0a &&
+    header[6] === 0x1a &&
+    header[7] === 0x0a
+  ) return 'image/png'
+  if (
+    header.length >= 12 &&
+    header[0] === 0x52 &&
+    header[1] === 0x49 &&
+    header[2] === 0x46 &&
+    header[3] === 0x46 &&
+    header[8] === 0x57 &&
+    header[9] === 0x45 &&
+    header[10] === 0x42 &&
+    header[11] === 0x50
+  ) return 'image/webp'
+  if (header.length >= 4 && header[0] === 0x00 && header[1] === 0x00 && header[2] === 0x01 && header[3] === 0x00) return 'image/x-icon'
+
+  const textHeader = new TextDecoder().decode(header).trimStart().slice(0, 80).toLowerCase()
+  if (textHeader.startsWith('<svg') || textHeader.startsWith('<?xml')) return 'image/svg+xml'
+  return ''
+}
+
+function normalizeDataUrlMime(dataUrl: string, mime: string) {
+  if (!mime || !dataUrl.startsWith('data:')) return dataUrl
+  return dataUrl.replace(/^data:[^;,]*/, `data:${mime}`)
+}
+
+function getImageUploadSummary(file: File, dataUrl: string) {
+  return `원본 ${formatFileSize(file.size)}, 저장 데이터 ${formatFileSize(getDataUrlApproxByteSize(dataUrl))}.`
+}
+
+function getDataUrlApproxByteSize(dataUrl: string) {
+  const base64 = dataUrl.includes(',') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl
+  return Math.max(0, Math.floor((base64.replace(/=+$/, '').length * 3) / 4))
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10}KB`
+  return `${Math.round(bytes / 1024 / 102.4) / 10}MB`
 }
 
 function loadImageElement(src: string) {
